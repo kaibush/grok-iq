@@ -13,7 +13,7 @@ from sqlalchemy import delete, inspect
 from app.analyzer import Thresholds
 from app.core.clock import to_app_timezone, utc_now
 from app.core.config import Settings
-from app.integrations.grok2api.client import ChatProbeResult, IntegrationError
+from app.integrations.grok2api.client import ChatProbeResult, IntegrationError, model_account_bind_window_message
 from app.persistence.account_repository import (
     ALL_EGRESS_RISK_MIGRATION_KEY,
     FIXED_EGRESS_RISK_MIGRATION_KEY,
@@ -1013,6 +1013,7 @@ class FakeGrokClient:
         self.create_probe_route_calls: list[dict[str, Any]] = []
         self.quality_guard_calls: list[dict[str, Any]] = []
         self.quality_probe_calls: list[dict[str, Any]] = []
+        self.quality_probe_account_id: int | None = None
 
     async def get_account(self, account_id: int) -> dict[str, Any]:
         return {
@@ -1163,10 +1164,23 @@ class FakeGrokClient:
         usage = {"completion_tokens": 120, "quality_test": True}
         if kwargs.get("pin_account"):
             usage["account_bind_skipped"] = True
+        verified_account_id = self.quality_probe_account_id or 10
+        if kwargs.get("pin_account") and verified_account_id != kwargs["account_id"]:
+            error = IntegrationError(
+                model_account_bind_window_message(
+                    kwargs["account_id"],
+                    verified_account_id=verified_account_id,
+                ),
+                request_id="quality-request-1",
+                error_code="modelBindWindow",
+            )
+            error.verified_account_id = verified_account_id
+            error.verified_egress_node_id = egress_id
+            raise error
         return ChatProbeResult(
             request_id="quality-request-1",
             audit_id=2,
-            verified_account_id=10,
+            verified_account_id=verified_account_id,
             verified_egress_node_id=egress_id,
             status_code=200,
             response_text="",
@@ -2112,9 +2126,53 @@ async def test_bind_window_fallback_requires_egress_node(tmp_path: Path):
         )
         detail = await wait_for_terminal_run(probe_repository, run_id)
         assert detail["run"]["status"] == "failed"
-        assert "没有可用出口节点" in str(detail["run"]["error"] or "")
+        error = str(detail["run"]["error"] or "")
+        assert "模型绑定窗口" in error
+        assert "最新约 1000 个账号" in error
+        assert "没有可用出口节点" in error
         assert client.quality_guard_calls == []
         assert client.quality_probe_calls == []
         assert client.deleted_route is False
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_bind_window_fallback_explains_unpatched_grok2api(tmp_path: Path):
+    database = Database(tmp_path / "grokiq.db")
+    database.initialize()
+    probe_repository = ProbeRepository(database)
+    client = FakeGrokClient()
+    client.account_egress_node_id = 110
+    client.bind_mismatch = True
+    client.quality_probe_account_id = 99
+    manager = ProbeManager(
+        settings=Settings(
+            database_path=tmp_path / "grokiq.db",
+            scheduler_enabled=False,
+            probe_worker_concurrency=1,
+            probe_step_delay_seconds=0,
+        ),
+        repository=probe_repository,
+        accounts=AccountRepository(database),
+        client=client,  # type: ignore[arg-type]
+        thresholds=Thresholds(),
+    )
+    await manager.start()
+    try:
+        run_id = await manager.enqueue_manual(
+            account_id=10,
+            profile_id="quality-marker",
+            rounds=1,
+            proxy_targets=[{"kind": "direct", "id": None}],
+        )
+        detail = await wait_for_terminal_run(probe_repository, run_id)
+        sample = detail["samples"][0]
+        assert detail["run"]["status"] in {"failed", "completed_with_errors"}
+        error = str(sample["error"] or detail["run"]["error"] or "")
+        assert "模型绑定窗口" in error
+        assert "最新约 1000 个账号" in error
+        assert "实际命中了账号 99" in error
+        assert sample["verified_account_id"] == 99
     finally:
         await manager.stop()

@@ -11,6 +11,7 @@ from app.core.clock import utc_now
 from app.integrations.grok2api.client import (
     IntegrationError,
     is_model_account_bind_mismatch,
+    model_account_bind_window_message,
 )
 from app.persistence.probe_repository import AccountSettingsSnapshot, RunExecutionContext
 from app.services.probe_runtime import AccountRestoreError, WorkerRuntime
@@ -141,8 +142,11 @@ class ProbeRunExecutor:
                 raise
             if not self._can_pin_unbound_probe(run, state):
                 raise IntegrationError(
-                    "该账号超出 grok2api 模型绑定窗口，且没有可用出口节点，"
-                    "无法做定向探测"
+                    model_account_bind_window_message(
+                        account_id,
+                        missing_egress=True,
+                    ),
+                    error_code="modelBindWindow",
                 ) from exc
             self.logger.warning(
                 "probe run %s account %s is outside grok2api model bind "
@@ -357,7 +361,7 @@ class ProbeRunExecutor:
         target: dict[str, Any],
         state: ProbeRunState,
     ) -> Callable[[], Awaitable[Any]]:
-        node_id = self._forced_egress_node_id(target, state)
+        node_id = self._forced_egress_node_id(account_id, target, state)
 
         def factory() -> Awaitable[Any]:
             return self.manager.client.quality_probe(
@@ -375,6 +379,7 @@ class ProbeRunExecutor:
 
     @staticmethod
     def _forced_egress_node_id(
+        account_id: int,
         target: dict[str, Any],
         state: ProbeRunState,
     ) -> int:
@@ -385,8 +390,11 @@ class ProbeRunExecutor:
             node_id = int(target.get("id") or 0)
         if node_id <= 0:
             raise IntegrationError(
-                "该账号超出 grok2api 模型绑定窗口，且没有可用出口节点，"
-                "无法做定向探测"
+                model_account_bind_window_message(
+                    account_id,
+                    missing_egress=True,
+                ),
+                error_code="modelBindWindow",
             )
         return node_id
 

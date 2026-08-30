@@ -101,6 +101,18 @@ def test_model_account_bind_mismatch_detects_grok2api_window_error():
     assert is_model_account_bind_mismatch(RuntimeError("nope")) is False
 
 
+def test_model_account_bind_window_message_explains_official_grok2api_limit():
+    from app.integrations.grok2api.client import model_account_bind_window_message
+
+    pinned = model_account_bind_window_message(4725, verified_account_id=99)
+    missing = model_account_bind_window_message(4725, missing_egress=True)
+
+    assert "账号 4725" in pinned
+    assert "最新约 1000 个账号" in pinned
+    assert "实际命中了账号 99" in pinned
+    assert "没有可用出口节点" in missing
+
+
 @pytest.mark.asyncio
 async def test_create_probe_route_omits_account_ids_when_unbound():
     client = Grok2APIClient(Settings())

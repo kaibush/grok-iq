@@ -66,6 +66,7 @@ TRANSIENT_GATEWAY_CODES = frozenset(
     }
 )
 MODEL_ACCOUNT_BIND_MISMATCH_HINT = "不存在或与模型来源不匹配"
+MODEL_ACCOUNT_BIND_WINDOW_HINT = "官方 grok2api 校验模型绑定时只看最新约 1000 个账号"
 ADMIN_REFRESH_COOKIE = "grok2api_admin_refresh"
 ADMIN_TOKEN_REFRESH_SKEW_SECONDS = 30.0
 ACCOUNT_BATCH_UPDATE_SIZE = 10_000
@@ -73,6 +74,28 @@ ACCOUNT_BATCH_FALLBACK_CONCURRENCY = 8
 ACCOUNT_BATCH_FALLBACK_STATUSES = frozenset({400, 404, 405, 409, 422})
 
 logger = logging.getLogger(__name__)
+
+
+def model_account_bind_window_message(
+    account_id: int,
+    *,
+    verified_account_id: int | None = None,
+    missing_egress: bool = False,
+) -> str:
+    """Explain why an old grok2api account cannot be pinned."""
+
+    prefix = (
+        f"账号 {account_id} 超出当前 grok2api 的模型绑定窗口"
+        f"（{MODEL_ACCOUNT_BIND_WINDOW_HINT}）"
+    )
+    if missing_egress:
+        return prefix + "，且没有可用出口节点，无法做定向探测。"
+    if verified_account_id is not None:
+        return (
+            prefix
+            + f"，探测无法钉到该账号，实际命中了账号 {verified_account_id}。"
+        )
+    return prefix + "，无法做定向探测。"
 
 
 def is_model_account_bind_mismatch(error: BaseException) -> bool:
@@ -1042,7 +1065,11 @@ class Grok2APIClient:
             timeout=300,
         )
         result = self._quality_result_from_payload(payload, extra_usage=extra_usage)
-        return await self._verify_quality_probe_account(result, account_id=account_id)
+        return await self._verify_quality_probe_account(
+            result,
+            account_id=account_id,
+            pin_account=pin_account,
+        )
 
     async def quality_guard_probe(
         self,
@@ -1085,6 +1112,7 @@ class Grok2APIClient:
         return await self._verify_quality_probe_account(
             result,
             account_id=account_id,
+            pin_account=True,
         )
 
     def _quality_result_from_payload(
@@ -1143,6 +1171,7 @@ class Grok2APIClient:
         result: ChatProbeResult,
         *,
         account_id: int,
+        pin_account: bool = False,
     ) -> ChatProbeResult:
         audit = await self.find_audit(result.request_id)
         if audit is None:
@@ -1161,9 +1190,18 @@ class Grok2APIClient:
             verified_egress_node_id=verified_egress_node_id,
         )
         if verified_account_id != account_id:
+            message = (
+                model_account_bind_window_message(
+                    account_id,
+                    verified_account_id=verified_account_id,
+                )
+                if pin_account
+                else f"请求实际命中账号 {verified_account_id}，目标账号为 {account_id}"
+            )
             error = IntegrationError(
-                f"请求实际命中账号 {verified_account_id}，目标账号为 {account_id}",
+                message,
                 request_id=result.request_id,
+                error_code="modelBindWindow" if pin_account else "",
             )
             error.audit_id = result.audit_id
             error.verified_account_id = verified_account_id

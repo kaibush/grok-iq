@@ -499,6 +499,50 @@ async def test_quality_probe_sends_account_id_only_when_pinning(
 
 
 @pytest.mark.asyncio
+async def test_quality_probe_pin_mismatch_explains_bind_window(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = Grok2APIClient(Settings())
+
+    async def admin_request(_: str, __: str, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "requestId": "request-3",
+            "statusCode": 200,
+            "durationMs": 1000,
+            "firstTokenMs": 100,
+            "generationMs": 900,
+            "outputTokens": 100,
+            "reasoningTokens": 20,
+            "visibleTokens": 80,
+            "expectedMatched": True,
+        }
+
+    async def find_audit(_: str) -> dict[str, Any]:
+        return {"id": "1", "accountId": "99", "egressNodeId": "2"}
+
+    monkeypatch.setattr(client, "admin_request", admin_request)
+    monkeypatch.setattr(client, "find_audit", find_audit)
+
+    with pytest.raises(IntegrationError) as exc_info:
+        await client.quality_probe(
+            client_key_id="3",
+            public_model="model",
+            account_id=7,
+            egress_node_id=2,
+            prompt="prompt",
+            expected="OK",
+            max_output_tokens=0,
+            pin_account=True,
+        )
+
+    error = exc_info.value
+    assert error.error_code == "modelBindWindow"
+    assert "账号 7" in str(error)
+    assert "最新约 1000 个账号" in str(error)
+    assert "实际命中了账号 99" in str(error)
+
+
+@pytest.mark.asyncio
 async def test_quality_guard_probe_pins_account_and_verifies_audit(
     monkeypatch: pytest.MonkeyPatch,
 ):
