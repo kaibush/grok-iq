@@ -74,6 +74,22 @@ export type ClientKeyUsageTotals = {
   estimatedCostInUsdTicks: number
   averageDurationMs: number
   successRate: number
+  cacheHitRate: number
+}
+
+export type PublicUpstreamUsagePeriod = '24h' | '7d'
+
+export type PublicUpstreamUsageWindow = {
+  period: PublicUpstreamUsagePeriod
+  sourcePeriod: string
+  range: { start: string | null; end: string | null }
+  truncated: boolean
+  usage: ClientKeyUsageTotals
+}
+
+export type PublicUpstreamUsageOverview = {
+  reachable: boolean
+  windows: Record<PublicUpstreamUsagePeriod, PublicUpstreamUsageWindow>
 }
 
 export type PublicClientKeyUsage = {
@@ -2807,6 +2823,10 @@ export const api = {
   health: () => request<HealthResponse>('/health'),
   publicUpstreamAccounts: () =>
     request<PublicUpstreamAccountSummary>('/public/upstream-accounts', {
+      skipAuth: true,
+    }),
+  publicUpstreamUsage: () =>
+    request<PublicUpstreamUsageOverview>('/public/upstream-usage', {
       skipAuth: true,
     }),
   lookupPublicClientKeyQuota: (apiKey: string) =>

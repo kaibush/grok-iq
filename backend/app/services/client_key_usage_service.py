@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -13,6 +14,8 @@ MAX_AUDIT_PAGES = 40
 AUDIT_PAGE_SIZE = 200
 AUDIT_FETCH_TIMEOUT_SECONDS = 60
 AUDIT_FETCH_CONCURRENCY = 8
+PUBLIC_USAGE_TTL_SECONDS = 30.0
+PUBLIC_USAGE_PERIODS = ("24h", "7d")
 AUDIT_PERIODS = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -29,6 +32,8 @@ class ClientKeyUsageService:
     ) -> None:
         self.client = client
         self.quota_service = quota_service or ClientKeyQuotaService(client)
+        self._public_usage_cache: tuple[float, dict[str, Any]] | None = None
+        self._public_usage_lock = asyncio.Lock()
 
     async def lookup_public_usage(
         self,
@@ -58,6 +63,49 @@ class ClientKeyUsageService:
             "range": summary["range"],
             "truncated": summary["truncated"],
             "usage": summary["total"],
+        }
+
+    async def public_usage_overview(self) -> dict[str, Any]:
+        cached = self._fresh_public_usage()
+        if cached is not None:
+            return cached
+        async with self._public_usage_lock:
+            cached = self._fresh_public_usage()
+            if cached is not None:
+                return cached
+            try:
+                windows = await asyncio.gather(
+                    *(self._public_usage_window(period) for period in PUBLIC_USAGE_PERIODS)
+                )
+                payload = {
+                    "reachable": True,
+                    "windows": {
+                        period: window for period, window in zip(PUBLIC_USAGE_PERIODS, windows, strict=True)
+                    },
+                }
+            except Exception:
+                payload = _empty_public_usage(reachable=False)
+            self._public_usage_cache = (time.monotonic(), payload)
+            return payload
+
+    def _fresh_public_usage(self) -> dict[str, Any] | None:
+        cached = self._public_usage_cache
+        if cached is not None and time.monotonic() - cached[0] < PUBLIC_USAGE_TTL_SECONDS:
+            return cached[1]
+        return None
+
+    async def _public_usage_window(self, period: str) -> dict[str, Any]:
+        window = resolve_audit_window(period)
+        row = await self._audit_usage_for_window(window)
+        return {
+            "period": window["period"],
+            "sourcePeriod": window["sourcePeriod"],
+            "range": {
+                "start": _iso_z(window["start"]),
+                "end": _iso_z(window["end"]),
+            },
+            "truncated": bool(row.get("truncated")) or bool(window["clamped"]),
+            "usage": _finalize_audit_usage(row["usage"]),
         }
 
     async def audit_summary(
@@ -113,6 +161,14 @@ class ClientKeyUsageService:
         key_id: str,
         window: dict[str, Any],
     ) -> dict[str, Any]:
+        return await self._audit_usage_for_window(window, key_id=key_id)
+
+    async def _audit_usage_for_window(
+        self,
+        window: dict[str, Any],
+        *,
+        key_id: str = "",
+    ) -> dict[str, Any]:
         usage = _empty_audit_usage()
         name = ""
         truncated = False
@@ -135,11 +191,9 @@ class ClientKeyUsageService:
             older = False
             for item in items:
                 ident = str(item.get("clientKeyId") or item.get("client_key_id") or "")
-                if ident != key_id:
+                if key_id and ident != key_id:
                     continue
-                created = _parse_audit_time(
-                    str(item.get("createdAt") or item.get("created_at") or "")
-                )
+                created = _parse_audit_time(str(item.get("createdAt") or item.get("created_at") or ""))
                 if created is None:
                     continue
                 if created >= end:
@@ -148,9 +202,7 @@ class ClientKeyUsageService:
                     older = True
                     continue
                 if not name:
-                    name = str(
-                        item.get("clientKeyName") or item.get("client_key_name") or ""
-                    )
+                    name = str(item.get("clientKeyName") or item.get("client_key_name") or "")
                 _add_audit_item(usage, item)
             if older or not data.get("hasMore"):
                 break
@@ -274,13 +326,9 @@ def _add_audit_item(usage: dict[str, Any], item: dict[str, Any]) -> None:
     else:
         usage["failedRequests"] += 1
     usage["inputTokens"] += _as_int(item.get("inputTokens", item.get("input_tokens")))
-    usage["cachedInputTokens"] += _as_int(
-        item.get("cachedInputTokens", item.get("cached_input_tokens"))
-    )
+    usage["cachedInputTokens"] += _as_int(item.get("cachedInputTokens", item.get("cached_input_tokens")))
     usage["outputTokens"] += _as_int(item.get("outputTokens", item.get("output_tokens")))
-    usage["reasoningTokens"] += _as_int(
-        item.get("reasoningTokens", item.get("reasoning_tokens"))
-    )
+    usage["reasoningTokens"] += _as_int(item.get("reasoningTokens", item.get("reasoning_tokens")))
     usage["totalTokens"] += _as_int(item.get("totalTokens", item.get("total_tokens")))
     cost = item.get("estimatedCostInUsdTicks", item.get("estimated_cost_in_usd_ticks"))
     if not cost:
@@ -308,13 +356,29 @@ def _merge_audit_usage(target: dict[str, Any], extra: dict[str, Any]) -> None:
 def _finalize_audit_usage(usage: dict[str, Any]) -> dict[str, Any]:
     result = dict(usage)
     requests = result.get("requests") or 0
+    input_tokens = result.get("inputTokens") or 0
     if requests:
         result["successRate"] = result["successfulRequests"] / requests * 100
         result["averageDurationMs"] = result["durationMs"] / requests
     else:
         result["successRate"] = 0.0
         result["averageDurationMs"] = 0.0
+    result["cacheHitRate"] = result["cachedInputTokens"] / input_tokens * 100 if input_tokens else 0.0
     return result
+
+
+def _empty_public_usage(*, reachable: bool) -> dict[str, Any]:
+    empty = _finalize_audit_usage(_empty_audit_usage())
+    windows: dict[str, Any] = {}
+    for period in PUBLIC_USAGE_PERIODS:
+        windows[period] = {
+            "period": period,
+            "sourcePeriod": period,
+            "range": {"start": None, "end": None},
+            "truncated": False,
+            "usage": dict(empty),
+        }
+    return {"reachable": reachable, "windows": windows}
 
 
 def _list_items(payload: Any) -> list[dict[str, Any]]:
@@ -335,4 +399,3 @@ def _as_int(value: Any, fallback: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return fallback
-

@@ -50,6 +50,11 @@ def build_public_router(
             end=payload.end,
         )
 
+    @router.get("/public/upstream-usage")
+    async def public_upstream_usage(response: Response) -> dict[str, Any]:
+        disable_client_cache(response)
+        return await usage_service.public_usage_overview()
+
     return router
 
 

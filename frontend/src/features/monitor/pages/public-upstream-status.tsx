@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   Compass,
   Loader2,
   RefreshCw,
@@ -15,8 +16,11 @@ import {
 import { IconGithub } from '@/assets/brand-icons'
 import {
   api,
+  type ClientKeyUsageTotals,
   type PublicUpstreamAccountSummary,
   type PublicUpstreamProvider,
+  type PublicUpstreamUsagePeriod,
+  type PublicUpstreamUsageWindow,
 } from '@/lib/api'
 import { formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +57,34 @@ const providerMeta: Record<
   },
 }
 
+const emptyUsageTotals: ClientKeyUsageTotals = {
+  requests: 0,
+  successfulRequests: 0,
+  failedRequests: 0,
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  reasoningTokens: 0,
+  totalTokens: 0,
+  durationMs: 0,
+  estimatedCostInUsdTicks: 0,
+  averageDurationMs: 0,
+  successRate: 0,
+  cacheHitRate: 0,
+}
+
+function emptyUsageWindow(
+  period: PublicUpstreamUsagePeriod
+): PublicUpstreamUsageWindow {
+  return {
+    period,
+    sourcePeriod: period,
+    range: { start: null, end: null },
+    truncated: false,
+    usage: emptyUsageTotals,
+  }
+}
+
 const emptySummary: PublicUpstreamAccountSummary = {
   reachable: false,
   updatedAt: null,
@@ -77,7 +109,18 @@ export function PublicUpstreamStatusPage() {
     refetchInterval: 15_000,
     retry: 1,
   })
+  const usageQuery = useQuery({
+    queryKey: ['public', 'upstream-usage'],
+    queryFn: api.publicUpstreamUsage,
+    refetchInterval: 30_000,
+    retry: 1,
+  })
   const data = query.data ?? emptySummary
+  const usageErrorMessage = usageQuery.isError
+    ? getErrorMessage(usageQuery.error)
+    : ''
+  const usageReady =
+    usageQuery.data != null && usageQuery.data.reachable && !usageQuery.isError
   const errorMessage = query.isError ? getErrorMessage(query.error) : ''
   const hasData = query.data != null
   const ready = hasData && data.reachable && !query.isError
@@ -135,7 +178,7 @@ export function PublicUpstreamStatusPage() {
               上游账号情况
             </h1>
             <p className='mt-1 text-sm text-muted-foreground'>
-              默认只展示上游账号聚合计数。密钥额度与使用量需手动查询，不会回显明文。
+              默认展示上游账号聚合计数，以及近 24 小时和 7 天的请求统计。密钥额度需手动查询，不会回显明文。
             </p>
           </div>
           <div className='flex flex-wrap items-center gap-2'>
@@ -149,10 +192,13 @@ export function PublicUpstreamStatusPage() {
               type='button'
               size='sm'
               variant='outline'
-              onClick={() => void query.refetch()}
-              disabled={query.isFetching}
+              onClick={() => {
+                void query.refetch()
+                void usageQuery.refetch()
+              }}
+              disabled={query.isFetching || usageQuery.isFetching}
             >
-              {query.isFetching ? (
+              {query.isFetching || usageQuery.isFetching ? (
                 <Loader2 className='animate-spin' />
               ) : (
                 <RefreshCw />
@@ -245,6 +291,41 @@ export function PublicUpstreamStatusPage() {
               />
             )
           )}
+        </section>
+
+        <section className='space-y-3'>
+          <div className='flex items-center gap-2'>
+            <BarChart3 className='size-4 text-primary' />
+            <h2 className='text-base font-medium'>请求看板</h2>
+          </div>
+          {usageErrorMessage ? (
+            <Card className='border-destructive/30 bg-destructive/5'>
+              <CardContent className='p-4 text-sm text-destructive'>
+                请求统计读取失败：{usageErrorMessage}
+              </CardContent>
+            </Card>
+          ) : null}
+          {!usageErrorMessage && usageQuery.data && !usageQuery.data.reachable ? (
+            <Card className='border-amber-500/30 bg-amber-500/5'>
+              <CardContent className='p-4 text-sm text-amber-800 dark:text-amber-300'>
+                上游暂时不可达，当前不展示请求统计。
+              </CardContent>
+            </Card>
+          ) : null}
+          <div className='grid gap-4 lg:grid-cols-2'>
+            <UsageWindowCard
+              title='近 24 小时'
+              window={usageQuery.data?.windows['24h'] ?? emptyUsageWindow('24h')}
+              ready={usageReady}
+              loading={usageQuery.isLoading && usageQuery.data == null}
+            />
+            <UsageWindowCard
+              title='近 7 天'
+              window={usageQuery.data?.windows['7d'] ?? emptyUsageWindow('7d')}
+              ready={usageReady}
+              loading={usageQuery.isLoading && usageQuery.data == null}
+            />
+          </div>
         </section>
 
         <section className='grid gap-4 lg:grid-cols-2'>
@@ -369,12 +450,74 @@ function ProviderCard({
   )
 }
 
-function CountTile({ label, value }: { label: string; value: number | null }) {
+function UsageWindowCard({
+  title,
+  window,
+  ready,
+  loading,
+}: {
+  title: string
+  window: PublicUpstreamUsageWindow
+  ready: boolean
+  loading: boolean
+}) {
+  const usage = window.usage
+  const show = ready && !loading
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className='flex items-center justify-between gap-2 text-base'>
+          <span>{title}</span>
+          {window.truncated ? <Badge variant='warning'>已截断</Badge> : null}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className='space-y-3'>
+        <div className='grid gap-3 sm:grid-cols-2'>
+          <CountTile label='请求' value={show ? usage.requests : null} />
+          <CountTile
+            label='成功 / 失败'
+            display={
+              show
+                ? `${formatNumber(usage.successfulRequests, 0)} / ${formatNumber(usage.failedRequests, 0)}`
+                : null
+            }
+          />
+          <CountTile
+            label='成功率'
+            display={show ? percentValue(usage.successRate) : null}
+          />
+          <CountTile label='Tokens' value={show ? usage.totalTokens : null} />
+          <CountTile label='输入' value={show ? usage.inputTokens : null} />
+          <CountTile label='缓存' value={show ? usage.cachedInputTokens : null} />
+          <CountTile
+            label='缓存命中'
+            display={show ? percentValue(usage.cacheHitRate) : null}
+          />
+          <CountTile label='输出' value={show ? usage.outputTokens : null} />
+        </div>
+        <p className='text-xs text-muted-foreground'>
+          窗口 {show ? formatDate(window.range.start) : '—'} ~{' '}
+          {show ? formatDate(window.range.end) : '—'}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function CountTile({
+  label,
+  value,
+  display,
+}: {
+  label: string
+  value?: number | null
+  display?: string | null
+}) {
   return (
     <div className='rounded-lg border bg-muted/20 px-3 py-3'>
       <div className='text-xs text-muted-foreground'>{label}</div>
       <div className='mt-1 text-xl font-semibold tabular-nums'>
-        {value == null ? '—' : formatNumber(value, 0)}
+        {display ?? (value == null ? '—' : formatNumber(value, 0))}
       </div>
     </div>
   )
@@ -383,4 +526,8 @@ function CountTile({ label, value }: { label: string; value: number | null }) {
 function percent(part: number, total: number) {
   if (!total) return '—'
   return `${Math.round((part / total) * 100)}%`
+}
+
+function percentValue(value: number) {
+  return `${formatNumber(value, 1)}%`
 }

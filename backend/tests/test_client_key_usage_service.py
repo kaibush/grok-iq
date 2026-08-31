@@ -276,3 +276,89 @@ def test_resolve_audit_window_custom_validation() -> None:
     assert clamped["sourcePeriod"] == "90d"
     assert clamped["start"] == now - timedelta(days=90)
     assert clamped["end"] == now
+
+
+@pytest.mark.asyncio
+async def test_public_usage_overview_splits_24h_and_7d(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("app.services.client_key_usage_service.utc_now", lambda: now)
+    client = FakeGrok2APIClient(
+        audits={
+            "": {
+                "items": [
+                    {
+                        "clientKeyId": "1",
+                        "statusCode": 200,
+                        "inputTokens": 10,
+                        "cachedInputTokens": 4,
+                        "outputTokens": 6,
+                        "reasoningTokens": 2,
+                        "totalTokens": 18,
+                        "durationMs": 40,
+                        "createdAt": "2026-08-31T08:00:00Z",
+                    },
+                    {
+                        "clientKeyId": "2",
+                        "statusCode": 500,
+                        "errorCode": "upstream",
+                        "inputTokens": 5,
+                        "cachedInputTokens": 0,
+                        "outputTokens": 1,
+                        "totalTokens": 6,
+                        "durationMs": 80,
+                        "createdAt": "2026-08-28T12:00:00Z",
+                    },
+                    {
+                        "clientKeyId": "3",
+                        "statusCode": 200,
+                        "inputTokens": 1,
+                        "totalTokens": 1,
+                        "createdAt": "2026-08-01T12:00:00Z",
+                    },
+                ],
+                "hasMore": False,
+                "nextCursor": "",
+            }
+        }
+    )
+    service = ClientKeyUsageService(client)  # type: ignore[arg-type]
+
+    result = await service.public_usage_overview()
+    cached = await service.public_usage_overview()
+
+    assert result["reachable"] is True
+    assert cached is result
+    assert {call["period"] for call in client.list_request_audits_calls} == {"24h", "7d"}
+    assert {call["key"] for call in client.list_request_audits_calls} == {""}
+    assert len(client.list_request_audits_calls) == 2
+
+    day = result["windows"]["24h"]
+    week = result["windows"]["7d"]
+    assert day["period"] == "24h"
+    assert day["truncated"] is False
+    assert day["usage"]["requests"] == 1
+    assert day["usage"]["successfulRequests"] == 1
+    assert day["usage"]["failedRequests"] == 0
+    assert day["usage"]["totalTokens"] == 18
+    assert day["usage"]["cachedInputTokens"] == 4
+    assert day["usage"]["cacheHitRate"] == 40.0
+    assert week["usage"]["requests"] == 2
+    assert week["usage"]["successfulRequests"] == 1
+    assert week["usage"]["failedRequests"] == 1
+    assert week["usage"]["totalTokens"] == 24
+    assert week["usage"]["successRate"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_public_usage_overview_hides_upstream_errors() -> None:
+    class BrokenClient(FakeGrok2APIClient):
+        async def list_request_audits(self, **params: Any) -> dict[str, Any]:
+            raise RuntimeError("upstream down")
+
+    service = ClientKeyUsageService(BrokenClient())  # type: ignore[arg-type]
+    result = await service.public_usage_overview()
+    assert result["reachable"] is False
+    assert result["windows"]["24h"]["usage"]["requests"] == 0
+    assert result["windows"]["7d"]["usage"]["requests"] == 0
