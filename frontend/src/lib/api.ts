@@ -23,9 +23,9 @@ export type PublicUpstreamProviderCounts = {
 export type PublicUpstreamAccountSummary = {
   reachable: boolean
   updatedAt: string | null
-  risk: number
   providers: Record<PublicUpstreamProvider, PublicUpstreamProviderCounts>
   total?: number
+  risk?: number
   available?: number
   recovering?: number
   attention?: number

@@ -22,7 +22,7 @@ import {
   type PublicUpstreamUsagePeriod,
   type PublicUpstreamUsageWindow,
 } from '@/lib/api'
-import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
+import { formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import { Badge } from '@/components/ui/badge'
 import { ProgressBar } from '@/components/ui/progress'
@@ -226,61 +226,52 @@ export function PublicUpstreamStatusPage() {
           </Card>
         )}
 
-        <section
-          className={cn(
-            'grid gap-4',
-            isAdmin ? 'sm:grid-cols-2 xl:grid-cols-5' : 'sm:grid-cols-2'
-          )}
-        >
-          {isAdmin ? (
-            <>
-              <StatCard
-                label='账号总数'
-                value={ready ? formatNumber(data.total, 0) : '—'}
-                detail={
-                  ready
-                    ? `${formatNumber(data.available, 0)} 个当前可调度`
-                    : '读取中'
-                }
-                icon={UsersRound}
-                tone='sky'
-                loading={query.isLoading && !hasData}
-                index={0}
-              />
-              <StatCard
-                label='恢复中'
-                value={ready ? formatNumber(data.recovering, 0) : '—'}
-                detail='冷却、待重置或检测中'
-                icon={TimerReset}
-                tone='amber'
-                loading={query.isLoading && !hasData}
-                index={1}
-              />
-              <StatCard
-                label='需关注'
-                value={ready ? formatNumber(data.attention, 0) : '—'}
-                detail={
-                  ready
-                    ? `${formatNumber(data.issues?.disabled, 0)} 停用 · ${formatNumber(data.issues?.reauthRequired, 0)} 失效`
-                    : '读取中'
-                }
-                icon={AlertTriangle}
-                tone='amber'
-                loading={query.isLoading && !hasData}
-                index={2}
-              />
-            </>
-          ) : null}
-          <StatCard
-            label='风险标记'
-            value={ready ? formatNumber(data.risk, 0) : '—'}
-            detail='上游机器人风险账号'
-            icon={ShieldAlert}
-            tone='red'
-            loading={query.isLoading && !hasData}
-            index={isAdmin ? 3 : 0}
-          />
-          {isAdmin ? (
+        {isAdmin ? (
+          <section className='grid gap-4 sm:grid-cols-2 xl:grid-cols-5'>
+            <StatCard
+              label='账号总数'
+              value={ready ? formatNumber(data.total, 0) : '—'}
+              detail={
+                ready
+                  ? `${formatNumber(data.available, 0)} 个当前可调度`
+                  : '读取中'
+              }
+              icon={UsersRound}
+              tone='sky'
+              loading={query.isLoading && !hasData}
+              index={0}
+            />
+            <StatCard
+              label='恢复中'
+              value={ready ? formatNumber(data.recovering, 0) : '—'}
+              detail='冷却、待重置或检测中'
+              icon={TimerReset}
+              tone='amber'
+              loading={query.isLoading && !hasData}
+              index={1}
+            />
+            <StatCard
+              label='需关注'
+              value={ready ? formatNumber(data.attention, 0) : '—'}
+              detail={
+                ready
+                  ? `${formatNumber(data.issues?.disabled, 0)} 停用 · ${formatNumber(data.issues?.reauthRequired, 0)} 失效`
+                  : '读取中'
+              }
+              icon={AlertTriangle}
+              tone='amber'
+              loading={query.isLoading && !hasData}
+              index={2}
+            />
+            <StatCard
+              label='风险标记'
+              value={ready ? formatNumber(data.risk, 0) : '—'}
+              detail='上游机器人风险账号'
+              icon={ShieldAlert}
+              tone='red'
+              loading={query.isLoading && !hasData}
+              index={3}
+            />
             <StatCard
               label='可调度占比'
               value={ready ? percent(data.available, data.total) : '—'}
@@ -290,8 +281,8 @@ export function PublicUpstreamStatusPage() {
               loading={query.isLoading && !hasData}
               index={4}
             />
-          ) : null}
-        </section>
+          </section>
+        ) : null}
 
         <section className='grid gap-4 lg:grid-cols-3'>
           {(Object.keys(providerMeta) as PublicUpstreamProvider[]).map(

@@ -1646,6 +1646,7 @@ _PUBLIC_INVENTORY_KEYS = (
     "available",
     "recovering",
     "attention",
+    "risk",
     "recovery",
     "issues",
 )

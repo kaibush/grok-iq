@@ -275,7 +275,7 @@ async def test_public_upstream_summary_returns_counts_only(tmp_path: Path):
     assert "attention" not in public
     assert "recovery" not in public
     assert "issues" not in public
-    assert public["risk"] == 1
+    assert "risk" not in public
     assert public["providers"]["grok_build"] == {"total": 8, "available": 5}
     assert "token" not in public
     assert "accounts" not in public
@@ -285,6 +285,7 @@ async def test_public_upstream_summary_returns_counts_only(tmp_path: Path):
     assert admin["available"] == 7
     assert admin["recovering"] == 3
     assert admin["attention"] == 2
+    assert admin["risk"] == 1
     assert admin["recovery"] == {"cooldown": 1, "waitingReset": 1, "probing": 1}
     assert admin["issues"] == {"disabled": 1, "reauthRequired": 1}
     database.dispose()
