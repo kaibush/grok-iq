@@ -276,7 +276,12 @@ async def test_public_upstream_summary_returns_counts_only(tmp_path: Path):
     assert "recovery" not in public
     assert "issues" not in public
     assert "risk" not in public
-    assert public["providers"]["grok_build"] == {"total": 8, "available": 5}
+    assert public["providers"]["grok_build"] == {"capacity": 63}
+    assert public["providers"]["grok_web"] == {"capacity": 67}
+    assert public["providers"]["grok_console"] == {"capacity": 0}
+    assert "total" not in public["providers"]["grok_build"]
+    assert "available" not in public["providers"]["grok_build"]
+    assert admin["providers"]["grok_build"] == {"total": 8, "available": 5}
     assert "token" not in public
     assert "accounts" not in public
 

@@ -46,17 +46,17 @@ const providerMeta: Record<
 > = {
   grok_build: {
     label: 'Build',
-    hint: 'Grok Build 账号',
+    hint: '编程与工具调用通道',
     icon: SquareTerminal,
   },
   grok_web: {
     label: 'Web',
-    hint: 'Grok Web 账号',
+    hint: '网页对话通道',
     icon: Compass,
   },
   grok_console: {
     label: 'Console',
-    hint: 'Grok Console 账号',
+    hint: '控制台接入通道',
     icon: Webhook,
   },
 }
@@ -127,7 +127,7 @@ export function PublicUpstreamStatusPage() {
                 GrokIQ
               </span>
               <span className='block truncate text-[11px] text-muted-foreground'>
-                上游账号状态
+                上游状态
               </span>
             </span>
           </div>
@@ -382,12 +382,12 @@ function ProviderCard({
   ready,
 }: {
   provider: PublicUpstreamProvider
-  counts: { total: number; available: number }
+  counts: { capacity?: number; total?: number; available?: number }
   ready: boolean
 }) {
   const meta = providerMeta[provider]
   const Icon = meta.icon
-  const ratio = counts.total > 0 ? counts.available / counts.total : 0
+  const capacity = providerCapacity(counts)
   return (
     <Card>
       <CardContent className='space-y-4 p-5'>
@@ -400,24 +400,27 @@ function ProviderCard({
             <p className='mt-1 text-xs text-muted-foreground'>{meta.hint}</p>
           </div>
           <Badge variant='outline'>
-            {ready ? percent(counts.available, counts.total) : '—'}
+            {ready ? `${capacity}%` : '—'}
           </Badge>
         </div>
-        <ProgressBar
-          className='h-2'
-          value={ready ? Math.round(ratio * 100) : 0}
-        />
+        <ProgressBar className='h-2' value={ready ? capacity : 0} />
         <div className='flex items-center justify-between text-sm'>
-          <span className='text-muted-foreground'>可调度</span>
-          <span className='tabular-nums'>
-            {ready
-              ? `${formatNumber(counts.available, 0)} / ${formatNumber(counts.total, 0)}`
-              : '—'}
-          </span>
+          <span className='text-muted-foreground'>当前余量</span>
+          <span className='tabular-nums'>{ready ? `${capacity}%` : '—'}</span>
         </div>
       </CardContent>
     </Card>
   )
+}
+
+function providerCapacity(counts: {
+  capacity?: number
+  total?: number
+  available?: number
+}) {
+  if (counts.capacity != null) return Math.max(0, Math.min(100, counts.capacity))
+  if (!counts.total) return 0
+  return Math.round(((counts.available ?? 0) / counts.total) * 100)
 }
 
 function CountTile({

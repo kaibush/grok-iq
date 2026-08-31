@@ -1657,11 +1657,27 @@ def _public_upstream_view(
 ) -> dict[str, Any]:
     if include_inventory:
         return dict(payload)
-    return {
+    view = {
         key: value
         for key, value in payload.items()
         if key not in _PUBLIC_INVENTORY_KEYS
     }
+    providers = view.get("providers")
+    if isinstance(providers, dict):
+        view["providers"] = {
+            name: _public_provider_capacity(counts)
+            for name, counts in providers.items()
+        }
+    return view
+
+
+def _public_provider_capacity(value: Any) -> dict[str, int]:
+    payload = value if isinstance(value, dict) else {}
+    total = _count(payload.get("total"))
+    available = _count(payload.get("available"))
+    if total <= 0:
+        return {"capacity": 0}
+    return {"capacity": round(available / total * 100)}
 
 
 def _public_upstream_summary(raw: Any, *, reachable: bool) -> dict[str, Any]:

@@ -16,8 +16,9 @@ export type AuthStatus = {
 export type PublicUpstreamProvider = 'grok_build' | 'grok_web' | 'grok_console'
 
 export type PublicUpstreamProviderCounts = {
-  total: number
-  available: number
+  capacity?: number
+  total?: number
+  available?: number
 }
 
 export type PublicUpstreamAccountSummary = {
