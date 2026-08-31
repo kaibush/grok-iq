@@ -33,6 +33,7 @@ import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
   api,
+  type AccountQuarantineLocalDeleteResult,
   type OperatorNote,
   type ProbeSample,
   type UpstreamAccount,
@@ -138,6 +139,21 @@ type IsolationUpstreamStatusFilter = UpstreamStatusFilter | 'missing'
 
 const RESTORE_PRIORITY_MIN = -2_000_000_000
 const RESTORE_PRIORITY_MAX = 2_000_000_000
+
+function quarantineDeleteRetainedIds(
+  result: Pick<
+    AccountQuarantineLocalDeleteResult,
+    'skippedAccountIds' | 'failedAccountIds' | 'skippedNotQuarantinedAccountIds'
+  >
+): number[] {
+  return Array.from(
+    new Set([
+      ...(result.skippedAccountIds ?? []),
+      ...(result.failedAccountIds ?? []),
+      ...(result.skippedNotQuarantinedAccountIds ?? []),
+    ])
+  )
+}
 
 function parseRestorePriority(value: string): {
   priority?: number
@@ -802,6 +818,7 @@ export function QuarantinePage() {
   const [disableOpen, setDisableOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteUpstreamOpen, setDeleteUpstreamOpen] = useState(false)
+  const [deleteUpstreamAlsoLocal, setDeleteUpstreamAlsoLocal] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [noteEditorId, setNoteEditorId] = useState<number | null>(null)
@@ -1219,43 +1236,121 @@ export function QuarantinePage() {
   })
 
   const deleteUpstreamMutation = useMutation({
-    mutationFn: (accountIds: number[]) =>
-      api.deleteQuarantineUpstream(accountIds),
-    onSuccess: (result, accountIds) => {
-      const skippedAccountIds = result.skippedAccountIds ?? []
-      const failedAccountIds = result.failedAccountIds ?? []
+    mutationFn: async ({
+      accountIds,
+      alsoDeleteLocal,
+    }: {
+      accountIds: number[]
+      alsoDeleteLocal: boolean
+    }) => {
+      const upstream = await api.deleteQuarantineUpstream(accountIds)
+      const upstreamRetainedIds = new Set(quarantineDeleteRetainedIds(upstream))
+      const successfulIds = accountIds.filter(
+        (accountId) => !upstreamRetainedIds.has(accountId)
+      )
+      let local: AccountQuarantineLocalDeleteResult | null = null
+      let localError: unknown = null
+      if (alsoDeleteLocal && successfulIds.length > 0) {
+        try {
+          local = await api.deleteQuarantineLocal(successfulIds)
+        } catch (error) {
+          localError = error
+        }
+      }
+      return {
+        accountIds,
+        alsoDeleteLocal,
+        successfulIds,
+        upstream,
+        local,
+        localError,
+      }
+    },
+    onSuccess: (result) => {
+      const {
+        accountIds,
+        alsoDeleteLocal,
+        successfulIds,
+        upstream,
+        local,
+        localError,
+      } = result
+      const skippedAccountIds = upstream.skippedAccountIds ?? []
+      const failedAccountIds = upstream.failedAccountIds ?? []
       const skippedNotQuarantinedAccountIds =
-        result.skippedNotQuarantinedAccountIds ?? []
+        upstream.skippedNotQuarantinedAccountIds ?? []
+      const localSkippedAccountIds = local?.skippedAccountIds ?? []
+      const localFailedAccountIds = local?.failedAccountIds ?? []
+      const localRetainedIds = new Set(
+        alsoDeleteLocal
+          ? localError
+            ? successfulIds
+            : [...localSkippedAccountIds, ...localFailedAccountIds]
+          : []
+      )
       const retainedAccountIds = Array.from(
         new Set([
           ...skippedAccountIds,
           ...failedAccountIds,
           ...skippedNotQuarantinedAccountIds,
+          ...successfulIds.filter((accountId) =>
+            localRetainedIds.has(accountId)
+          ),
           ...selected.filter((id) => !accountIds.includes(id)),
         ])
       )
       setDeleteUpstreamOpen(false)
+      setDeleteUpstreamAlsoLocal(false)
       syncSelection(retainedAccountIds)
       if (
+        detailId != null &&
+        alsoDeleteLocal &&
+        !localError &&
+        successfulIds.includes(detailId) &&
+        !localRetainedIds.has(detailId)
+      ) {
+        setDetailOpen(false)
+      }
+      const details = [`已删除上游 ${upstream.deleted} 个账号`]
+      if (alsoDeleteLocal) {
+        if (localError) {
+          details.push(
+            `本系统记录删除失败，本地隔离记录仍保留：${getErrorMessage(localError)}`
+          )
+        } else if (local) {
+          details.push(`已删除 ${local.deleted} 条本系统记录`)
+          if (localFailedAccountIds.length) {
+            details.push(
+              `${localFailedAccountIds.length} 个本系统记录删除失败并保留选择`
+            )
+          }
+          if (localSkippedAccountIds.length) {
+            details.push(`${localSkippedAccountIds.length} 个本系统记录已跳过`)
+          }
+        }
+      }
+      if (failedAccountIds.length) {
+        details.push(`${failedAccountIds.length} 个删除失败并保留选择`)
+      }
+      if (skippedAccountIds.length) {
+        details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+      }
+      if (skippedNotQuarantinedAccountIds.length) {
+        details.push(
+          `${skippedNotQuarantinedAccountIds.length} 个账号不在隔离区并跳过`
+        )
+      }
+      const isWarning =
         failedAccountIds.length > 0 ||
         skippedAccountIds.length > 0 ||
-        skippedNotQuarantinedAccountIds.length > 0
-      ) {
-        const details = [`已删除上游 ${result.deleted} 个账号`]
-        if (failedAccountIds.length) {
-          details.push(`${failedAccountIds.length} 个删除失败并保留选择`)
-        }
-        if (skippedAccountIds.length) {
-          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
-        }
-        if (skippedNotQuarantinedAccountIds.length) {
-          details.push(
-            `${skippedNotQuarantinedAccountIds.length} 个账号不在隔离区并跳过`
-          )
-        }
+        skippedNotQuarantinedAccountIds.length > 0 ||
+        Boolean(localError) ||
+        localFailedAccountIds.length > 0 ||
+        localSkippedAccountIds.length > 0
+      if (isWarning) {
         toast.warning(details.join('；'))
       } else {
-        toast.success(`已删除上游 ${result.deleted} 个账号`)
+        toast.success(details.join('；'))
       }
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -1405,7 +1500,10 @@ export function QuarantinePage() {
                 disabled={
                   selectionActionPending || probeableSelected.length === 0
                 }
-                onClick={() => setDeleteUpstreamOpen(true)}
+                onClick={() => {
+                  setDeleteUpstreamAlsoLocal(false)
+                  setDeleteUpstreamOpen(true)
+                }}
               >
                 <UserX />
               </ToolbarAction>
@@ -1895,7 +1993,10 @@ export function QuarantinePage() {
       <ConfirmDialog
         open={deleteUpstreamOpen}
         onOpenChange={(open) => {
-          if (!open && !deleteUpstreamPending) setDeleteUpstreamOpen(false)
+          if (!open && !deleteUpstreamPending) {
+            setDeleteUpstreamOpen(false)
+            setDeleteUpstreamAlsoLocal(false)
+          }
         }}
         title={`删除 ${probeableSelected.length} 个账号的上游？`}
         desc={
@@ -1905,7 +2006,9 @@ export function QuarantinePage() {
               个有上游记录的账号，此操作不可撤销。
             </p>
             <p className='font-medium text-foreground'>
-              这不会删除 GrokIQ 本地评估、样本和隔离记录；那些会保留，直到使用「删除本系统记录」。
+              {deleteUpstreamAlsoLocal
+                ? '勾选后，上游删除成功的账号会继续删除 GrokIQ 本地评估、样本和隔离记录，并离开隔离区列表。'
+                : '默认不会删除 GrokIQ 本地评估、样本和隔离记录；那些会保留，直到使用「删除本系统记录」。'}
             </p>
             <p className='text-muted-foreground'>
               正在执行探针或等待账号设置恢复的账号会被跳过并保留选择。
@@ -1922,6 +2025,11 @@ export function QuarantinePage() {
               <Loader2 className='animate-spin' />
               删除中…
             </>
+          ) : deleteUpstreamAlsoLocal ? (
+            <>
+              <UserX />
+              确认删除上游和本地记录
+            </>
           ) : (
             <>
               <UserX />
@@ -1932,8 +2040,36 @@ export function QuarantinePage() {
         destructive
         isLoading={deleteUpstreamPending}
         disabled={probeableSelected.length === 0}
-        handleConfirm={() => deleteUpstreamMutation.mutate(probeableSelected)}
-      />
+        handleConfirm={() =>
+          deleteUpstreamMutation.mutate({
+            accountIds: probeableSelected,
+            alsoDeleteLocal: deleteUpstreamAlsoLocal,
+          })
+        }
+      >
+        <div className='flex items-start gap-2 rounded-lg border p-3'>
+          <Checkbox
+            id='quarantine-delete-upstream-also-local'
+            checked={deleteUpstreamAlsoLocal}
+            disabled={deleteUpstreamPending}
+            onCheckedChange={(value) =>
+              setDeleteUpstreamAlsoLocal(value === true)
+            }
+            className='mt-0.5'
+          />
+          <div className='space-y-1'>
+            <Label
+              htmlFor='quarantine-delete-upstream-also-local'
+              className='text-sm font-medium leading-5'
+            >
+              同时删除本地隔离记录
+            </Label>
+            <p className='text-xs leading-5 text-muted-foreground'>
+              仅处理上游删除成功的账号；失败或被跳过的账号会保留选择。
+            </p>
+          </div>
+        </div>
+      </ConfirmDialog>
       <Dialog open={upstreamOpen} onOpenChange={setUpstreamOpen}>
         <DialogContent size='wide' className='overflow-hidden'>
           <DialogHeader className='shrink-0'>
