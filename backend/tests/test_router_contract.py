@@ -34,6 +34,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/accounts/quarantine"),
     ("GET", "/api/accounts/quarantine/stats"),
     ("DELETE", "/api/accounts/quarantine/local"),
+    ("DELETE", "/api/accounts/quarantine/upstream"),
     ("GET", "/api/accounts/{account_id}"),
     ("GET", "/api/accounts/{account_id}/samples"),
     ("GET", "/api/accounts/{account_id}/timeline"),

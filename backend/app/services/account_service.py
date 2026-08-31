@@ -1240,6 +1240,42 @@ class AccountService:
             ],
         }
 
+    async def delete_quarantine_upstream_accounts(
+        self,
+        *,
+        account_ids: list[int],
+    ) -> dict[str, Any]:
+        unique_ids = list(
+            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
+        )
+        if not unique_ids:
+            raise ValueError("至少选择一个账号")
+        assessments = self.accounts.get_assessments(unique_ids)
+        isolation_ids = [
+            account_id
+            for account_id in unique_ids
+            if self._is_isolation_zone(assessments.get(account_id))
+        ]
+        skipped_not_quarantined = [
+            account_id
+            for account_id in unique_ids
+            if not self._is_isolation_zone(assessments.get(account_id))
+        ]
+        if isolation_ids:
+            result = await self.delete_upstream_accounts(account_ids=isolation_ids)
+        else:
+            result = {
+                "requested": 0,
+                "eligible": 0,
+                "deleted": 0,
+                "skippedAccountIds": [],
+                "failedAccountIds": [],
+                "failures": [],
+            }
+        result["requested"] = len(unique_ids)
+        result["skippedNotQuarantinedAccountIds"] = sorted(skipped_not_quarantined)
+        return result
+
     async def recover_due_quarantines(self) -> dict[str, Any]:
         restored = 0
         guarded = 0

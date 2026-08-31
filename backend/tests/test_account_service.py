@@ -10,7 +10,11 @@ import pytest
 from app.analyzer import Thresholds
 from app.core.clock import app_isoformat, utc_now
 from app.core.config import Settings
-from app.integrations.grok2api.client import AccountBatchUpdateResult
+from app.integrations.grok2api.client import (
+    AccountBatchDeleteResult,
+    AccountBatchUpdateResult,
+    AccountUpdateFailure,
+)
 from app.persistence.account_repository import AccountRepository
 from app.persistence.database import Database
 from app.persistence.models import AccountAssessment
@@ -500,6 +504,7 @@ class IsolationClient:
         self.enabled_calls: list[tuple[int, bool]] = []
         self.priority_calls: list[tuple[int, int]] = []
         self.delete_calls: list[int] = []
+        self.failing_delete_ids: set[int] = set()
 
     async def get_account(self, account_id: int) -> dict[str, Any]:
         return dict(self.accounts[account_id])
@@ -534,7 +539,29 @@ class IsolationClient:
 
     async def delete_account(self, account_id: int) -> None:
         self.delete_calls.append(account_id)
+        if account_id in self.failing_delete_ids:
+            raise RuntimeError(f"delete failed for {account_id}")
         self.accounts.pop(account_id, None)
+
+    async def delete_accounts(
+        self,
+        account_ids: list[int],
+    ) -> AccountBatchDeleteResult:
+        unique_ids = list(
+            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
+        )
+        failures: list[AccountUpdateFailure] = []
+        for account_id in unique_ids:
+            try:
+                await self.delete_account(account_id)
+            except Exception as exc:
+                failures.append(
+                    AccountUpdateFailure(account_id=account_id, error=str(exc))
+                )
+        return AccountBatchDeleteResult(
+            deleted=len(unique_ids) - len(failures),
+            failures=tuple(failures),
+        )
 
 
 def _isolation_service(
@@ -1179,6 +1206,94 @@ async def test_local_purge_skips_locked_accounts(tmp_path: Path):
     assert result["skippedAccountIds"] == [2]
     assert accounts.get_assessment(2) is not None
     assert client.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_quarantine_upstream_delete_only_removes_isolated_accounts(tmp_path: Path):
+    _database, accounts, _probes, client, service = _isolation_service(tmp_path)
+    await service.action(
+        account_id=1,
+        action="isolate",
+        note="manual isolate",
+        propagate=True,
+        quarantine_minutes=None,
+    )
+
+    result = await service.delete_quarantine_upstream_accounts(account_ids=[1, 1, 2])
+
+    assert result["requested"] == 2
+    assert result["eligible"] == 1
+    assert result["deleted"] == 1
+    assert result["skippedAccountIds"] == []
+    assert result["failedAccountIds"] == []
+    assert result["skippedNotQuarantinedAccountIds"] == [2]
+    assert client.delete_calls == [1]
+    assert 1 not in client.accounts
+    assert 2 in client.accounts
+    assert accounts.get_assessment(1) is not None
+
+
+@pytest.mark.asyncio
+async def test_quarantine_upstream_delete_skips_locked_accounts(tmp_path: Path):
+    _database, accounts, _probes, client, service = _isolation_service(
+        tmp_path,
+        probes=LockedProbeSettings(),
+    )
+    accounts.set_manual_status(
+        account_id=2,
+        status="quarantined",
+        note="locked",
+        quarantine_until=None,
+        previous_upstream_enabled=True,
+        disabled_by_monitor=True,
+        recovery_guarded=False,
+    )
+
+    result = await service.delete_quarantine_upstream_accounts(account_ids=[2])
+
+    assert result["requested"] == 1
+    assert result["eligible"] == 0
+    assert result["deleted"] == 0
+    assert result["skippedAccountIds"] == [2]
+    assert result["failedAccountIds"] == []
+    assert result["skippedNotQuarantinedAccountIds"] == []
+    assert client.delete_calls == []
+    assert accounts.get_assessment(2) is not None
+
+
+@pytest.mark.asyncio
+async def test_quarantine_upstream_delete_requires_account_ids(tmp_path: Path):
+    _database, _accounts, _probes, _client, service = _isolation_service(tmp_path)
+
+    with pytest.raises(ValueError, match="至少选择一个账号"):
+        await service.delete_quarantine_upstream_accounts(account_ids=[])
+    with pytest.raises(ValueError, match="至少选择一个账号"):
+        await service.delete_quarantine_upstream_accounts(account_ids=[0, -1])
+
+
+@pytest.mark.asyncio
+async def test_quarantine_upstream_delete_records_upstream_failures(tmp_path: Path):
+    _database, accounts, _probes, client, service = _isolation_service(tmp_path)
+    client.failing_delete_ids.add(1)
+    await service.action(
+        account_id=1,
+        action="isolate",
+        note="manual isolate",
+        propagate=True,
+        quarantine_minutes=None,
+    )
+
+    result = await service.delete_quarantine_upstream_accounts(account_ids=[1])
+
+    assert result["requested"] == 1
+    assert result["eligible"] == 1
+    assert result["deleted"] == 0
+    assert result["failedAccountIds"] == [1]
+    assert result["failures"] == [{"id": 1, "error": "delete failed for 1"}]
+    assert result["skippedNotQuarantinedAccountIds"] == []
+    assert client.delete_calls == [1]
+    assert 1 in client.accounts
+    assert accounts.get_assessment(1) is not None
 
 
 @pytest.mark.asyncio

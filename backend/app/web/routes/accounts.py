@@ -158,6 +158,14 @@ def build_accounts_router(service: AccountService) -> APIRouter:
             account_ids=payload.account_ids,
         )
 
+    @router.delete("/accounts/quarantine/upstream")
+    async def delete_quarantine_upstream_accounts(
+        payload: AccountBatchDeleteInput,
+    ) -> dict[str, Any]:
+        return await service.delete_quarantine_upstream_accounts(
+            account_ids=payload.account_ids,
+        )
+
     @router.get("/accounts/{account_id}")
     async def account_detail(
         account_id: int,

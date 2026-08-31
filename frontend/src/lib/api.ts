@@ -1946,6 +1946,7 @@ export type AccountQuarantineLocalDeleteResult = {
   skippedAccountIds: number[]
   failedAccountIds: number[]
   failures: { id: number; error: string }[]
+  skippedNotQuarantinedAccountIds?: number[]
 }
 
 type AccountBatchEgressResult = {
@@ -2568,6 +2569,80 @@ async function deleteQuarantineLocal(
   return result
 }
 
+async function deleteQuarantineUpstream(
+  accountIds: number[]
+): Promise<AccountQuarantineLocalDeleteResult> {
+  const uniqueIds = Array.from(
+    new Set(
+      accountIds.filter(
+        (accountId) => Number.isSafeInteger(accountId) && accountId > 0
+      )
+    )
+  )
+  const skippedNotQuarantinedAccountIds: number[] = []
+  const result: AccountQuarantineLocalDeleteResult = {
+    requested: 0,
+    eligible: 0,
+    deleted: 0,
+    skippedAccountIds: [],
+    failedAccountIds: [],
+    failures: [],
+  }
+
+  for (
+    let start = 0;
+    start < uniqueIds.length;
+    start += ACCOUNT_BATCH_REQUEST_SIZE
+  ) {
+    const accountBatch = uniqueIds.slice(
+      start,
+      start + ACCOUNT_BATCH_REQUEST_SIZE
+    )
+    let batchResult: AccountQuarantineLocalDeleteResult | undefined
+    for (
+      let attempt = 1;
+      attempt <= ACCOUNT_BATCH_NETWORK_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        batchResult = await request<AccountQuarantineLocalDeleteResult>(
+          '/accounts/quarantine/upstream',
+          {
+            method: 'DELETE',
+            body: JSON.stringify({ account_ids: accountBatch }),
+          }
+        )
+        break
+      } catch (error) {
+        const retrying =
+          isRetryableAccountBatchError(error) &&
+          attempt < ACCOUNT_BATCH_NETWORK_ATTEMPTS
+        if (!retrying) throw error
+        await new Promise<void>((resolve) =>
+          globalThis.setTimeout(resolve, attempt * 250)
+        )
+      }
+    }
+    if (!batchResult) throw new Error('删除隔离区上游账号请求异常结束')
+    result.requested += batchResult.requested ?? accountBatch.length
+    result.eligible += batchResult.eligible ?? 0
+    result.deleted += batchResult.deleted ?? 0
+    result.skippedAccountIds.push(...(batchResult.skippedAccountIds ?? []))
+    result.failedAccountIds.push(...(batchResult.failedAccountIds ?? []))
+    result.failures.push(...(batchResult.failures ?? []))
+    skippedNotQuarantinedAccountIds.push(
+      ...(batchResult.skippedNotQuarantinedAccountIds ?? [])
+    )
+  }
+
+  result.skippedAccountIds = Array.from(new Set(result.skippedAccountIds))
+  result.failedAccountIds = Array.from(new Set(result.failedAccountIds))
+  result.skippedNotQuarantinedAccountIds = Array.from(
+    new Set(skippedNotQuarantinedAccountIds)
+  )
+  return result
+}
+
 async function deleteAccounts(
   accountIds: number[]
 ): Promise<AccountBatchDeleteResult> {
@@ -2881,6 +2956,7 @@ export const api = {
       { signal }
     ),
   deleteQuarantineLocal,
+  deleteQuarantineUpstream,
   updateAccountsEnabled,
   updateAccountsEgress,
   deleteAccounts,

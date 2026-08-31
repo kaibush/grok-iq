@@ -27,6 +27,7 @@ import {
   StickyNote,
   Trash2,
   Undo2,
+  UserX,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
@@ -800,6 +801,7 @@ export function QuarantinePage() {
   const [restorePriority, setRestorePriority] = useState('')
   const [disableOpen, setDisableOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteUpstreamOpen, setDeleteUpstreamOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [noteEditorId, setNoteEditorId] = useState<number | null>(null)
@@ -1216,10 +1218,62 @@ export function QuarantinePage() {
     },
   })
 
+  const deleteUpstreamMutation = useMutation({
+    mutationFn: (accountIds: number[]) =>
+      api.deleteQuarantineUpstream(accountIds),
+    onSuccess: (result, accountIds) => {
+      const skippedAccountIds = result.skippedAccountIds ?? []
+      const failedAccountIds = result.failedAccountIds ?? []
+      const skippedNotQuarantinedAccountIds =
+        result.skippedNotQuarantinedAccountIds ?? []
+      const retainedAccountIds = Array.from(
+        new Set([
+          ...skippedAccountIds,
+          ...failedAccountIds,
+          ...skippedNotQuarantinedAccountIds,
+          ...selected.filter((id) => !accountIds.includes(id)),
+        ])
+      )
+      setDeleteUpstreamOpen(false)
+      syncSelection(retainedAccountIds)
+      if (
+        failedAccountIds.length > 0 ||
+        skippedAccountIds.length > 0 ||
+        skippedNotQuarantinedAccountIds.length > 0
+      ) {
+        const details = [`已删除上游 ${result.deleted} 个账号`]
+        if (failedAccountIds.length) {
+          details.push(`${failedAccountIds.length} 个删除失败并保留选择`)
+        }
+        if (skippedAccountIds.length) {
+          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+        }
+        if (skippedNotQuarantinedAccountIds.length) {
+          details.push(
+            `${skippedNotQuarantinedAccountIds.length} 个账号不在隔离区并跳过`
+          )
+        }
+        toast.warning(details.join('；'))
+      } else {
+        toast.success(`已删除上游 ${result.deleted} 个账号`)
+      }
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['accounts'] })
+      void client.invalidateQueries({
+        queryKey: ['accounts', 'quarantine-stats'],
+      })
+      void client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+
   const restorePending = restoreMutation.isPending
   const disablePending = disableMutation.isPending
   const deletePending = deleteMutation.isPending
-  const selectionActionPending = restorePending || disablePending || deletePending
+  const deleteUpstreamPending = deleteUpstreamMutation.isPending
+  const selectionActionPending =
+    restorePending || disablePending || deletePending || deleteUpstreamPending
   const upstreamStatusLabel =
     isolationUpstreamStatusOptions.find(
       (option) => option.value === upstreamStatus
@@ -1255,8 +1309,9 @@ export function QuarantinePage() {
         description={
           <div className='space-y-2'>
             <p>
-              隔离后账号保留在本地并停用上游，不删除 grok2api
-              账号。可查看样本，恢复上游需确认，也可只删除本系统记录。
+              隔离后账号默认保留在本地并停用上游，不自动删除 grok2api
+              账号。可查看样本，恢复上游需确认；也可批量删除 grok2api
+              账号，或只删除本系统记录。
             </p>
             <p>
               来源包括人工移入、请求审计永久停用、探针按监控判定自动隔离，以及 grok2api 降智二次命中后的停用同步。请求审计页面的「高风险」不会直接把账号送进这里，要达到停用次数后才会进来。
@@ -1338,6 +1393,21 @@ export function QuarantinePage() {
                 onClick={() => setDisableOpen(true)}
               >
                 <PowerOff />
+              </ToolbarAction>
+              <ToolbarAction
+                label={
+                  selected.length > 0 && probeableSelected.length === 0
+                    ? '已选账号缺少上游记录，无法删除 grok2api 账号'
+                    : `删除已选 ${probeableSelected.length} 个账号的上游`
+                }
+                destructive
+                pending={deleteUpstreamPending}
+                disabled={
+                  selectionActionPending || probeableSelected.length === 0
+                }
+                onClick={() => setDeleteUpstreamOpen(true)}
+              >
+                <UserX />
               </ToolbarAction>
               <ToolbarAction
                 label={`删除已选 ${selected.length} 个账号的本系统记录`}
@@ -1821,6 +1891,48 @@ export function QuarantinePage() {
         isLoading={deletePending}
         disabled={selected.length === 0}
         handleConfirm={() => deleteMutation.mutate(selected)}
+      />
+      <ConfirmDialog
+        open={deleteUpstreamOpen}
+        onOpenChange={(open) => {
+          if (!open && !deleteUpstreamPending) setDeleteUpstreamOpen(false)
+        }}
+        title={`删除 ${probeableSelected.length} 个账号的上游？`}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              将通过 grok2api API 永久删除当前 {probeableSelected.length}{' '}
+              个有上游记录的账号，此操作不可撤销。
+            </p>
+            <p className='font-medium text-foreground'>
+              这不会删除 GrokIQ 本地评估、样本和隔离记录；那些会保留，直到使用「删除本系统记录」。
+            </p>
+            <p className='text-muted-foreground'>
+              正在执行探针或等待账号设置恢复的账号会被跳过并保留选择。
+            </p>
+            <p className='text-muted-foreground'>
+              已选但标记为上游缺失的账号不会包含在这次删除里。
+            </p>
+          </div>
+        }
+        cancelBtnText='取消'
+        confirmText={
+          deleteUpstreamPending ? (
+            <>
+              <Loader2 className='animate-spin' />
+              删除中…
+            </>
+          ) : (
+            <>
+              <UserX />
+              确认删除上游
+            </>
+          )
+        }
+        destructive
+        isLoading={deleteUpstreamPending}
+        disabled={probeableSelected.length === 0}
+        handleConfirm={() => deleteUpstreamMutation.mutate(probeableSelected)}
       />
       <Dialog open={upstreamOpen} onOpenChange={setUpstreamOpen}>
         <DialogContent size='wide' className='overflow-hidden'>
