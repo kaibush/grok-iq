@@ -13,7 +13,11 @@ from sqlalchemy import delete, inspect
 from app.analyzer import Thresholds
 from app.core.clock import to_app_timezone, utc_now
 from app.core.config import Settings
-from app.integrations.grok2api.client import ChatProbeResult, IntegrationError, model_account_bind_window_message
+from app.integrations.grok2api.client import (
+    ChatProbeResult,
+    IntegrationError,
+    model_account_bind_window_message,
+)
 from app.persistence.account_repository import (
     ALL_EGRESS_RISK_MIGRATION_KEY,
     FIXED_EGRESS_RISK_MIGRATION_KEY,
