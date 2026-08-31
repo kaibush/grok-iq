@@ -551,6 +551,10 @@ class Grok2APIClient:
         cursor: str = "",
         page_size: int = 200,
         period: str = "24h",
+        key: str = "",
+        sort_by: str = "createdAt",
+        sort_order: str = "desc",
+        timeout: float = 180,
     ) -> dict[str, Any]:
         """Read one cursor page from grok2api's request-audit ledger.
 
@@ -563,15 +567,18 @@ class Grok2APIClient:
             "pagination": "cursor",
             "period": period,
             "pageSize": max(1, min(int(page_size), 500)),
-            "sortBy": "createdAt",
-            "sortOrder": "desc",
+            "sortBy": sort_by,
+            "sortOrder": sort_order,
         }
         if cursor:
             query["cursor"] = cursor
+        if key:
+            query["key"] = key
         return await self.admin_request(
             "GET",
             "/api/admin/v1/request-audits",
             params=query,
+            timeout=timeout,
         )
 
     async def set_egress_nodes_enabled(

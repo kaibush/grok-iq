@@ -16,6 +16,8 @@ EXPECTED_ROUTES = {
     ("GET", "/api/health"),
     ("GET", "/api/public/upstream-accounts"),
     ("POST", "/api/public/client-key-quota"),
+    ("GET", "/api/client-keys"),
+    ("GET", "/api/client-keys/usage"),
     ("GET", "/api/system/version"),
     ("POST", "/api/system/update/check"),
     ("GET", "/api/dashboard"),
