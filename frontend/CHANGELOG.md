@@ -329,6 +329,27 @@ but introduces breaking changes.
 - update sidebar logo and title
 - **ui**: remove unnecessary spacing
 - remove unused files
+## v0.7.2 (2026-08-31)
+
+Please upgrade. Opening the workspace dock and switching pages could keep every visited page mounted, grow a single browser tab to about 2GB, and crash the console.
+
+### Fix
+
+- unmount inactive workspace dock pages so switching tabs no longer retains four large React trees and background polling
+- stop request-audit live refresh while the browser tab is in the background
+- shorten query cache lifetime and drop page-specific caches when a dock tab is closed
+- pin old grok2api accounts via quality-guard and quality-test
+- probe old grok2api accounts without model account bind
+- explain official grok2api model bind window
+- keep media-input thinking zero from auto-disable
+
+### Feat
+
+- batch-delete grok2api accounts from the isolation zone
+- add admin client key quota and usage APIs and pages
+- show client key usage on public quota lookup
+- sync grok2api degrade-disable into the isolation zone
+
 ## v0.7.1 (2026-08-30)
 
 ### Feat

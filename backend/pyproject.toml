@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grok-iq-backend"
-version = "0.7.1"
+version = "0.7.2"
 description = "GrokIQ account quality probe and risk analysis service for grok2api"
 requires-python = ">=3.11"
 license = "MIT"
