@@ -28,11 +28,17 @@ class ClientKeyQuotaService:
         self.limiter = limiter or SlidingWindowRateLimiter()
 
     async def lookup(self, api_key: str, *, client_ip: str) -> dict[str, Any]:
+        item = await self.lookup_item(api_key, client_ip=client_ip)
+        if item is None:
+            return {"found": False}
+        return _quota_payload(item)
+
+    async def lookup_item(self, api_key: str, *, client_ip: str) -> dict[str, Any] | None:
         self._consume_rate_limit(client_ip)
         prefix = _parse_prefix(api_key)
         if prefix is None:
-            return {"found": False}
-        return await self._find_quota(prefix, api_key)
+            return None
+        return await self._find_item(prefix, api_key)
 
     def _consume_rate_limit(self, client_ip: str) -> None:
         allowed_short, retry_short = self.limiter.allow(
@@ -48,7 +54,7 @@ class ClientKeyQuotaService:
         if not allowed_short or not allowed_long:
             raise RateLimitExceeded(retry_after=max(retry_short, retry_long, 1))
 
-    async def _find_quota(self, prefix: str, api_key: str) -> dict[str, Any]:
+    async def _find_item(self, prefix: str, api_key: str) -> dict[str, Any] | None:
         secret_fetches = 0
         page = 1
         while page <= MAX_PAGES:
@@ -69,20 +75,20 @@ class ClientKeyQuotaService:
                 if not key_id:
                     continue
                 if secret_fetches >= MAX_SECRET_FETCHES:
-                    return {"found": False}
+                    return None
                 secret_fetches += 1
                 try:
                     secret = await self.client.get_client_key_secret(key_id)
                 except IntegrationError:
                     continue
                 if _secrets_match(secret, api_key):
-                    return _quota_payload(item)
+                    return item
             page_size = int(payload.get("pageSize") or PAGE_SIZE)
             total = int(payload.get("total") or 0)
             if page_size <= 0 or page * page_size >= total:
                 break
             page += 1
-        return {"found": False}
+        return None
 
 
 def _parse_prefix(raw: str) -> str | None:

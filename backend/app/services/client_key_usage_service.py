@@ -6,7 +6,7 @@ from typing import Any
 
 from app.core.clock import utc_now
 from app.integrations.grok2api.client import Grok2APIClient
-from app.services.client_key_quota_service import _quota_payload
+from app.services.client_key_quota_service import ClientKeyQuotaService
 
 MAX_AUDIT_KEYS = 50
 MAX_AUDIT_PAGES = 40
@@ -22,30 +22,42 @@ AUDIT_PERIODS = {
 
 
 class ClientKeyUsageService:
-    def __init__(self, client: Grok2APIClient) -> None:
-        self.client = client
-
-    async def list_keys(
+    def __init__(
         self,
+        client: Grok2APIClient,
+        quota_service: ClientKeyQuotaService | None = None,
+    ) -> None:
+        self.client = client
+        self.quota_service = quota_service or ClientKeyQuotaService(client)
+
+    async def lookup_public_usage(
+        self,
+        api_key: str,
         *,
-        page: int = 1,
-        page_size: int = 50,
-        search: str = "",
+        client_ip: str,
+        period: str = "24h",
+        start: str = "",
+        end: str = "",
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {
-            "page": max(1, page),
-            "pageSize": max(1, min(page_size, 100)),
-        }
-        if search.strip():
-            params["search"] = search.strip()
-        payload = await self.client.list_client_keys(**params)
-        items = _list_items(payload)
-        data = payload if isinstance(payload, dict) else {}
+        item = await self.quota_service.lookup_item(api_key, client_ip=client_ip)
+        if item is None:
+            return {"found": False}
+        key_id = str(item.get("id") or "")
+        if not key_id:
+            return {"found": False}
+        summary = await self.audit_summary(
+            key_ids=[key_id],
+            period=period,
+            start=start,
+            end=end,
+        )
         return {
-            "items": [_normalize_key(item) for item in items],
-            "total": _list_total(payload, len(items)),
-            "page": _as_int(data.get("page"), params["page"]),
-            "pageSize": _as_int(data.get("pageSize"), params["pageSize"]),
+            "found": True,
+            "period": summary["period"],
+            "sourcePeriod": summary["sourcePeriod"],
+            "range": summary["range"],
+            "truncated": summary["truncated"],
+            "usage": summary["total"],
         }
 
     async def audit_summary(
@@ -316,15 +328,6 @@ def _list_items(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _list_total(payload: Any, fallback: int) -> int:
-    if isinstance(payload, dict):
-        try:
-            return int(payload.get("total") or fallback)
-        except (TypeError, ValueError):
-            return fallback
-    return fallback
-
-
 def _as_int(value: Any, fallback: int = 0) -> int:
     if value is None or value == "":
         return fallback
@@ -333,34 +336,3 @@ def _as_int(value: Any, fallback: int = 0) -> int:
     except (TypeError, ValueError):
         return fallback
 
-
-def _normalize_key(item: dict[str, Any]) -> dict[str, Any]:
-    quota = _quota_payload(
-        {
-            "name": str(item.get("name") or ""),
-            "prefix": str(item.get("prefix") or ""),
-            "enabled": bool(item.get("enabled", True)),
-            "expiresAt": item.get("expiresAt") or item.get("expires_at"),
-            "lastUsedAt": item.get("lastUsedAt") or item.get("last_used_at"),
-            "billingLimitUsdTicks": item.get(
-                "billingLimitUsdTicks", item.get("billing_limit_usd_ticks")
-            ),
-            "billedUsageUsdTicks": item.get(
-                "billedUsageUsdTicks", item.get("billed_usage_usd_ticks")
-            ),
-        }
-    )
-    return {
-        "id": str(item.get("id") or ""),
-        "name": quota["name"],
-        "prefix": quota["prefix"],
-        "enabled": quota["enabled"],
-        "expired": quota["expired"],
-        "expiresAt": quota["expiresAt"],
-        "lastUsedAt": quota["lastUsedAt"],
-        "unlimited": quota["unlimited"],
-        "billingLimitUsd": quota["billingLimitUsd"],
-        "billedUsageUsd": quota["billedUsageUsd"],
-        "remainingUsd": quota["remainingUsd"],
-        "usagePercent": quota["usagePercent"],
-    }

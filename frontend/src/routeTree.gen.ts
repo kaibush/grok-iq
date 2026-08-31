@@ -35,7 +35,6 @@ import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
 import { Route as AuthenticatedGuideIndexRouteImport } from './routes/_authenticated/guide/index'
 import { Route as AuthenticatedEgressNodesIndexRouteImport } from './routes/_authenticated/egress-nodes/index'
-import { Route as AuthenticatedClientKeysIndexRouteImport } from './routes/_authenticated/client-keys/index'
 import { Route as AuthenticatedAccountsIndexRouteImport } from './routes/_authenticated/accounts/index'
 import { Route as AuthenticatedSettingsVersionRouteImport } from './routes/_authenticated/settings/version'
 import { Route as AuthenticatedSettingsRiskRouteImport } from './routes/_authenticated/settings/risk'
@@ -188,12 +187,6 @@ const AuthenticatedEgressNodesIndexRoute =
     path: '/egress-nodes/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedClientKeysIndexRoute =
-  AuthenticatedClientKeysIndexRouteImport.update({
-    id: '/client-keys/',
-    path: '/client-keys/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedAccountsIndexRoute =
   AuthenticatedAccountsIndexRouteImport.update({
     id: '/accounts/',
@@ -301,7 +294,6 @@ export interface FileRoutesByFullPath {
   '/settings/risk': typeof AuthenticatedSettingsRiskRoute
   '/settings/version': typeof AuthenticatedSettingsVersionRoute
   '/accounts/': typeof AuthenticatedAccountsIndexRoute
-  '/client-keys/': typeof AuthenticatedClientKeysIndexRoute
   '/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/guide/': typeof AuthenticatedGuideIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
@@ -341,7 +333,6 @@ export interface FileRoutesByTo {
   '/settings/risk': typeof AuthenticatedSettingsRiskRoute
   '/settings/version': typeof AuthenticatedSettingsVersionRoute
   '/accounts': typeof AuthenticatedAccountsIndexRoute
-  '/client-keys': typeof AuthenticatedClientKeysIndexRoute
   '/egress-nodes': typeof AuthenticatedEgressNodesIndexRoute
   '/guide': typeof AuthenticatedGuideIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
@@ -384,7 +375,6 @@ export interface FileRoutesById {
   '/_authenticated/settings/risk': typeof AuthenticatedSettingsRiskRoute
   '/_authenticated/settings/version': typeof AuthenticatedSettingsVersionRoute
   '/_authenticated/accounts/': typeof AuthenticatedAccountsIndexRoute
-  '/_authenticated/client-keys/': typeof AuthenticatedClientKeysIndexRoute
   '/_authenticated/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/_authenticated/guide/': typeof AuthenticatedGuideIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
@@ -427,7 +417,6 @@ export interface FileRouteTypes {
     | '/settings/risk'
     | '/settings/version'
     | '/accounts/'
-    | '/client-keys/'
     | '/egress-nodes/'
     | '/guide/'
     | '/plans/'
@@ -467,7 +456,6 @@ export interface FileRouteTypes {
     | '/settings/risk'
     | '/settings/version'
     | '/accounts'
-    | '/client-keys'
     | '/egress-nodes'
     | '/guide'
     | '/plans'
@@ -509,7 +497,6 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/risk'
     | '/_authenticated/settings/version'
     | '/_authenticated/accounts/'
-    | '/_authenticated/client-keys/'
     | '/_authenticated/egress-nodes/'
     | '/_authenticated/guide/'
     | '/_authenticated/plans/'
@@ -723,13 +710,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEgressNodesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/client-keys/': {
-      id: '/_authenticated/client-keys/'
-      path: '/client-keys'
-      fullPath: '/client-keys/'
-      preLoaderRoute: typeof AuthenticatedClientKeysIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/accounts/': {
       id: '/_authenticated/accounts/'
       path: '/accounts'
@@ -865,7 +845,6 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedRequestAuditsScheduleRoute: typeof AuthenticatedRequestAuditsScheduleRoute
   AuthenticatedRequestAuditsWorkspaceRoute: typeof AuthenticatedRequestAuditsWorkspaceRoute
   AuthenticatedAccountsIndexRoute: typeof AuthenticatedAccountsIndexRoute
-  AuthenticatedClientKeysIndexRoute: typeof AuthenticatedClientKeysIndexRoute
   AuthenticatedEgressNodesIndexRoute: typeof AuthenticatedEgressNodesIndexRoute
   AuthenticatedGuideIndexRoute: typeof AuthenticatedGuideIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
@@ -888,7 +867,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedRequestAuditsWorkspaceRoute:
     AuthenticatedRequestAuditsWorkspaceRoute,
   AuthenticatedAccountsIndexRoute: AuthenticatedAccountsIndexRoute,
-  AuthenticatedClientKeysIndexRoute: AuthenticatedClientKeysIndexRoute,
   AuthenticatedEgressNodesIndexRoute: AuthenticatedEgressNodesIndexRoute,
   AuthenticatedGuideIndexRoute: AuthenticatedGuideIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,

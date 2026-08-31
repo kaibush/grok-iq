@@ -59,10 +59,6 @@ export type PublicClientKeyQuotaLookup =
   | { found: false }
   | PublicClientKeyQuota
 
-export type ClientKey = Omit<PublicClientKeyQuota, 'found'> & {
-  id: string
-}
-
 export type ClientKeyUsagePeriod = '24h' | '7d' | '30d' | '90d' | 'custom'
 
 export type ClientKeyUsageTotals = {
@@ -80,19 +76,18 @@ export type ClientKeyUsageTotals = {
   successRate: number
 }
 
-export type ClientKeyUsageRow = ClientKeyUsageTotals & {
-  id: string
-  name: string
-}
-
-export type ClientKeyUsageSummary = {
+export type PublicClientKeyUsage = {
+  found: true
   period: string
   sourcePeriod: string
   range: { start: string; end: string }
-  total: ClientKeyUsageTotals
-  keys: ClientKeyUsageRow[]
   truncated: boolean
+  usage: ClientKeyUsageTotals
 }
+
+export type PublicClientKeyUsageLookup =
+  | { found: false }
+  | PublicClientKeyUsage
 
 export type AuthSession = {
   accessToken: string
@@ -2745,31 +2740,22 @@ export const api = {
       skipAuth: true,
       body: JSON.stringify({ apiKey }),
     }),
-  clientKeys: (
-    params: { page?: number; pageSize?: number; search?: string } = {}
-  ) =>
-    request<Page<ClientKey>>(
-      `/client-keys${query({
-        page: params.page,
-        pageSize: params.pageSize,
-        search: params.search?.trim() || undefined,
-      })}`
-    ),
-  clientKeyUsage: (params: {
-    keyIds: string[]
+  lookupPublicClientKeyUsage: (params: {
+    apiKey: string
     period: ClientKeyUsagePeriod
     start?: string
     end?: string
-  }) => {
-    const search = new URLSearchParams()
-    search.set('period', params.period)
-    if (params.start) search.set('start', params.start)
-    if (params.end) search.set('end', params.end)
-    for (const id of params.keyIds) {
-      if (id.trim()) search.append('keyIds', id.trim())
-    }
-    return request<ClientKeyUsageSummary>(`/client-keys/usage?${search}`)
-  },
+  }) =>
+    request<PublicClientKeyUsageLookup>('/public/client-key-usage', {
+      method: 'POST',
+      skipAuth: true,
+      body: JSON.stringify({
+        apiKey: params.apiKey,
+        period: params.period,
+        start: params.start,
+        end: params.end,
+      }),
+    }),
   systemVersion: () =>
     request<SystemVersionInfo>('/system/version', { cache: 'no-store' }),
   checkSystemUpdate: () =>

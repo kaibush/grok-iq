@@ -7,7 +7,8 @@ from fastapi import APIRouter, Request, Response
 from app.integrations.grok2api.client import Grok2APIClient
 from app.services.account_service import AccountService
 from app.services.client_key_quota_service import ClientKeyQuotaService
-from app.web.schemas import ClientKeyQuotaInput
+from app.services.client_key_usage_service import ClientKeyUsageService
+from app.web.schemas import ClientKeyQuotaInput, ClientKeyUsageInput
 
 from ._shared import disable_client_cache
 
@@ -18,6 +19,7 @@ def build_public_router(
 ) -> APIRouter:
     router = APIRouter()
     quota_service = ClientKeyQuotaService(client)
+    usage_service = ClientKeyUsageService(client, quota_service=quota_service)
 
     @router.get("/public/upstream-accounts")
     async def public_upstream_accounts(response: Response) -> dict[str, Any]:
@@ -32,6 +34,21 @@ def build_public_router(
     ) -> dict[str, Any]:
         disable_client_cache(response)
         return await quota_service.lookup(payload.api_key, client_ip=_client_ip(request))
+
+    @router.post("/public/client-key-usage")
+    async def public_client_key_usage(
+        payload: ClientKeyUsageInput,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        return await usage_service.lookup_public_usage(
+            payload.api_key,
+            client_ip=_client_ip(request),
+            period=payload.period,
+            start=payload.start,
+            end=payload.end,
+        )
 
     return router
 

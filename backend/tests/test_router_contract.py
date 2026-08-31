@@ -16,8 +16,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/health"),
     ("GET", "/api/public/upstream-accounts"),
     ("POST", "/api/public/client-key-quota"),
-    ("GET", "/api/client-keys"),
-    ("GET", "/api/client-keys/usage"),
+    ("POST", "/api/public/client-key-usage"),
     ("GET", "/api/system/version"),
     ("POST", "/api/system/update/check"),
     ("GET", "/api/dashboard"),
@@ -117,6 +116,7 @@ PUBLIC_PATHS = {
     "/api/health",
     "/api/public/upstream-accounts",
     "/api/public/client-key-quota",
+    "/api/public/client-key-usage",
     "/api/integrations/grok-register/account-created",
     "/api/integrations/grok-register/account-imported",
 }

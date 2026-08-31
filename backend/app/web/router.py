@@ -24,7 +24,6 @@ from .auth import build_admin_auth_dependency
 from .routes.accounts import build_accounts_router
 from .routes.auth import build_auth_router
 from .routes.chat import build_chat_router
-from .routes.client_keys import build_client_keys_router
 from .routes.egress import build_egress_router
 from .routes.exports import build_exports_router
 from .routes.health import build_health_router
@@ -112,7 +111,6 @@ def build_router(
         )
     )
     protected.include_router(build_chat_router(chat_service))
-    protected.include_router(build_client_keys_router(client))
     if request_audits is not None:
         protected.include_router(build_request_audits_router(request_audits))
     protected.include_router(build_sso_reports_router(sso_reports))

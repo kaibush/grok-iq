@@ -22,6 +22,12 @@ class ClientKeyQuotaInput(BaseModel):
     api_key: str = Field(alias="apiKey", min_length=8, max_length=256)
 
 
+class ClientKeyUsageInput(ClientKeyQuotaInput):
+    period: Literal["24h", "7d", "30d", "90d", "custom"] = "24h"
+    start: str = ""
+    end: str = ""
+
+
 class ChatProviderCreateInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
