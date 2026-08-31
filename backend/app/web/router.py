@@ -72,7 +72,7 @@ def build_router(
             auth=auth_service,
         )
     )
-    router.include_router(build_public_router(account_service, client))
+    router.include_router(build_public_router(account_service, client, auth_service))
     router.include_router(
         build_integrations_router(settings, register_integration)
     )

@@ -298,14 +298,20 @@ class AccountService:
             "pageSize": int(payload.get("pageSize") or page_size),
         }
 
-    async def public_upstream_account_summary(self) -> dict[str, Any]:
+    async def public_upstream_account_summary(
+        self, *, include_inventory: bool = False
+    ) -> dict[str, Any]:
         """Return sanitized grok2api account counts for the public status page.
 
         The browser never talks to grok2api. Only integer aggregates leave
         this process; tokens, account identities, and upstream error bodies
-        stay on the server.
+        stay on the server. Inventory counts stay admin-only.
         """
 
+        payload = await self._cached_public_upstream_summary()
+        return _public_upstream_view(payload, include_inventory=include_inventory)
+
+    async def _cached_public_upstream_summary(self) -> dict[str, Any]:
         cached = self._fresh_public_summary()
         if cached is not None:
             return cached
@@ -1632,6 +1638,28 @@ def _provider_counts(value: Any) -> dict[str, int]:
     return {
         "total": _count(payload.get("total")),
         "available": _count(payload.get("available")),
+    }
+
+
+_PUBLIC_INVENTORY_KEYS = (
+    "total",
+    "available",
+    "recovering",
+    "attention",
+    "recovery",
+    "issues",
+)
+
+
+def _public_upstream_view(
+    payload: dict[str, Any], *, include_inventory: bool
+) -> dict[str, Any]:
+    if include_inventory:
+        return dict(payload)
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in _PUBLIC_INVENTORY_KEYS
     }
 
 

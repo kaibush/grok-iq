@@ -23,18 +23,18 @@ export type PublicUpstreamProviderCounts = {
 export type PublicUpstreamAccountSummary = {
   reachable: boolean
   updatedAt: string | null
-  total: number
-  available: number
-  recovering: number
-  attention: number
   risk: number
   providers: Record<PublicUpstreamProvider, PublicUpstreamProviderCounts>
-  recovery: {
+  total?: number
+  available?: number
+  recovering?: number
+  attention?: number
+  recovery?: {
     cooldown: number
     waitingReset: number
     probing: number
   }
-  issues: {
+  issues?: {
     disabled: number
     reauthRequired: number
   }
@@ -2823,7 +2823,7 @@ export const api = {
   health: () => request<HealthResponse>('/health'),
   publicUpstreamAccounts: () =>
     request<PublicUpstreamAccountSummary>('/public/upstream-accounts', {
-      skipAuth: true,
+      skipAuth: !authorizationHeaders().Authorization,
     }),
   publicUpstreamUsage: () =>
     request<PublicUpstreamUsageOverview>('/public/upstream-usage', {

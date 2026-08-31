@@ -265,16 +265,28 @@ async def test_public_upstream_summary_returns_counts_only(tmp_path: Path):
         probes=ProbeRepository(database),
     )
 
-    result = await service.public_upstream_account_summary()
+    public = await service.public_upstream_account_summary()
+    admin = await service.public_upstream_account_summary(include_inventory=True)
 
-    assert result["reachable"] is True
-    assert result["total"] == 12
-    assert result["available"] == 7
-    assert result["providers"]["grok_build"] == {"total": 8, "available": 5}
-    assert result["recovery"] == {"cooldown": 1, "waitingReset": 1, "probing": 1}
-    assert result["issues"] == {"disabled": 1, "reauthRequired": 1}
-    assert "token" not in result
-    assert "accounts" not in result
+    assert public["reachable"] is True
+    assert "total" not in public
+    assert "available" not in public
+    assert "recovering" not in public
+    assert "attention" not in public
+    assert "recovery" not in public
+    assert "issues" not in public
+    assert public["risk"] == 1
+    assert public["providers"]["grok_build"] == {"total": 8, "available": 5}
+    assert "token" not in public
+    assert "accounts" not in public
+
+    assert admin["reachable"] is True
+    assert admin["total"] == 12
+    assert admin["available"] == 7
+    assert admin["recovering"] == 3
+    assert admin["attention"] == 2
+    assert admin["recovery"] == {"cooldown": 1, "waitingReset": 1, "probing": 1}
+    assert admin["issues"] == {"disabled": 1, "reauthRequired": 1}
     database.dispose()
 
 
@@ -316,9 +328,11 @@ async def test_public_upstream_summary_hides_upstream_errors(tmp_path: Path):
     )
 
     result = await service.public_upstream_account_summary()
+    admin = await service.public_upstream_account_summary(include_inventory=True)
 
     assert result["reachable"] is False
-    assert result["total"] == 0
+    assert "total" not in result
+    assert admin["total"] == 0
     assert "jwt" not in str(result).lower()
     assert "admin" not in str(result).lower()
     database.dispose()

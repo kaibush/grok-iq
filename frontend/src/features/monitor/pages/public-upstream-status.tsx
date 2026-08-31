@@ -22,7 +22,8 @@ import {
   type PublicUpstreamUsagePeriod,
   type PublicUpstreamUsageWindow,
 } from '@/lib/api'
-import { formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
+import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 import { Badge } from '@/components/ui/badge'
 import { ProgressBar } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
@@ -103,8 +104,9 @@ const emptySummary: PublicUpstreamAccountSummary = {
 }
 
 export function PublicUpstreamStatusPage() {
+  const isAdmin = Boolean(useAuthStore((state) => state.auth.accessToken))
   const query = useQuery({
-    queryKey: ['public', 'upstream-accounts'],
+    queryKey: ['public', 'upstream-accounts', isAdmin],
     queryFn: api.publicUpstreamAccounts,
     refetchInterval: 15_000,
     retry: 1,
@@ -224,42 +226,51 @@ export function PublicUpstreamStatusPage() {
           </Card>
         )}
 
-        <section className='grid gap-4 sm:grid-cols-2 xl:grid-cols-5'>
-          <StatCard
-            label='账号总数'
-            value={ready ? formatNumber(data.total, 0) : '—'}
-            detail={
-              ready
-                ? `${formatNumber(data.available, 0)} 个当前可调度`
-                : '读取中'
-            }
-            icon={UsersRound}
-            tone='sky'
-            loading={query.isLoading && !hasData}
-            index={0}
-          />
-          <StatCard
-            label='恢复中'
-            value={ready ? formatNumber(data.recovering, 0) : '—'}
-            detail='冷却、待重置或检测中'
-            icon={TimerReset}
-            tone='amber'
-            loading={query.isLoading && !hasData}
-            index={1}
-          />
-          <StatCard
-            label='需关注'
-            value={ready ? formatNumber(data.attention, 0) : '—'}
-            detail={
-              ready
-                ? `${formatNumber(data.issues.disabled, 0)} 停用 · ${formatNumber(data.issues.reauthRequired, 0)} 失效`
-                : '读取中'
-            }
-            icon={AlertTriangle}
-            tone='amber'
-            loading={query.isLoading && !hasData}
-            index={2}
-          />
+        <section
+          className={cn(
+            'grid gap-4',
+            isAdmin ? 'sm:grid-cols-2 xl:grid-cols-5' : 'sm:grid-cols-2'
+          )}
+        >
+          {isAdmin ? (
+            <>
+              <StatCard
+                label='账号总数'
+                value={ready ? formatNumber(data.total, 0) : '—'}
+                detail={
+                  ready
+                    ? `${formatNumber(data.available, 0)} 个当前可调度`
+                    : '读取中'
+                }
+                icon={UsersRound}
+                tone='sky'
+                loading={query.isLoading && !hasData}
+                index={0}
+              />
+              <StatCard
+                label='恢复中'
+                value={ready ? formatNumber(data.recovering, 0) : '—'}
+                detail='冷却、待重置或检测中'
+                icon={TimerReset}
+                tone='amber'
+                loading={query.isLoading && !hasData}
+                index={1}
+              />
+              <StatCard
+                label='需关注'
+                value={ready ? formatNumber(data.attention, 0) : '—'}
+                detail={
+                  ready
+                    ? `${formatNumber(data.issues?.disabled, 0)} 停用 · ${formatNumber(data.issues?.reauthRequired, 0)} 失效`
+                    : '读取中'
+                }
+                icon={AlertTriangle}
+                tone='amber'
+                loading={query.isLoading && !hasData}
+                index={2}
+              />
+            </>
+          ) : null}
           <StatCard
             label='风险标记'
             value={ready ? formatNumber(data.risk, 0) : '—'}
@@ -267,17 +278,19 @@ export function PublicUpstreamStatusPage() {
             icon={ShieldAlert}
             tone='red'
             loading={query.isLoading && !hasData}
-            index={3}
+            index={isAdmin ? 3 : 0}
           />
-          <StatCard
-            label='可调度占比'
-            value={ready ? percent(data.available, data.total) : '—'}
-            detail='可调度 / 总数'
-            icon={Activity}
-            tone='emerald'
-            loading={query.isLoading && !hasData}
-            index={4}
-          />
+          {isAdmin ? (
+            <StatCard
+              label='可调度占比'
+              value={ready ? percent(data.available, data.total) : '—'}
+              detail='可调度 / 总数'
+              icon={Activity}
+              tone='emerald'
+              loading={query.isLoading && !hasData}
+              index={4}
+            />
+          ) : null}
         </section>
 
         <section className='grid gap-4 lg:grid-cols-3'>
@@ -328,48 +341,50 @@ export function PublicUpstreamStatusPage() {
           </div>
         </section>
 
-        <section className='grid gap-4 lg:grid-cols-2'>
-          <Card>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2 text-base'>
-                <TimerReset className='size-4 text-primary' />
-                恢复队列
-              </CardTitle>
-            </CardHeader>
-            <CardContent className='grid gap-3 sm:grid-cols-3'>
-              <CountTile
-                label='冷却中'
-                value={ready ? data.recovery.cooldown : null}
-              />
-              <CountTile
-                label='待重置'
-                value={ready ? data.recovery.waitingReset : null}
-              />
-              <CountTile
-                label='检测中'
-                value={ready ? data.recovery.probing : null}
-              />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className='flex items-center gap-2 text-base'>
-                <AlertTriangle className='size-4 text-primary' />
-                账号问题
-              </CardTitle>
-            </CardHeader>
-            <CardContent className='grid gap-3 sm:grid-cols-2'>
-              <CountTile
-                label='已停用'
-                value={ready ? data.issues.disabled : null}
-              />
-              <CountTile
-                label='需重新登录'
-                value={ready ? data.issues.reauthRequired : null}
-              />
-            </CardContent>
-          </Card>
-        </section>
+        {isAdmin ? (
+          <section className='grid gap-4 lg:grid-cols-2'>
+            <Card>
+              <CardHeader>
+                <CardTitle className='flex items-center gap-2 text-base'>
+                  <TimerReset className='size-4 text-primary' />
+                  恢复队列
+                </CardTitle>
+              </CardHeader>
+              <CardContent className='grid gap-3 sm:grid-cols-3'>
+                <CountTile
+                  label='冷却中'
+                  value={ready ? data.recovery?.cooldown ?? null : null}
+                />
+                <CountTile
+                  label='待重置'
+                  value={ready ? data.recovery?.waitingReset ?? null : null}
+                />
+                <CountTile
+                  label='检测中'
+                  value={ready ? data.recovery?.probing ?? null : null}
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className='flex items-center gap-2 text-base'>
+                  <AlertTriangle className='size-4 text-primary' />
+                  账号问题
+                </CardTitle>
+              </CardHeader>
+              <CardContent className='grid gap-3 sm:grid-cols-2'>
+                <CountTile
+                  label='已停用'
+                  value={ready ? data.issues?.disabled ?? null : null}
+                />
+                <CountTile
+                  label='需重新登录'
+                  value={ready ? data.issues?.reauthRequired ?? null : null}
+                />
+              </CardContent>
+            </Card>
+          </section>
+        ) : null}
 
         <p className='text-xs text-muted-foreground'>
           最近更新：{hasData ? formatDate(data.updatedAt) : '—'} · 每 15
@@ -523,9 +538,9 @@ function CountTile({
   )
 }
 
-function percent(part: number, total: number) {
+function percent(part?: number, total?: number) {
   if (!total) return '—'
-  return `${Math.round((part / total) * 100)}%`
+  return `${Math.round(((part ?? 0) / total) * 100)}%`
 }
 
 function percentValue(value: number) {
