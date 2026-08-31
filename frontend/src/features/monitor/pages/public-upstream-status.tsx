@@ -14,6 +14,7 @@ import {
   Webhook,
 } from 'lucide-react'
 import { IconGithub } from '@/assets/brand-icons'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   api,
   type PublicUpstreamAccountSummary,
@@ -22,11 +23,10 @@ import {
 } from '@/lib/api'
 import { formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
-import { useAuthStore } from '@/stores/auth-store'
 import { Badge } from '@/components/ui/badge'
-import { ProgressBar } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ProgressBar } from '@/components/ui/progress'
 import {
   Tooltip,
   TooltipContent,
@@ -91,6 +91,8 @@ export function PublicUpstreamStatusPage() {
     refetchInterval: 15_000,
     retry: 1,
   })
+  // usageRefresh is a one-shot fetch flag, not part of the cache identity.
+  // eslint-disable-next-line @tanstack/query/exhaustive-deps
   const usageQuery = useQuery({
     queryKey: ['public', 'upstream-usage', period],
     queryFn: async () => {
@@ -308,15 +310,15 @@ export function PublicUpstreamStatusPage() {
               <CardContent className='grid gap-3 sm:grid-cols-3'>
                 <CountTile
                   label='冷却中'
-                  value={ready ? data.recovery?.cooldown ?? null : null}
+                  value={ready ? (data.recovery?.cooldown ?? null) : null}
                 />
                 <CountTile
                   label='待重置'
-                  value={ready ? data.recovery?.waitingReset ?? null : null}
+                  value={ready ? (data.recovery?.waitingReset ?? null) : null}
                 />
                 <CountTile
                   label='检测中'
-                  value={ready ? data.recovery?.probing ?? null : null}
+                  value={ready ? (data.recovery?.probing ?? null) : null}
                 />
               </CardContent>
             </Card>
@@ -330,11 +332,11 @@ export function PublicUpstreamStatusPage() {
               <CardContent className='grid gap-3 sm:grid-cols-2'>
                 <CountTile
                   label='已停用'
-                  value={ready ? data.issues?.disabled ?? null : null}
+                  value={ready ? (data.issues?.disabled ?? null) : null}
                 />
                 <CountTile
                   label='需重新登录'
-                  value={ready ? data.issues?.reauthRequired ?? null : null}
+                  value={ready ? (data.issues?.reauthRequired ?? null) : null}
                 />
               </CardContent>
             </Card>
@@ -399,9 +401,7 @@ function ProviderCard({
             </div>
             <p className='mt-1 text-xs text-muted-foreground'>{meta.hint}</p>
           </div>
-          <Badge variant='outline'>
-            {ready ? `${capacity}%` : '—'}
-          </Badge>
+          <Badge variant='outline'>{ready ? `${capacity}%` : '—'}</Badge>
         </div>
         <ProgressBar className='h-2' value={ready ? capacity : 0} />
         <div className='flex items-center justify-between text-sm'>
@@ -418,7 +418,8 @@ function providerCapacity(counts: {
   total?: number
   available?: number
 }) {
-  if (counts.capacity != null) return Math.max(0, Math.min(100, counts.capacity))
+  if (counts.capacity != null)
+    return Math.max(0, Math.min(100, counts.capacity))
   if (!counts.total) return 0
   return Math.round(((counts.available ?? 0) / counts.total) * 100)
 }

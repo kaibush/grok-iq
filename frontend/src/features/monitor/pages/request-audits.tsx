@@ -1,16 +1,16 @@
-import {
-  useDeferredValue,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
+import { useDeferredValue, useMemo, useState, type ReactNode } from 'react'
 import {
   keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router'
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearch,
+} from '@tanstack/react-router'
 import {
   Activity,
   AlertTriangle,
@@ -76,7 +76,6 @@ import {
 import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
-import { EnabledBadge } from '@/components/enabled-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -124,9 +123,10 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { ActionToolbar, ToolbarAction } from '@/components/action-toolbar'
-import { ExportMenu } from '@/components/export-menu'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { CopyableText } from '@/components/copy-button'
+import { EnabledBadge } from '@/components/enabled-badge'
+import { ExportMenu } from '@/components/export-menu'
 import { InfoTooltip } from '@/components/info-tooltip'
 import { EmptyState, LoadingState, Page, PageHeader } from '@/components/page'
 import { SelectionToolbar } from '@/components/selection-toolbar'
@@ -219,11 +219,12 @@ const requestAuditPageHelp = (
     </p>
     <p>
       单条 high：高速 TPS（达到强异常阈值）直接高风险；无媒体输入时思考连续为 0
-      达到模型策略次数后升为高风险。普通 TPS 和 Media Input（含思考为 0）只观察。
+      达到模型策略次数后升为高风险。普通 TPS 和 Media Input（含思考为
+      0）只观察。
     </p>
     <p>
-      自动停用看累计次数，不是看这一条：高速 TPS
-      默认 2 次，思考为 0 按策略连续次数。探针监控判定是另一套累计规则，不会处理这里的高风险。
+      自动停用看累计次数，不是看这一条：高速 TPS 默认 2 次，思考为 0
+      按策略连续次数。探针监控判定是另一套累计规则，不会处理这里的高风险。
     </p>
   </div>
 )
@@ -238,7 +239,8 @@ const requestAuditAutoDisableHelp = (
       连续达到策略次数后，会永久停用并移入隔离区。Media Input 不会因此停用。
     </p>
     <p>
-      不再做停用前 SSO 复检，也不再把 TPS-only 只当观察。探针「自动停用高风险账号」不会处理请求审计高风险。
+      不再做停用前 SSO 复检，也不再把 TPS-only
+      只当观察。探针「自动停用高风险账号」不会处理请求审计高风险。
     </p>
   </div>
 )
@@ -250,7 +252,8 @@ const requestAuditRiskEvidenceHelp = (
       就会标高风险，但要达到次数才自动停用。
     </p>
     <p>
-      思考 0、Media Input 用短标签表示命中规则；完整原因、次数和处置详情点「证据」。
+      思考 0、Media Input
+      用短标签表示命中规则；完整原因、次数和处置详情点「证据」。
     </p>
   </div>
 )
@@ -259,8 +262,9 @@ const requestAuditRecordRiskHelp = (
   <div className='space-y-2'>
     <p>单条请求的风险等级，不等于账号已经被停用。</p>
     <p>
-      高速 TPS 直接高风险；无媒体输入时思考为 0 先观察，连续达到策略次数后升为高风险。普通
-      TPS 和 Media Input（含思考为 0）保持观察，避免误判隔离或停用。自动停用看累计次数。
+      高速 TPS 直接高风险；无媒体输入时思考为 0
+      先观察，连续达到策略次数后升为高风险。普通 TPS 和 Media Input（含思考为
+      0）保持观察，避免误判隔离或停用。自动停用看累计次数。
     </p>
   </div>
 )
@@ -305,10 +309,7 @@ const workspaceRiskLabels: Record<WorkspaceRiskFilter, string> = {
   normal: '正常',
 }
 
-function clientKeyLabel(row: {
-  clientKeyName?: string
-  clientKeyId?: string
-}) {
+function clientKeyLabel(row: { clientKeyName?: string; clientKeyId?: string }) {
   const name = row.clientKeyName?.trim() || ''
   const id = row.clientKeyId?.trim() || ''
   if (name) return name
@@ -634,11 +635,7 @@ function RiskBadge({
   thresholds: RequestAuditThresholds
 }) {
   const label =
-    value === 'normal'
-      ? '正常'
-      : value === 'watch'
-        ? '观察'
-        : '高风险'
+    value === 'normal' ? '正常' : value === 'watch' ? '观察' : '高风险'
   return (
     <Badge
       variant={riskVariant[value]}
@@ -647,7 +644,7 @@ function RiskBadge({
           ? `达到 ${formatNumber(thresholds.high)} TPS，或命中已启用的连续高风险规则`
           : value === 'watch'
             ? `达到 ${formatNumber(thresholds.watch)} TPS，或命中观察型规则`
-          : undefined
+            : undefined
       }
     >
       {label}
@@ -662,7 +659,6 @@ function Tps({ value }: { value: number | null | undefined }) {
     </span>
   )
 }
-
 
 function accountHasRiskEvidence(account: RequestAuditAccountRisk) {
   return (
@@ -751,7 +747,8 @@ function AccountRiskEvidenceCell({
                 <div className='space-y-1'>
                   <div className='text-xs font-medium'>停用来源</div>
                   <p className='text-[11px] leading-5'>
-                    {account.disposition.sourceLabel || account.disposition.source}
+                    {account.disposition.sourceLabel ||
+                      account.disposition.source}
                     {account.disposition.actionLabel
                       ? ` · ${account.disposition.actionLabel}`
                       : ''}
@@ -768,7 +765,9 @@ function AccountRiskEvidenceCell({
                   ))}
                 </ul>
               ) : (
-                <p className='text-[11px] text-muted-foreground'>暂无规则说明</p>
+                <p className='text-[11px] text-muted-foreground'>
+                  暂无规则说明
+                </p>
               )}
               {(account.reasoningZeroCount > 0 ||
                 account.mediaInputCount > 0) && (
@@ -799,8 +798,9 @@ function AccountRiskEvidenceCell({
                   </div>
                   {account.preDisableCheck.appliedPriority != null && (
                     <div className='font-mono text-muted-foreground'>
-                      优先级 {account.preDisableCheck.previousPriority ?? '未知'}{' '}
-                      → {account.preDisableCheck.appliedPriority}
+                      优先级{' '}
+                      {account.preDisableCheck.previousPriority ?? '未知'} →{' '}
+                      {account.preDisableCheck.appliedPriority}
                     </div>
                   )}
                 </div>
@@ -1228,7 +1228,8 @@ export function RequestAuditsPage() {
   const search = isActive ? readRequestAuditsSearch(rawSearch) : {}
   const accountFromUrl = search.account?.trim() ?? ''
   const pinnedAccountId = pinnedAccountIdFromSearch(search)
-  const perspective: Perspective = search.view === 'nodes' ? 'nodes' : 'accounts'
+  const perspective: Perspective =
+    search.view === 'nodes' ? 'nodes' : 'accounts'
   const [cachedTab, setCachedTab] = useState<RequestAuditTab>(routeTab)
   const accountSyncKey = `${accountFromUrl}::${pinnedAccountId ?? ''}`
   const [appliedAccountKey, setAppliedAccountKey] = useState(accountSyncKey)
@@ -1283,10 +1284,7 @@ export function RequestAuditsPage() {
   }
   const mainView = isActive ? routeTab : cachedTab
 
-  const goToTab = (
-    tab: RequestAuditTab,
-    patch: RequestAuditsSearch = {}
-  ) => {
+  const goToTab = (tab: RequestAuditTab, patch: RequestAuditsSearch = {}) => {
     const account = patch.account === undefined ? search.account : patch.account
     const view = patch.view === undefined ? search.view : patch.view
     void navigate({
@@ -1377,8 +1375,7 @@ export function RequestAuditsPage() {
   const egressQuery = useQuery({
     queryKey: ['egress'],
     queryFn: () => api.egress({ pageSize: 500 }),
-    enabled:
-      needsRecords || probeSelection != null || sampleAccount != null,
+    enabled: needsRecords || probeSelection != null || sampleAccount != null,
     staleTime: 60_000,
   })
   const accountSamplesQuery = useQuery({
@@ -1675,7 +1672,13 @@ export function RequestAuditsPage() {
           : item.riskLevel === effectiveRisk)
       return matchesSearch && matchesRisk
     })
-  }, [accounts, config.riskEnabled, deferredWorkspaceSearch, pinnedAccountId, workspaceRisk])
+  }, [
+    accounts,
+    config.riskEnabled,
+    deferredWorkspaceSearch,
+    pinnedAccountId,
+    workspaceRisk,
+  ])
   const riskPageCount = Math.max(
     1,
     Math.ceil(visibleAccounts.length / riskPageSize)
@@ -1716,15 +1719,20 @@ export function RequestAuditsPage() {
           : item.riskLevel === effectiveRisk)
       return matchesSearch && matchesRisk
     })
-  }, [config.riskEnabled, deferredWorkspaceSearch, nodes, pinnedAccountId, workspaceRisk])
+  }, [
+    config.riskEnabled,
+    deferredWorkspaceSearch,
+    nodes,
+    pinnedAccountId,
+    workspaceRisk,
+  ])
 
   const selectedNode =
     visibleNodes.find((item) => item.key === selectedNodeKey) ??
     visibleNodes[0] ??
     null
   const pinnedRiskAccount = useMemo(
-    () =>
-      accounts.find((item) => item.accountId === pinnedAccountId) ?? null,
+    () => accounts.find((item) => item.accountId === pinnedAccountId) ?? null,
     [accounts, pinnedAccountId]
   )
   const pinnedAccountDetail = pinnedAccountQuery.data?.account
@@ -1836,9 +1844,7 @@ export function RequestAuditsPage() {
     ? activityTone[activity.level]
     : waitingActivityTone
   const scan =
-    selectedWindow.window === 'today'
-      ? status?.scan
-      : summaryQuery.data?.scan
+    selectedWindow.window === 'today' ? status?.scan : summaryQuery.data?.scan
   const needsInitialScan = Boolean(
     status?.configured && config.enabled && scan && !scan.initialComplete
   )
@@ -1858,11 +1864,7 @@ export function RequestAuditsPage() {
     isolateMutation.isPending || restoreMutation.isPending
 
   const isolate = (account: RequestAuditAccountRisk) => {
-    if (
-      !config.isolationEnabled ||
-      !account.accountId ||
-      accountActionPending
-    )
+    if (!config.isolationEnabled || !account.accountId || accountActionPending)
       return
     if (
       !globalThis.window.confirm(
@@ -2139,9 +2141,7 @@ export function RequestAuditsPage() {
             <ToolbarAction
               label='扫描当前窗口'
               pending={scanMutation.isPending}
-              disabled={
-                !config.enabled || status?.configured === false
-              }
+              disabled={!config.enabled || status?.configured === false}
               onClick={() => scanMutation.mutate()}
             >
               <Zap />
@@ -2789,58 +2789,58 @@ export function RequestAuditsPage() {
                         >
                           <ListChecks />
                         </ToolbarAction>
-                      <SelectionToolbar
-                        wrap={false}
-                        selectedCount={selectedRiskAccountIds.length}
-                        entityLabel='账号'
-                        disabled={bulkSelectionPending}
-                        onClear={() => clearBulkSelection('risk')}
-                      >
-                        <ToolbarAction
-                          label={`为已选 ${selectedRiskAccountIds.length} 个账号创建探针任务`}
+                        <SelectionToolbar
+                          wrap={false}
+                          selectedCount={selectedRiskAccountIds.length}
+                          entityLabel='账号'
                           disabled={bulkSelectionPending}
-                          onClick={() => beginProbeCreation('risk')}
+                          onClear={() => clearBulkSelection('risk')}
                         >
-                          <Play />
-                        </ToolbarAction>
-                        <ToolbarAction
-                          label={`关联检查已选 ${selectedRiskAccountIds.length} 个账号的 SSO`}
-                          pending={
-                            bulkSsoMutation.isPending &&
-                            bulkAction?.source === 'risk'
-                          }
-                          disabled={bulkSelectionPending}
-                          onClick={() =>
-                            beginBulkAction(
-                              'sso',
-                              'risk',
-                              selectedRiskAccountIds
-                            )
-                          }
-                        >
-                          <ScanSearch />
-                        </ToolbarAction>
-                        <ToolbarAction
-                          label={`批量隔离已选 ${selectedRiskAccountIds.length} 个账号`}
-                          pending={
-                            bulkIsolationMutation.isPending &&
-                            bulkAction?.source === 'risk'
-                          }
-                          destructive
-                          disabled={
-                            bulkSelectionPending || !config.isolationEnabled
-                          }
-                          onClick={() =>
-                            beginBulkAction(
-                              'quarantine',
-                              'risk',
-                              selectedRiskAccountIds
-                            )
-                          }
-                        >
-                          <LockKeyhole />
-                        </ToolbarAction>
-                      </SelectionToolbar>
+                          <ToolbarAction
+                            label={`为已选 ${selectedRiskAccountIds.length} 个账号创建探针任务`}
+                            disabled={bulkSelectionPending}
+                            onClick={() => beginProbeCreation('risk')}
+                          >
+                            <Play />
+                          </ToolbarAction>
+                          <ToolbarAction
+                            label={`关联检查已选 ${selectedRiskAccountIds.length} 个账号的 SSO`}
+                            pending={
+                              bulkSsoMutation.isPending &&
+                              bulkAction?.source === 'risk'
+                            }
+                            disabled={bulkSelectionPending}
+                            onClick={() =>
+                              beginBulkAction(
+                                'sso',
+                                'risk',
+                                selectedRiskAccountIds
+                              )
+                            }
+                          >
+                            <ScanSearch />
+                          </ToolbarAction>
+                          <ToolbarAction
+                            label={`批量隔离已选 ${selectedRiskAccountIds.length} 个账号`}
+                            pending={
+                              bulkIsolationMutation.isPending &&
+                              bulkAction?.source === 'risk'
+                            }
+                            destructive
+                            disabled={
+                              bulkSelectionPending || !config.isolationEnabled
+                            }
+                            onClick={() =>
+                              beginBulkAction(
+                                'quarantine',
+                                'risk',
+                                selectedRiskAccountIds
+                              )
+                            }
+                          >
+                            <LockKeyhole />
+                          </ToolbarAction>
+                        </SelectionToolbar>
                       </ActionToolbar>
                     </div>
                   </div>
@@ -3300,88 +3300,90 @@ export function RequestAuditsPage() {
                       >
                         <ListChecks />
                       </ToolbarAction>
-                    <ExportMenu
-                      label='导出流水'
-                      onExport={(format) =>
-                        api.exportRequestAudits({
-                          format,
-                          ...windowParams,
-                          account: deferredAuditSearch.trim(),
-                          accountId: pinnedAccountId ?? undefined,
-                          clientKey:
-                            deferredAuditClientKey === 'all'
-                              ? ''
-                              : deferredAuditClientKey.trim(),
-                          risk:
-                            effectiveAuditRisk === 'all'
-                              ? ''
-                              : effectiveAuditRisk,
-                          egressNodeId:
-                            auditNode === 'all' ? undefined : Number(auditNode),
-                        })
-                      }
-                    />
-                    <SelectionToolbar
-                      wrap={false}
-                      selectedCount={selectedLedgerRecords.length}
-                      entityLabel='条请求'
-                      countLabel={`已选 ${selectedLedgerRecords.length} 条 · ${selectedLedgerAccountIds.length} 个账号`}
-                      disabled={bulkSelectionPending}
-                      onClear={() => clearBulkSelection('ledger')}
-                    >
-                      <ToolbarAction
-                        label={`为 ${selectedLedgerAccountIds.length} 个关联账号创建探针任务`}
-                        disabled={
-                          bulkSelectionPending ||
-                          selectedLedgerAccountIds.length === 0
+                      <ExportMenu
+                        label='导出流水'
+                        onExport={(format) =>
+                          api.exportRequestAudits({
+                            format,
+                            ...windowParams,
+                            account: deferredAuditSearch.trim(),
+                            accountId: pinnedAccountId ?? undefined,
+                            clientKey:
+                              deferredAuditClientKey === 'all'
+                                ? ''
+                                : deferredAuditClientKey.trim(),
+                            risk:
+                              effectiveAuditRisk === 'all'
+                                ? ''
+                                : effectiveAuditRisk,
+                            egressNodeId:
+                              auditNode === 'all'
+                                ? undefined
+                                : Number(auditNode),
+                          })
                         }
-                        onClick={() => beginProbeCreation('ledger')}
+                      />
+                      <SelectionToolbar
+                        wrap={false}
+                        selectedCount={selectedLedgerRecords.length}
+                        entityLabel='条请求'
+                        countLabel={`已选 ${selectedLedgerRecords.length} 条 · ${selectedLedgerAccountIds.length} 个账号`}
+                        disabled={bulkSelectionPending}
+                        onClear={() => clearBulkSelection('ledger')}
                       >
-                        <Play />
-                      </ToolbarAction>
-                      <ToolbarAction
-                        label={`关联检查 ${selectedLedgerAccountIds.length} 个账号的 SSO`}
-                        pending={
-                          bulkSsoMutation.isPending &&
-                          bulkAction?.source === 'ledger'
-                        }
-                        disabled={
-                          bulkSelectionPending ||
-                          selectedLedgerAccountIds.length === 0
-                        }
-                        onClick={() =>
-                          beginBulkAction(
-                            'sso',
-                            'ledger',
-                            selectedLedgerAccountIds
-                          )
-                        }
-                      >
-                        <ScanSearch />
-                      </ToolbarAction>
-                      <ToolbarAction
-                        label={`批量隔离 ${selectedLedgerAccountIds.length} 个关联账号`}
-                        pending={
-                          bulkIsolationMutation.isPending &&
-                          bulkAction?.source === 'ledger'
-                        }
-                        destructive
-                        disabled={
-                          bulkSelectionPending ||
-                          !config.isolationEnabled ||
-                          selectedLedgerAccountIds.length === 0
-                        }
-                        onClick={() =>
-                          beginBulkAction(
-                            'quarantine',
-                            'ledger',
-                            selectedLedgerAccountIds
-                          )
-                        }
-                      >
-                        <LockKeyhole />
-                      </ToolbarAction>
-                    </SelectionToolbar>
+                        <ToolbarAction
+                          label={`为 ${selectedLedgerAccountIds.length} 个关联账号创建探针任务`}
+                          disabled={
+                            bulkSelectionPending ||
+                            selectedLedgerAccountIds.length === 0
+                          }
+                          onClick={() => beginProbeCreation('ledger')}
+                        >
+                          <Play />
+                        </ToolbarAction>
+                        <ToolbarAction
+                          label={`关联检查 ${selectedLedgerAccountIds.length} 个账号的 SSO`}
+                          pending={
+                            bulkSsoMutation.isPending &&
+                            bulkAction?.source === 'ledger'
+                          }
+                          disabled={
+                            bulkSelectionPending ||
+                            selectedLedgerAccountIds.length === 0
+                          }
+                          onClick={() =>
+                            beginBulkAction(
+                              'sso',
+                              'ledger',
+                              selectedLedgerAccountIds
+                            )
+                          }
+                        >
+                          <ScanSearch />
+                        </ToolbarAction>
+                        <ToolbarAction
+                          label={`批量隔离 ${selectedLedgerAccountIds.length} 个关联账号`}
+                          pending={
+                            bulkIsolationMutation.isPending &&
+                            bulkAction?.source === 'ledger'
+                          }
+                          destructive
+                          disabled={
+                            bulkSelectionPending ||
+                            !config.isolationEnabled ||
+                            selectedLedgerAccountIds.length === 0
+                          }
+                          onClick={() =>
+                            beginBulkAction(
+                              'quarantine',
+                              'ledger',
+                              selectedLedgerAccountIds
+                            )
+                          }
+                        >
+                          <LockKeyhole />
+                        </ToolbarAction>
+                      </SelectionToolbar>
                     </ActionToolbar>
                   </div>
                 </div>
@@ -3909,7 +3911,6 @@ export function RequestAuditsPage() {
           if (!open) setSelectedAuditRecord(null)
         }}
       />
-
     </Page>
   )
 }
@@ -4252,9 +4253,7 @@ function ProbeAuditSampleCard({
         <Button asChild variant='ghost' size='sm'>
           <Link
             to='/runs'
-            search={
-              runsSearchFromAccount(sample.account_id, run.id) as never
-            }
+            search={runsSearchFromAccount(sample.account_id, run.id) as never}
           >
             <ExternalLink />
             任务中心
@@ -4946,10 +4945,7 @@ function AccountRiskRow({
         </div>
       </TableCell>
       <TableCell className='align-middle !whitespace-normal'>
-        <AccountRiskEvidenceCell
-          account={account}
-          thresholds={thresholds}
-        />
+        <AccountRiskEvidenceCell account={account} thresholds={thresholds} />
       </TableCell>
       <TableCell className='align-middle text-[11px] text-muted-foreground'>
         {formatDate(account.lastSeenAt)}

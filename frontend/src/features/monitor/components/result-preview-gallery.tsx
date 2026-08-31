@@ -1,5 +1,18 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import {
   ChevronLeft,
   ChevronRight,
@@ -21,38 +34,30 @@ import {
   type ProbeSample,
   type UpstreamAccount,
 } from '@/lib/api'
-import {
-  buildHtmlDocument,
-  extractHtmlPreviews,
-} from '@/lib/formatted-content'
+import { buildHtmlDocument, extractHtmlPreviews } from '@/lib/formatted-content'
 import {
   HTML_THUMB_FRAME_HEIGHT,
   HTML_THUMB_FRAME_WIDTH,
   useHtmlThumbSlot,
 } from '@/lib/html-preview-frame'
-import {
-  RUN_PREVIEW_GC_TIME,
-  slimRunPreview,
-} from '@/lib/preview-payload'
+import { RUN_PREVIEW_GC_TIME, slimRunPreview } from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
+import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { InfoTooltip } from '@/components/info-tooltip'
 import { CopyButton } from '@/components/copy-button'
 import { EnabledBadge } from '@/components/enabled-badge'
 import { ContentPreviewCanvas } from '@/components/formatted-content'
+import { InfoTooltip } from '@/components/info-tooltip'
 import { MonitorStatusBadge } from '@/components/monitor-status-badge'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  buildEgressNodeNameMap,
-} from '@/features/monitor/components/egress-node-names'
+import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-node-names'
 import { ProbeRunDetailDialog } from '@/features/monitor/components/probe-run-detail-dialog'
 import { DualTpsValue } from '@/features/monitor/components/tps-display'
-import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
 
 const AccountProbeDetailDialog = lazy(() =>
   import('@/features/monitor/components/account-probe-detail-dialog').then(
@@ -128,8 +133,7 @@ export function previewItemsFromSamples(
   }
 ): ResultPreviewItem[] {
   const accountId = Number(account.id)
-  const accountName =
-    account.name || account.email || `账号 ${account.id}`
+  const accountName = account.name || account.email || `账号 ${account.id}`
   return samples
     .filter((sample) => (sample.response_text || '').trim())
     .map((sample) => ({
@@ -275,8 +279,7 @@ export function ResultPreviewGallery({
   )
   const [sessionView, setSessionView] = useState<'split' | 'grid'>()
   const view =
-    sessionView ??
-    (previewPrefs.value.view === 'grid' ? 'grid' : 'split')
+    sessionView ?? (previewPrefs.value.view === 'grid' ? 'grid' : 'split')
   const groupMode =
     previewPrefs.value.groupMode === 'account' ? 'account' : 'task'
   const roundLayout =
@@ -318,10 +321,7 @@ export function ResultPreviewGallery({
   const layoutItems =
     items.length > 0 || !pageLoading ? items : cachedLayoutItems
   const sampleLeaves = layoutItems.some((entry) => Boolean(entry.sample))
-  const groups = useMemo(
-    () => groupPreviewItems(layoutItems),
-    [layoutItems]
-  )
+  const groups = useMemo(() => groupPreviewItems(layoutItems), [layoutItems])
   const showGroupToggle = !sampleLeaves && groups.length > 1
   const effectiveGroup = sampleLeaves || !showGroupToggle ? 'task' : groupMode
   const expandRounds = !sampleLeaves && roundLayout === 'expand'
@@ -336,10 +336,7 @@ export function ResultPreviewGallery({
     queryKey: ['run-preview-samples', previewRunIds],
     queryFn: () => api.runPreviewSamples(previewRunIds),
     enabled:
-      open &&
-      view === 'grid' &&
-      expandRounds &&
-      previewRunIds.length > 0,
+      open && view === 'grid' && expandRounds && previewRunIds.length > 0,
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
@@ -353,12 +350,7 @@ export function ResultPreviewGallery({
             effectiveGroup
           )
         : layoutItems,
-    [
-      effectiveGroup,
-      expandRounds,
-      layoutItems,
-      previewSamplesQuery.data?.items,
-    ]
+    [effectiveGroup, expandRounds, layoutItems, previewSamplesQuery.data?.items]
   )
   const activeSampleId = sampleOverrideId || item?.sampleId
   const expandLeafIndex = expandRounds
@@ -372,9 +364,8 @@ export function ResultPreviewGallery({
       )
     : safeIndex
   const canPrevItem =
-    (view === 'grid' && expandRounds
-      ? expandLeafIndex > 0
-      : safeIndex > 0) || currentPage > 1
+    (view === 'grid' && expandRounds ? expandLeafIndex > 0 : safeIndex > 0) ||
+    currentPage > 1
   const canNextItem =
     (view === 'grid' && expandRounds
       ? expandLeafIndex < Math.max(expandItems.length - 1, 0)
@@ -403,7 +394,8 @@ export function ResultPreviewGallery({
       return
     }
     if (next >= expandItems.length) {
-      if (currentPage < currentPageCount) onPageChange?.(currentPage + 1, 'start')
+      if (currentPage < currentPageCount)
+        onPageChange?.(currentPage + 1, 'start')
       return
     }
     selectExpandLeaf(next)
@@ -522,8 +514,7 @@ export function ResultPreviewGallery({
     item?.expectedOutput || runQuery.data?.profile?.expected_output || ''
   const expectedImageUrl =
     item?.expectedImageUrl || runQuery.data?.profile?.expected_image_url || ''
-  const profileName =
-    item?.profileName || runQuery.data?.profile?.name || ''
+  const profileName = item?.profileName || runQuery.data?.profile?.name || ''
   const canCompare = Boolean(expectedOutput || expectedImageUrl)
   const alreadyIsolated = isIsolatedAccount(account)
   const isolateMutation = useMutation({
@@ -635,7 +626,8 @@ export function ResultPreviewGallery({
         return
       }
       const step =
-        view === 'grid' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+        view === 'grid' &&
+        (event.key === 'ArrowUp' || event.key === 'ArrowDown')
           ? gridCols
           : 1
       if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
@@ -683,9 +675,7 @@ export function ResultPreviewGallery({
   ])
 
   const pageLabel =
-    currentPageCount > 1
-      ? `第 ${currentPage} / ${currentPageCount} 页`
-      : ''
+    currentPageCount > 1 ? `第 ${currentPage} / ${currentPageCount} 页` : ''
   const totalLabel = total != null ? `共 ${total} 条` : ''
   const accountCounter =
     effectiveGroup === 'account'
@@ -695,12 +685,15 @@ export function ResultPreviewGallery({
     sampleLeaves
       ? `样本 ${items.length ? safeIndex + 1 : 0} / ${items.length}`
       : expandRounds
-        ? [accountCounter, `轮次 ${expandItems.length ? expandLeafIndex + 1 : 0} / ${expandItems.length}`]
+        ? [
+            accountCounter,
+            `轮次 ${expandItems.length ? expandLeafIndex + 1 : 0} / ${expandItems.length}`,
+          ]
             .filter(Boolean)
             .join(' · ')
-      : effectiveGroup === 'account'
-        ? `${accountCounter} · 任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`
-        : `任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`,
+        : effectiveGroup === 'account'
+          ? `${accountCounter} · 任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`
+          : `任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`,
     pageLabel,
     totalLabel,
   ]
@@ -964,7 +957,7 @@ export function ResultPreviewGallery({
                           : group.items
                         return (
                           <section key={group.accountId}>
-                            <div className='sticky top-0 z-30 isolate -mx-4 border-b border-border/70 bg-background/90 px-4 py-2 backdrop-blur-md'>
+                            <div className='sticky top-0 isolate z-30 -mx-4 border-b border-border/70 bg-background/90 px-4 py-2 backdrop-blur-md'>
                               <div className='truncate text-sm font-medium'>
                                 {group.accountName}
                               </div>
@@ -981,7 +974,9 @@ export function ResultPreviewGallery({
                                     : ''}
                               </div>
                             </div>
-                            <div className={`${THUMB_GRID_CLASSNAME} pt-3 pb-6`}>
+                            <div
+                              className={`${THUMB_GRID_CLASSNAME} pt-3 pb-6`}
+                            >
                               {leaves.map((entry) => {
                                 const index = items.findIndex(
                                   (candidate) => candidate.runId === entry.runId
@@ -1091,7 +1086,8 @@ export function ResultPreviewGallery({
                                   onClick={() =>
                                     onIndexChange(
                                       items.findIndex(
-                                        (entry) => entry.id === group.items[0].id
+                                        (entry) =>
+                                          entry.id === group.items[0].id
                                       )
                                     )
                                   }
@@ -1177,7 +1173,10 @@ export function ResultPreviewGallery({
                                                       )
                                                     }
                                                   >
-                                                    第 {entrySample.round_number || 1} 轮
+                                                    第{' '}
+                                                    {entrySample.round_number ||
+                                                      1}{' '}
+                                                    轮
                                                   </Button>
                                                 )
                                               })}
@@ -1247,7 +1246,9 @@ export function ResultPreviewGallery({
                                           type='button'
                                           size='sm'
                                           variant={
-                                            selectedSample ? 'secondary' : 'outline'
+                                            selectedSample
+                                              ? 'secondary'
+                                              : 'outline'
                                           }
                                           className='h-7 px-2 text-xs'
                                           onClick={() =>
@@ -1436,7 +1437,12 @@ function InspectBar({
       />
       <div className='ms-auto flex flex-wrap gap-2'>
         {onOpenAccount ? (
-          <Button type='button' size='sm' variant='outline' onClick={onOpenAccount}>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            onClick={onOpenAccount}
+          >
             <UsersRound />
             探针详情
           </Button>
@@ -1614,7 +1620,7 @@ function PreviewThumbCard({
       type='button'
       data-preview-index={index}
       className={cn(
-        'relative z-0 isolate flex h-full w-full min-w-0 flex-col overflow-hidden rounded-xl border bg-background p-0 text-left transition-colors',
+        'relative isolate z-0 flex h-full w-full min-w-0 flex-col overflow-hidden rounded-xl border bg-background p-0 text-left transition-colors',
         active
           ? 'border-primary/60 ring-2 ring-primary/20'
           : 'hover:border-primary/30'
@@ -1622,7 +1628,7 @@ function PreviewThumbCard({
       onClick={() => onSelect(index)}
       onDoubleClick={() => onOpen(index)}
     >
-      <div className='relative aspect-[16/10] w-full min-h-0 overflow-hidden border-b bg-muted/20'>
+      <div className='relative aspect-[16/10] min-h-0 w-full overflow-hidden border-b bg-muted/20'>
         {(item.completedSteps || 0) > 1 && !item.sample && !item.sampleId ? (
           <span className='absolute top-2 right-2 z-[1] rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium shadow-sm'>
             {item.completedSteps} 轮
@@ -1745,10 +1751,7 @@ function accountMeta(
   const includeTaskTime = options.includeTaskTime ?? true
   const email = item.accountEmail?.trim()
   const parts = [`ID ${item.accountId}`]
-  if (
-    email &&
-    email.toLowerCase() !== item.accountName.trim().toLowerCase()
-  ) {
+  if (email && email.toLowerCase() !== item.accountName.trim().toLowerCase()) {
     parts.push(email)
   }
   if (includeTaskTime && item.createdAt) {
@@ -1773,12 +1776,14 @@ function scrollChildIntoContainer(container: HTMLElement, child: HTMLElement) {
   const extra = 8
   const containerRect = container.getBoundingClientRect()
   const childRect = child.getBoundingClientRect()
-  const childTop =
-    childRect.top - containerRect.top + container.scrollTop
+  const childTop = childRect.top - containerRect.top + container.scrollTop
   const childBottom = childTop + child.offsetHeight
   if (childTop < container.scrollTop + extra) {
     container.scrollTop = Math.max(0, childTop - extra)
-  } else if (childBottom > container.scrollTop + container.clientHeight - extra) {
+  } else if (
+    childBottom >
+    container.scrollTop + container.clientHeight - extra
+  ) {
     container.scrollTop = childBottom - container.clientHeight + extra
   }
 }

@@ -462,14 +462,14 @@ function TrendTooltip({
   payload,
 }: {
   active?: boolean
-  payload?: Array<{
+  payload?: readonly {
     payload?: {
       tooltipLabel?: string
       requests?: number
       tokens?: number
       billing?: number
     }
-  }>
+  }[]
 }) {
   const point = payload?.[0]?.payload
   if (!active || !point) return null

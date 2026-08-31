@@ -9,8 +9,8 @@ import {
   UsersRound,
   X,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { useWorkspaceTabsStore } from '@/stores/workspace-tabs-store'
+import { cn } from '@/lib/utils'
 import {
   Tooltip,
   TooltipContent,
@@ -67,8 +67,7 @@ const workspaceActive: Record<WorkspaceTabId, string> = {
     'bg-sky-500/15 text-sky-800 ring-1 ring-sky-500/30 dark:bg-sky-500/20 dark:text-sky-50 dark:ring-sky-400/30',
   quarantine:
     'bg-rose-500/15 text-rose-800 ring-1 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-50 dark:ring-rose-400/30',
-  runs:
-    'bg-violet-500/15 text-violet-800 ring-1 ring-violet-500/30 dark:bg-violet-500/20 dark:text-violet-50 dark:ring-violet-400/30',
+  runs: 'bg-violet-500/15 text-violet-800 ring-1 ring-violet-500/30 dark:bg-violet-500/20 dark:text-violet-50 dark:ring-violet-400/30',
   'request-audits':
     'bg-amber-500/15 text-amber-900 ring-1 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-50 dark:ring-amber-400/30',
 }
@@ -181,8 +180,7 @@ function WorkspacePageFrame({
     window.dispatchEvent(new Event('resize'))
     return () => {
       queryClient.removeQueries({
-        predicate: (query) =>
-          shouldDropHeavyWorkspaceQuery(id, query.queryKey),
+        predicate: (query) => shouldDropHeavyWorkspaceQuery(id, query.queryKey),
       })
     }
   }, [id, queryClient])
@@ -240,7 +238,7 @@ function WorkspaceDock() {
       aria-label='工作区页面'
       className='pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3'
     >
-      <div className='pointer-events-auto inline-flex items-center gap-0.5 rounded-full border bg-muted/80 p-1 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-md dark:bg-background/80 dark:shadow-black/40 dark:ring-white/10'>
+      <div className='pointer-events-auto inline-flex items-center gap-0.5 rounded-full border bg-muted/80 p-1 shadow-lg ring-1 shadow-black/10 ring-black/5 backdrop-blur-md dark:bg-background/80 dark:shadow-black/40 dark:ring-white/10'>
         {WORKSPACE_TAB_IDS.map((id) => (
           <WorkspaceDockItem
             key={id}
@@ -268,9 +266,7 @@ function WorkspaceDockItem({
 }) {
   const title = WORKSPACE_TAB_TITLES[id]
   const Icon = workspaceIcons[id]
-  const lastLocation = useWorkspaceTabsStore(
-    (state) => state.lastLocations[id]
-  )
+  const lastLocation = useWorkspaceTabsStore((state) => state.lastLocations[id])
   const link = workspaceTabLink(id, lastLocation)
   const tooltip = active
     ? `${title}（当前页）`
@@ -289,7 +285,7 @@ function WorkspaceDockItem({
             className={cn(
               'inline-flex h-8 items-center gap-1.5 rounded-full text-xs whitespace-nowrap transition-colors',
               'focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
-              mounted ? 'pl-2.5 pr-7' : 'px-2.5',
+              mounted ? 'pr-7 pl-2.5' : 'px-2.5',
               active && cn('font-semibold shadow-sm', workspaceActive[id]),
               !active &&
                 mounted &&
@@ -316,7 +312,7 @@ function WorkspaceDockItem({
         <div className='absolute top-1/2 right-1 size-5 -translate-y-1/2'>
           <span
             aria-hidden
-            className='pointer-events-none absolute inset-0 hidden items-center justify-center md:flex group-hover/dock-item:opacity-0 group-focus-within/dock-item:opacity-0'
+            className='pointer-events-none absolute inset-0 hidden items-center justify-center group-focus-within/dock-item:opacity-0 group-hover/dock-item:opacity-0 md:flex'
           >
             <span className='size-1.5 rounded-full bg-emerald-500' />
           </span>
@@ -328,7 +324,7 @@ function WorkspaceDockItem({
               event.stopPropagation()
               onClose()
             }}
-            className='absolute inset-0 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground md:pointer-events-none md:opacity-0 md:group-hover/dock-item:pointer-events-auto md:group-hover/dock-item:opacity-100 md:group-focus-within/dock-item:pointer-events-auto md:group-focus-within/dock-item:opacity-100'
+            className='absolute inset-0 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground md:pointer-events-none md:opacity-0 md:group-focus-within/dock-item:pointer-events-auto md:group-focus-within/dock-item:opacity-100 md:group-hover/dock-item:pointer-events-auto md:group-hover/dock-item:opacity-100'
           >
             <X className='size-3' />
           </button>

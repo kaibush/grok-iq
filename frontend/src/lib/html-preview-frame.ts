@@ -54,16 +54,12 @@ export function resetHtmlThumbSlotsForTests() {
 
 export function useHtmlThumbSlot(active: boolean) {
   const [held, setHeld] = useState(false)
+  if (!active && held) {
+    setHeld(false)
+  }
   useEffect(() => {
-    if (!active) {
-      setHeld(false)
-      return
-    }
-    const release = acquireHtmlThumbSlot(() => setHeld(true))
-    return () => {
-      release()
-      setHeld(false)
-    }
+    if (!active) return
+    return acquireHtmlThumbSlot(() => setHeld(true))
   }, [active])
-  return held
+  return active && held
 }
