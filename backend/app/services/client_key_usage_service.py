@@ -308,7 +308,9 @@ def _finalize_audit_usage(usage: dict[str, Any]) -> dict[str, Any]:
 def _list_items(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
         raw_items = payload.get("items") or payload.get("keys") or []
-        return [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+        if not isinstance(raw_items, list):
+            return []
+        return [item for item in raw_items if isinstance(item, dict)]
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     return []

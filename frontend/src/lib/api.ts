@@ -59,6 +59,41 @@ export type PublicClientKeyQuotaLookup =
   | { found: false }
   | PublicClientKeyQuota
 
+export type ClientKey = Omit<PublicClientKeyQuota, 'found'> & {
+  id: string
+}
+
+export type ClientKeyUsagePeriod = '24h' | '7d' | '30d' | '90d' | 'custom'
+
+export type ClientKeyUsageTotals = {
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  totalTokens: number
+  durationMs: number
+  estimatedCostInUsdTicks: number
+  averageDurationMs: number
+  successRate: number
+}
+
+export type ClientKeyUsageRow = ClientKeyUsageTotals & {
+  id: string
+  name: string
+}
+
+export type ClientKeyUsageSummary = {
+  period: string
+  sourcePeriod: string
+  range: { start: string; end: string }
+  total: ClientKeyUsageTotals
+  keys: ClientKeyUsageRow[]
+  truncated: boolean
+}
+
 export type AuthSession = {
   accessToken: string
   tokenType: 'bearer'
@@ -2710,6 +2745,31 @@ export const api = {
       skipAuth: true,
       body: JSON.stringify({ apiKey }),
     }),
+  clientKeys: (
+    params: { page?: number; pageSize?: number; search?: string } = {}
+  ) =>
+    request<Page<ClientKey>>(
+      `/client-keys${query({
+        page: params.page,
+        pageSize: params.pageSize,
+        search: params.search?.trim() || undefined,
+      })}`
+    ),
+  clientKeyUsage: (params: {
+    keyIds: string[]
+    period: ClientKeyUsagePeriod
+    start?: string
+    end?: string
+  }) => {
+    const search = new URLSearchParams()
+    search.set('period', params.period)
+    if (params.start) search.set('start', params.start)
+    if (params.end) search.set('end', params.end)
+    for (const id of params.keyIds) {
+      if (id.trim()) search.append('keyIds', id.trim())
+    }
+    return request<ClientKeyUsageSummary>(`/client-keys/usage?${search}`)
+  },
   systemVersion: () =>
     request<SystemVersionInfo>('/system/version', { cache: 'no-store' }),
   checkSystemUpdate: () =>
