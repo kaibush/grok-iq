@@ -4,8 +4,9 @@ import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.core.clock import utc_now
+from app.core.clock import APP_TIMEZONE_NAME, utc_now
 from app.integrations.grok2api.client import Grok2APIClient
 from app.services.client_key_quota_service import ClientKeyQuotaService
 
@@ -15,7 +16,7 @@ AUDIT_PAGE_SIZE = 200
 AUDIT_FETCH_TIMEOUT_SECONDS = 60
 AUDIT_FETCH_CONCURRENCY = 8
 PUBLIC_USAGE_TTL_SECONDS = 30.0
-PUBLIC_USAGE_PERIODS = ("24h", "7d")
+PUBLIC_DASHBOARD_PERIODS = ("24h", "7d", "30d", "90d")
 AUDIT_PERIODS = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -32,7 +33,7 @@ class ClientKeyUsageService:
     ) -> None:
         self.client = client
         self.quota_service = quota_service or ClientKeyQuotaService(client)
-        self._public_usage_cache: tuple[float, dict[str, Any]] | None = None
+        self._public_usage_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._public_usage_lock = asyncio.Lock()
 
     async def lookup_public_usage(
@@ -65,48 +66,42 @@ class ClientKeyUsageService:
             "usage": summary["total"],
         }
 
-    async def public_usage_overview(self) -> dict[str, Any]:
-        cached = self._fresh_public_usage()
-        if cached is not None:
-            return cached
-        async with self._public_usage_lock:
-            cached = self._fresh_public_usage()
+    async def public_usage_overview(
+        self,
+        *,
+        period: str = "24h",
+        timezone: str = APP_TIMEZONE_NAME,
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        resolved_period = _resolve_dashboard_period(period)
+        resolved_timezone = _resolve_dashboard_timezone(timezone)
+        cache_key = (resolved_period, resolved_timezone)
+        if not refresh:
+            cached = self._fresh_public_usage(cache_key)
             if cached is not None:
                 return cached
+        async with self._public_usage_lock:
+            if not refresh:
+                cached = self._fresh_public_usage(cache_key)
+                if cached is not None:
+                    return cached
             try:
-                windows = await asyncio.gather(
-                    *(self._public_usage_window(period) for period in PUBLIC_USAGE_PERIODS)
+                raw = await self.client.get_dashboard(
+                    period=resolved_period,
+                    timezone=resolved_timezone,
+                    refresh=refresh,
                 )
-                payload = {
-                    "reachable": True,
-                    "windows": {
-                        period: window for period, window in zip(PUBLIC_USAGE_PERIODS, windows, strict=True)
-                    },
-                }
+                payload = _public_dashboard(raw, reachable=True, period=resolved_period)
             except Exception:
-                payload = _empty_public_usage(reachable=False)
-            self._public_usage_cache = (time.monotonic(), payload)
+                payload = _empty_public_dashboard(period=resolved_period, reachable=False)
+            self._public_usage_cache[cache_key] = (time.monotonic(), payload)
             return payload
 
-    def _fresh_public_usage(self) -> dict[str, Any] | None:
-        cached = self._public_usage_cache
+    def _fresh_public_usage(self, cache_key: tuple[str, str]) -> dict[str, Any] | None:
+        cached = self._public_usage_cache.get(cache_key)
         if cached is not None and time.monotonic() - cached[0] < PUBLIC_USAGE_TTL_SECONDS:
             return cached[1]
         return None
-
-    async def _public_usage_window(self, period: str) -> dict[str, Any]:
-        window = resolve_audit_window(period)
-        row = await self._audit_usage_for_window(window)
-        return {
-            "period": window["period"],
-            "sourcePeriod": window["sourcePeriod"],
-            "range": {
-                "start": _iso_z(window["start"]),
-                "end": _iso_z(window["end"]),
-            },
-            "truncated": bool(row.get("truncated")) or bool(window["clamped"]),
-            "usage": _finalize_audit_usage(row["usage"]),
-        }
 
     async def audit_summary(
         self,
@@ -367,18 +362,153 @@ def _finalize_audit_usage(usage: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _empty_public_usage(*, reachable: bool) -> dict[str, Any]:
-    empty = _finalize_audit_usage(_empty_audit_usage())
-    windows: dict[str, Any] = {}
-    for period in PUBLIC_USAGE_PERIODS:
-        windows[period] = {
-            "period": period,
-            "sourcePeriod": period,
-            "range": {"start": None, "end": None},
-            "truncated": False,
-            "usage": dict(empty),
-        }
-    return {"reachable": reachable, "windows": windows}
+def _empty_public_dashboard(*, period: str, reachable: bool) -> dict[str, Any]:
+    return _public_dashboard({}, reachable=reachable, period=period)
+
+
+def _public_dashboard(raw: Any, *, reachable: bool, period: str) -> dict[str, Any]:
+    payload = raw if isinstance(raw, dict) else {}
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    range_raw = payload.get("range") if isinstance(payload.get("range"), dict) else {}
+    resolved_period = str(payload.get("period") or period).strip()
+    if resolved_period not in PUBLIC_DASHBOARD_PERIODS:
+        resolved_period = period
+    return {
+        "reachable": reachable,
+        "period": resolved_period,
+        "generatedAt": _as_timestamp(payload.get("generatedAt")),
+        "range": {
+            "start": _as_timestamp(range_raw.get("start")),
+            "end": _as_timestamp(range_raw.get("end")),
+        },
+        "usage": _public_dashboard_usage(usage),
+        "series": _public_dashboard_series_list(payload.get("series")),
+        "activity": _public_dashboard_activity_list(payload.get("activity")),
+        "topModels": _public_dashboard_model_list(payload.get("topModels")),
+        "providers": _public_dashboard_provider_list(payload.get("providers")),
+    }
+
+
+def _public_dashboard_usage(usage: dict[str, Any]) -> dict[str, Any]:
+    requests = _as_int(usage.get("requests"))
+    successful = _as_int(usage.get("successfulRequests"))
+    input_tokens = _as_int(usage.get("inputTokens"))
+    cached = _as_int(usage.get("cachedInputTokens"))
+    success_rate = _as_float(usage.get("successRate"))
+    if not success_rate and requests:
+        success_rate = successful / requests * 100
+    return {
+        "requests": requests,
+        "successfulRequests": successful,
+        "failedRequests": _as_int(usage.get("failedRequests")),
+        "inputTokens": input_tokens,
+        "cachedInputTokens": cached,
+        "outputTokens": _as_int(usage.get("outputTokens")),
+        "reasoningTokens": _as_int(usage.get("reasoningTokens")),
+        "tokens": _as_int(usage.get("tokens", usage.get("totalTokens"))),
+        "billedCostUsdTicks": _as_int(
+            usage.get("billedCostUsdTicks", usage.get("estimatedCostInUsdTicks"))
+        ),
+        "successRate": success_rate,
+        "cacheHitRate": cached / input_tokens * 100 if input_tokens else 0.0,
+        "averageFirstTokenMs": _as_float(usage.get("averageFirstTokenMs")),
+        "outputTokensPerSecond": _as_float(usage.get("outputTokensPerSecond")),
+        "firstTokenSamples": _as_int(usage.get("firstTokenSamples")),
+        "throughputSamples": _as_int(usage.get("throughputSamples")),
+    }
+
+
+def _public_dashboard_series_list(raw: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in _list_items(raw):
+        start = _as_timestamp(item.get("start"))
+        if not start:
+            continue
+        items.append(
+            {
+                "start": start,
+                "end": _as_timestamp(item.get("end")) or start,
+                "requests": _as_int(item.get("requests")),
+                "inputTokens": _as_int(item.get("inputTokens")),
+                "cachedInputTokens": _as_int(item.get("cachedInputTokens")),
+                "outputTokens": _as_int(item.get("outputTokens")),
+                "reasoningTokens": _as_int(item.get("reasoningTokens")),
+                "tokens": _as_int(item.get("tokens", item.get("totalTokens"))),
+                "billedCostUsdTicks": _as_int(item.get("billedCostUsdTicks")),
+            }
+        )
+    return items
+
+
+def _public_dashboard_activity_list(raw: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in _list_items(raw):
+        start = _as_timestamp(item.get("start"))
+        if not start:
+            continue
+        items.append({"start": start, "requests": _as_int(item.get("requests"))})
+    return items
+
+
+def _public_dashboard_model_list(raw: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in _list_items(raw):
+        model = str(item.get("model") or "").strip()
+        if not model:
+            continue
+        items.append(
+            {
+                "model": model,
+                "requests": _as_int(item.get("requests")),
+                "inputTokens": _as_int(item.get("inputTokens")),
+                "cachedInputTokens": _as_int(item.get("cachedInputTokens")),
+                "outputTokens": _as_int(item.get("outputTokens")),
+                "reasoningTokens": _as_int(item.get("reasoningTokens")),
+                "tokens": _as_int(item.get("tokens", item.get("totalTokens"))),
+                "billedCostUsdTicks": _as_int(item.get("billedCostUsdTicks")),
+            }
+        )
+    return items
+
+
+def _public_dashboard_provider_list(raw: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in _list_items(raw):
+        provider = str(item.get("provider") or "").strip()
+        if not provider:
+            continue
+        items.append(
+            {
+                "provider": provider,
+                "requests": _as_int(item.get("requests")),
+                "successfulRequests": _as_int(item.get("successfulRequests")),
+                "tokens": _as_int(item.get("tokens", item.get("totalTokens"))),
+            }
+        )
+    return items
+
+
+def _resolve_dashboard_period(value: str) -> str:
+    period = (value or "").strip()
+    return period if period in PUBLIC_DASHBOARD_PERIODS else "24h"
+
+
+def _resolve_dashboard_timezone(value: str) -> str:
+    candidate = (value or "").strip() or APP_TIMEZONE_NAME
+    try:
+        ZoneInfo(candidate)
+    except (ZoneInfoNotFoundError, ValueError):
+        return APP_TIMEZONE_NAME
+    return candidate
+
+
+def _as_timestamp(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return _iso_z(value)
+    text = str(value).strip()
+    return text or None
 
 
 def _list_items(payload: Any) -> list[dict[str, Any]]:
@@ -397,5 +527,14 @@ def _as_int(value: Any, fallback: int = 0) -> int:
         return fallback
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _as_float(value: Any, fallback: float = 0.0) -> float:
+    if value is None or value == "":
+        return fallback
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return fallback

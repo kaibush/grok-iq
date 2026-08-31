@@ -20,12 +20,15 @@ class FakeGrok2APIClient:
         keys: dict[str, Any] | None = None,
         audits: dict[str, dict[str, Any]] | None = None,
         secrets: dict[str, str] | None = None,
+        dashboards: dict[Any, dict[str, Any]] | None = None,
     ) -> None:
         self.keys_payload = keys or {"items": [], "total": 0, "page": 1, "pageSize": 20}
         self.audits_by_key = audits or {}
         self.secrets = secrets or {}
+        self.dashboards = dashboards or {}
         self.list_client_keys_calls: list[dict[str, Any]] = []
         self.list_request_audits_calls: list[dict[str, Any]] = []
+        self.get_dashboard_calls: list[dict[str, Any]] = []
         self.secret_calls: list[str] = []
 
     async def list_client_keys(self, **params: Any) -> dict[str, Any]:
@@ -42,6 +45,20 @@ class FakeGrok2APIClient:
         return self.audits_by_key.get(
             key,
             {"items": [], "hasMore": False, "nextCursor": ""},
+        )
+
+    async def get_dashboard(
+        self,
+        *,
+        period: str = "24h",
+        timezone: str = "Asia/Shanghai",
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        params = {"period": period, "timezone": timezone, "refresh": refresh}
+        self.get_dashboard_calls.append(params)
+        return self.dashboards.get(
+            (period, timezone),
+            self.dashboards.get(period, self.dashboards.get("default", {})),
         )
 
 
@@ -279,86 +296,116 @@ def test_resolve_audit_window_custom_validation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_public_usage_overview_splits_24h_and_7d(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr("app.services.client_key_usage_service.utc_now", lambda: now)
+async def test_public_usage_overview_proxies_dashboard_and_strips_resources() -> None:
     client = FakeGrok2APIClient(
-        audits={
-            "": {
-                "items": [
+        dashboards={
+            ("7d", "Asia/Shanghai"): {
+                "period": "7d",
+                "generatedAt": "2026-08-31T12:00:00Z",
+                "range": {
+                    "start": "2026-08-24T12:00:00Z",
+                    "end": "2026-08-31T12:00:00Z",
+                },
+                "resources": {
+                    "totalAccounts": 1406,
+                    "activeAccounts": 675,
+                    "buildAccounts": 900,
+                    "webAccounts": 400,
+                    "consoleAccounts": 106,
+                    "activeClientKeys": 12,
+                    "totalClientKeys": 20,
+                },
+                "usage": {
+                    "requests": 12000,
+                    "successfulRequests": 11800,
+                    "failedRequests": 200,
+                    "inputTokens": 1000,
+                    "cachedInputTokens": 400,
+                    "outputTokens": 500,
+                    "reasoningTokens": 80,
+                    "tokens": 1580,
+                    "billedCostUsdTicks": 20_000_000_000,
+                    "successRate": 98.3,
+                    "averageFirstTokenMs": 420.5,
+                    "outputTokensPerSecond": 31.2,
+                    "firstTokenSamples": 10,
+                    "throughputSamples": 8,
+                },
+                "series": [
                     {
-                        "clientKeyId": "1",
-                        "statusCode": 200,
-                        "inputTokens": 10,
-                        "cachedInputTokens": 4,
-                        "outputTokens": 6,
-                        "reasoningTokens": 2,
-                        "totalTokens": 18,
-                        "durationMs": 40,
-                        "createdAt": "2026-08-31T08:00:00Z",
-                    },
-                    {
-                        "clientKeyId": "2",
-                        "statusCode": 500,
-                        "errorCode": "upstream",
-                        "inputTokens": 5,
-                        "cachedInputTokens": 0,
-                        "outputTokens": 1,
-                        "totalTokens": 6,
-                        "durationMs": 80,
-                        "createdAt": "2026-08-28T12:00:00Z",
-                    },
-                    {
-                        "clientKeyId": "3",
-                        "statusCode": 200,
-                        "inputTokens": 1,
-                        "totalTokens": 1,
-                        "createdAt": "2026-08-01T12:00:00Z",
-                    },
+                        "start": "2026-08-24T00:00:00Z",
+                        "end": "2026-08-25T00:00:00Z",
+                        "requests": 100,
+                        "tokens": 10,
+                        "billedCostUsdTicks": 1,
+                    }
                 ],
-                "hasMore": False,
-                "nextCursor": "",
+                "activity": [{"start": "2026-08-24T00:00:00Z", "requests": 100}],
+                "topModels": [
+                    {
+                        "model": "grok-4",
+                        "requests": 9,
+                        "tokens": 8,
+                        "billedCostUsdTicks": 1,
+                    }
+                ],
+                "providers": [
+                    {
+                        "provider": "grok_build",
+                        "requests": 80,
+                        "successfulRequests": 79,
+                        "tokens": 7,
+                    }
+                ],
             }
         }
     )
     service = ClientKeyUsageService(client)  # type: ignore[arg-type]
 
-    result = await service.public_usage_overview()
-    cached = await service.public_usage_overview()
+    result = await service.public_usage_overview(period="7d")
+    cached = await service.public_usage_overview(period="7d")
 
     assert result["reachable"] is True
     assert cached is result
-    assert {call["period"] for call in client.list_request_audits_calls} == {"24h", "7d"}
-    assert {call["key"] for call in client.list_request_audits_calls} == {""}
-    assert len(client.list_request_audits_calls) == 2
+    assert result["period"] == "7d"
+    assert "resources" not in result
+    assert "windows" not in result
+    assert result["usage"]["requests"] == 12000
+    assert result["usage"]["tokens"] == 1580
+    assert result["usage"]["cacheHitRate"] == 40.0
+    assert result["usage"]["successRate"] == 98.3
+    assert result["usage"]["averageFirstTokenMs"] == 420.5
+    assert result["series"][0]["requests"] == 100
+    assert result["activity"][0]["requests"] == 100
+    assert result["topModels"][0]["model"] == "grok-4"
+    assert result["providers"][0]["provider"] == "grok_build"
+    assert client.get_dashboard_calls == [
+        {"period": "7d", "timezone": "Asia/Shanghai", "refresh": False}
+    ]
+    assert client.list_request_audits_calls == []
 
-    day = result["windows"]["24h"]
-    week = result["windows"]["7d"]
-    assert day["period"] == "24h"
-    assert day["truncated"] is False
-    assert day["usage"]["requests"] == 1
-    assert day["usage"]["successfulRequests"] == 1
-    assert day["usage"]["failedRequests"] == 0
-    assert day["usage"]["totalTokens"] == 18
-    assert day["usage"]["cachedInputTokens"] == 4
-    assert day["usage"]["cacheHitRate"] == 40.0
-    assert week["usage"]["requests"] == 2
-    assert week["usage"]["successfulRequests"] == 1
-    assert week["usage"]["failedRequests"] == 1
-    assert week["usage"]["totalTokens"] == 24
-    assert week["usage"]["successRate"] == 50.0
+    refreshed = await service.public_usage_overview(period="7d", refresh=True)
+    assert refreshed["usage"]["requests"] == 12000
+    assert len(client.get_dashboard_calls) == 2
+    assert client.get_dashboard_calls[1]["refresh"] is True
+
+    other = await service.public_usage_overview(period="24h")
+    assert other["period"] == "24h"
+    assert other["usage"]["requests"] == 0
+    assert len(client.get_dashboard_calls) == 3
 
 
 @pytest.mark.asyncio
 async def test_public_usage_overview_hides_upstream_errors() -> None:
     class BrokenClient(FakeGrok2APIClient):
-        async def list_request_audits(self, **params: Any) -> dict[str, Any]:
+        async def get_dashboard(self, **params: Any) -> dict[str, Any]:
             raise RuntimeError("upstream down")
 
     service = ClientKeyUsageService(BrokenClient())  # type: ignore[arg-type]
-    result = await service.public_usage_overview()
+    result = await service.public_usage_overview(period="7d")
     assert result["reachable"] is False
-    assert result["windows"]["24h"]["usage"]["requests"] == 0
-    assert result["windows"]["7d"]["usage"]["requests"] == 0
+    assert result["period"] == "7d"
+    assert result["usage"]["requests"] == 0
+    assert result["series"] == []
+    assert result["topModels"] == []
+    assert "resources" not in result

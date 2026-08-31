@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from app.integrations.grok2api.client import Grok2APIClient
 from app.services.account_service import AccountService
@@ -58,9 +58,18 @@ def build_public_router(
         )
 
     @router.get("/public/upstream-usage")
-    async def public_upstream_usage(response: Response) -> dict[str, Any]:
+    async def public_upstream_usage(
+        response: Response,
+        period: str = Query(default="24h"),
+        timezone: str = Query(default="Asia/Shanghai"),
+        refresh: str = Query(default=""),
+    ) -> dict[str, Any]:
         disable_client_cache(response)
-        return await usage_service.public_usage_overview()
+        return await usage_service.public_usage_overview(
+            period=period,
+            timezone=timezone,
+            refresh=refresh.strip().lower() in {"1", "true", "yes"},
+        )
 
     return router
 

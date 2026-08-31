@@ -77,19 +77,71 @@ export type ClientKeyUsageTotals = {
   cacheHitRate: number
 }
 
-export type PublicUpstreamUsagePeriod = '24h' | '7d'
+export type PublicUpstreamUsagePeriod = '24h' | '7d' | '30d' | '90d'
 
-export type PublicUpstreamUsageWindow = {
-  period: PublicUpstreamUsagePeriod
-  sourcePeriod: string
-  range: { start: string | null; end: string | null }
-  truncated: boolean
-  usage: ClientKeyUsageTotals
+export type PublicUpstreamUsageTotals = {
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  tokens: number
+  billedCostUsdTicks: number
+  successRate: number
+  cacheHitRate: number
+  averageFirstTokenMs: number
+  outputTokensPerSecond: number
+  firstTokenSamples: number
+  throughputSamples: number
+}
+
+export type PublicUpstreamUsageSeriesPoint = {
+  start: string
+  end: string
+  requests: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  tokens: number
+  billedCostUsdTicks: number
+}
+
+export type PublicUpstreamUsageActivityPoint = {
+  start: string
+  requests: number
+}
+
+export type PublicUpstreamUsageModel = {
+  model: string
+  requests: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  tokens: number
+  billedCostUsdTicks: number
+}
+
+export type PublicUpstreamUsageProviderStat = {
+  provider: string
+  requests: number
+  successfulRequests: number
+  tokens: number
 }
 
 export type PublicUpstreamUsageOverview = {
   reachable: boolean
-  windows: Record<PublicUpstreamUsagePeriod, PublicUpstreamUsageWindow>
+  period: PublicUpstreamUsagePeriod
+  generatedAt: string | null
+  range: { start: string | null; end: string | null }
+  usage: PublicUpstreamUsageTotals
+  series: PublicUpstreamUsageSeriesPoint[]
+  activity: PublicUpstreamUsageActivityPoint[]
+  topModels: PublicUpstreamUsageModel[]
+  providers: PublicUpstreamUsageProviderStat[]
 }
 
 export type PublicClientKeyUsage = {
@@ -2825,10 +2877,21 @@ export const api = {
     request<PublicUpstreamAccountSummary>('/public/upstream-accounts', {
       skipAuth: !authorizationHeaders().Authorization,
     }),
-  publicUpstreamUsage: () =>
-    request<PublicUpstreamUsageOverview>('/public/upstream-usage', {
-      skipAuth: true,
-    }),
+  publicUpstreamUsage: (params?: {
+    period?: PublicUpstreamUsagePeriod
+    timezone?: string
+    refresh?: boolean
+  }) => {
+    const query = new URLSearchParams()
+    if (params?.period) query.set('period', params.period)
+    if (params?.timezone) query.set('timezone', params.timezone)
+    if (params?.refresh) query.set('refresh', '1')
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return request<PublicUpstreamUsageOverview>(
+      `/public/upstream-usage${suffix}`,
+      { skipAuth: true }
+    )
+  },
   lookupPublicClientKeyQuota: (apiKey: string) =>
     request<PublicClientKeyQuotaLookup>('/public/client-key-quota', {
       method: 'POST',

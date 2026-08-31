@@ -581,6 +581,21 @@ class Grok2APIClient:
             timeout=timeout,
         )
 
+    async def get_dashboard(
+        self,
+        *,
+        period: str = "24h",
+        timezone: str = "Asia/Shanghai",
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Read grok2api's aggregated dashboard. This is SQL totals, not a ledger scan."""
+
+        query: dict[str, Any] = {"period": period, "timezone": timezone}
+        if refresh:
+            query["refresh"] = "1"
+        payload = await self.admin_request("GET", "/api/admin/v1/dashboard", params=query)
+        return payload if isinstance(payload, dict) else {}
+
     async def set_egress_nodes_enabled(
         self,
         node_ids: list[int],
