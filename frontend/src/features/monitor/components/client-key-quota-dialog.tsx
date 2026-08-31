@@ -201,7 +201,7 @@ export function ClientKeyQuotaDialog() {
         <DialogHeader>
           <DialogTitle>查询密钥额度</DialogTitle>
           <DialogDescription>
-            输入 grok2api Client Key，查看剩余额度和时间窗口使用量。
+            输入密钥，查看剩余额度和时间窗口使用量。
           </DialogDescription>
         </DialogHeader>
         <form className='space-y-3' onSubmit={handleSubmit}>
@@ -212,7 +212,7 @@ export function ClientKeyQuotaDialog() {
               type='password'
               autoComplete='off'
               spellCheck={false}
-              placeholder='g2a_********'
+              placeholder='********'
               className='font-mono'
               maxLength={256}
               value={apiKey}
@@ -438,7 +438,7 @@ function UsageMetrics({
         <div className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-300'>
           <AlertTriangle className='mt-0.5 size-4 shrink-0' />
           <span>
-            结果已截断：自定义起点早于 grok2api 可查的 90 天，或记录过多。
+            结果已截断：自定义起点早于可查询的 90 天，或记录过多。
           </span>
         </div>
       ) : null}

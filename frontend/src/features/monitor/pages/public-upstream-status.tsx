@@ -135,7 +135,7 @@ export function PublicUpstreamStatusPage() {
               上游账号情况
             </h1>
             <p className='mt-1 text-sm text-muted-foreground'>
-              默认只展示 grok2api 聚合计数。密钥额度与使用量需手动查询，不会回显明文。
+              默认只展示上游账号聚合计数。密钥额度与使用量需手动查询，不会回显明文。
             </p>
           </div>
           <div className='flex flex-wrap items-center gap-2'>
