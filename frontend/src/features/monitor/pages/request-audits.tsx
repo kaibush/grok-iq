@@ -1352,7 +1352,7 @@ export function RequestAuditsPage() {
         ? Math.max(10_000, config.liveRefreshSeconds * 1000)
         : false
     },
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   })
   const config = statusQuery.data?.config ?? fallbackConfig
   const liveRefreshInterval = config.liveRefreshEnabled
@@ -1363,7 +1363,7 @@ export function RequestAuditsPage() {
     queryKey: ['scheduler'],
     queryFn: api.scheduler,
     refetchInterval: liveRefreshInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   })
   const profilesQuery = useQuery({
     queryKey: ['profiles'],
@@ -1401,7 +1401,7 @@ export function RequestAuditsPage() {
     queryFn: () => api.requestAuditSummary(windowParams),
     placeholderData: keepPreviousData,
     refetchInterval: liveRefreshInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   })
   const pinnedAccountQuery = useQuery({
     queryKey: ['account', pinnedAccountId],
@@ -1436,7 +1436,7 @@ export function RequestAuditsPage() {
       }),
     placeholderData: keepPreviousData,
     refetchInterval: liveRefreshInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   })
   const probeContextQuery = useQuery({
     queryKey: [

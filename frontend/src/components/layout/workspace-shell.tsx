@@ -1,4 +1,5 @@
 import { lazy, Suspense, useLayoutEffect, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   Activity,
@@ -72,6 +73,30 @@ const workspaceActive: Record<WorkspaceTabId, string> = {
     'bg-amber-500/15 text-amber-900 ring-1 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-50 dark:ring-amber-400/30',
 }
 
+function shouldDropWorkspaceQuery(
+  id: WorkspaceTabId,
+  queryKey: readonly unknown[]
+) {
+  const root = queryKey[0]
+  const second = queryKey[1]
+  if (id === 'request-audits') return root === 'request-audits'
+  if (id === 'runs') return root === 'runs' || root === 'run'
+  if (id === 'quarantine') {
+    return (
+      root === 'accounts' &&
+      (second === 'quarantine' || second === 'quarantine-stats')
+    )
+  }
+  if (id === 'accounts') {
+    return (
+      root === 'accounts' &&
+      second !== 'quarantine' &&
+      second !== 'quarantine-stats'
+    )
+  }
+  return false
+}
+
 export function WorkspaceShell({ children }: { children: ReactNode }) {
   const pathname = useLocation({ select: (location) => location.pathname })
   const showRouteOutlet = !isWorkspaceTabPath(pathname)
@@ -91,12 +116,7 @@ function WorkspaceKeepAlive() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const search = useLocation({ select: (location) => location.search })
   const currentId = matchWorkspaceTabId(pathname)
-  const mounted = useWorkspaceTabsStore((state) => state.mounted)
   const visit = useWorkspaceTabsStore((state) => state.visit)
-  const renderMounted =
-    currentId && !mounted.includes(currentId)
-      ? [...mounted, currentId]
-      : mounted
 
   useLayoutEffect(() => {
     if (!currentId) return
@@ -106,47 +126,34 @@ function WorkspaceKeepAlive() {
     })
   }, [currentId, pathname, search, visit])
 
+  if (!currentId) return null
+
+  const Page = workspacePages[currentId]
   return (
-    <>
-      {WORKSPACE_TAB_IDS.map((id) => {
-        if (!renderMounted.includes(id)) return null
-        const Page = workspacePages[id]
-        return (
-          <WorkspacePageFrame key={id} id={id} active={id === currentId}>
-            <Suspense fallback={<WorkspacePageFallback />}>
-              <Page />
-            </Suspense>
-          </WorkspacePageFrame>
-        )
-      })}
-    </>
+    <WorkspacePageFrame key={currentId} id={currentId}>
+      <Suspense fallback={<WorkspacePageFallback />}>
+        <Page />
+      </Suspense>
+    </WorkspacePageFrame>
   )
 }
 
 function WorkspacePageFrame({
   id,
-  active,
   children,
 }: {
   id: WorkspaceTabId
-  active: boolean
   children: ReactNode
 }) {
   useLayoutEffect(() => {
-    if (!active) return
     window.dispatchEvent(new Event('resize'))
-  }, [active])
+  }, [id])
 
   return (
     <div
       data-workspace-tab={id}
-      data-active={active ? 'true' : 'false'}
-      className={cn(
-        'absolute inset-0 min-h-0 overflow-hidden pb-16',
-        active ? 'z-10' : 'invisible pointer-events-none z-0'
-      )}
-      aria-hidden={!active}
-      inert={!active ? true : undefined}
+      data-active='true'
+      className='absolute inset-0 z-10 min-h-0 overflow-hidden pb-16'
     >
       {children}
     </div>
@@ -165,6 +172,7 @@ function WorkspacePageFallback() {
 function WorkspaceDock() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const currentId = matchWorkspaceTabId(pathname)
   const mounted = useWorkspaceTabsStore((state) => state.mounted)
 
@@ -183,6 +191,9 @@ function WorkspaceDock() {
         await navigate({ to: '/' })
       }
     }
+    queryClient.removeQueries({
+      predicate: (query) => shouldDropWorkspaceQuery(id, query.queryKey),
+    })
     state.close(id)
   }
 
@@ -224,10 +235,10 @@ function WorkspaceDockItem({
   )
   const link = workspaceTabLink(id, lastLocation)
   const tooltip = active
-    ? `${title}（当前页，已保持挂载）`
+    ? `${title}（当前页）`
     : mounted
-      ? `${title}（已挂载，切换时保留筛选和选择）`
-      : `打开${title}并保持在工作区`
+      ? `${title}（已打开，切换时保留筛选）`
+      : `打开${title}`
 
   return (
     <div className='group/dock-item relative inline-flex'>
