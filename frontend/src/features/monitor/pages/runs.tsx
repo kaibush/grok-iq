@@ -137,6 +137,11 @@ import {
   getEgressNodeName,
   type EgressNodeNameMap,
 } from '@/features/monitor/components/egress-node-names'
+import {
+  ModelBindWindowError,
+  ModelBindWindowHint,
+  isModelBindWindowIssue,
+} from '@/features/monitor/components/model-bind-window-hint'
 import { EgressNodeReference } from '@/features/monitor/components/egress-node-reference'
 import { FilterChip } from '@/features/monitor/components/filter-chip'
 import { ReasoningPanel } from '@/features/monitor/components/reasoning-panel'
@@ -1520,6 +1525,7 @@ export function RunsPage() {
             <div className='rounded-md border bg-muted/20 p-3 text-xs leading-5 text-muted-foreground'>
               正在执行探针或等待账号设置恢复的账号会跳过；成功修改的账号会自动带入建任务窗口，直接选择方案和轮数即可加入队列。
             </div>
+            <ModelBindWindowHint variant='egress' />
           </div>
           <DialogFooter>
             <Button
@@ -2353,6 +2359,9 @@ function RunDetail({
         egressNodeNames={egressNodeNames}
         onRestore={() => onAction('restore')}
       />
+      {run.error ? (
+        <ModelBindWindowError message={run.error} />
+      ) : null}
       <div className='rounded-lg border bg-muted/20 p-4'>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='min-w-0'>
@@ -2889,19 +2898,26 @@ function SampleCard({
       </div>
       <div className='space-y-3 p-4'>
         {sample.error ? (
-          <div className='space-y-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-            <div>{sample.error}</div>
-            {sample.error_code && (
-              <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
-                <Badge variant='outline'>{sample.error_code}</Badge>
-                {sample.status_code > 0 && (
-                  <span>HTTP {sample.status_code}</span>
-                )}
-                {sample.retry_count ? (
-                  <span>重试 {sample.retry_count} 次</span>
-                ) : null}
+          <div className='space-y-2'>
+            <div className='space-y-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
+              <div className='break-words whitespace-pre-wrap'>
+                {sample.error}
               </div>
-            )}
+              {sample.error_code && (
+                <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+                  <Badge variant='outline'>{sample.error_code}</Badge>
+                  {sample.status_code > 0 && (
+                    <span>HTTP {sample.status_code}</span>
+                  )}
+                  {sample.retry_count ? (
+                    <span>重试 {sample.retry_count} 次</span>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            {isModelBindWindowIssue(sample.error, sample.error_code) ? (
+              <ModelBindWindowHint variant='error' />
+            ) : null}
           </div>
         ) : null}
         {executionMode === 'quality_test' && !sample.response_text ? (

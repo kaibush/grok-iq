@@ -21,6 +21,10 @@ import {
   type EgressNodeNameMap,
 } from '@/features/monitor/components/egress-node-names'
 import { ReasoningPanel } from '@/features/monitor/components/reasoning-panel'
+import {
+  ModelBindWindowHint,
+  isModelBindWindowIssue,
+} from '@/features/monitor/components/model-bind-window-hint'
 import { DualTpsValue, SampleTpsDetail } from '@/features/monitor/components/tps-display'
 
 type AccountSampleExplorerProps = {
@@ -323,8 +327,13 @@ function SampleDetail({
           />
         </div>
         {sample.error && (
-          <div className='rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm break-words whitespace-pre-wrap text-destructive'>
-            {sample.error}
+          <div className='space-y-2'>
+            <div className='rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm break-words whitespace-pre-wrap text-destructive'>
+              {sample.error}
+            </div>
+            {isModelBindWindowIssue(sample.error, sample.error_code) ? (
+              <ModelBindWindowHint variant='error' />
+            ) : null}
           </div>
         )}
         <ReasoningPanel content={sample.reasoning_text || ''} tokenCount={sample.reasoning_tokens} />

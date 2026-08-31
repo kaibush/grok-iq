@@ -25,6 +25,11 @@ import {
 } from '@/features/monitor/components/egress-node-names'
 import { ReasoningPanel } from '@/features/monitor/components/reasoning-panel'
 import { DualTpsValue } from '@/features/monitor/components/tps-display'
+import {
+  ModelBindWindowError,
+  ModelBindWindowHint,
+  isModelBindWindowIssue,
+} from '@/features/monitor/components/model-bind-window-hint'
 
 const STACKED_Z = 'z-[70]'
 
@@ -113,6 +118,7 @@ export function ProbeRunDetailDialog({
                 />
                 <DetailMetric label='错误' value={run.error_count} />
               </div>
+              {run.error ? <ModelBindWindowError message={run.error} /> : null}
               {profile ? (
                 <div className='rounded-lg border bg-muted/20 p-4'>
                   <div className='text-sm font-medium'>{profile.name}</div>
@@ -214,8 +220,13 @@ function PreviewSampleCard({
       </div>
       <div className='space-y-3 p-4'>
         {sample.error ? (
-          <div className='rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-            {sample.error}
+          <div className='space-y-2'>
+            <div className='rounded-lg bg-destructive/10 p-3 text-sm break-words whitespace-pre-wrap text-destructive'>
+              {sample.error}
+            </div>
+            {isModelBindWindowIssue(sample.error, sample.error_code) ? (
+              <ModelBindWindowHint variant='error' />
+            ) : null}
           </div>
         ) : null}
         <ReasoningPanel

@@ -90,6 +90,7 @@ import {
   ServerTableLoadingOverlay,
 } from '@/components/server-pagination'
 import { AccountProbeDetailDialog } from '@/features/monitor/components/account-probe-detail-dialog'
+import { ModelBindWindowHint } from '@/features/monitor/components/model-bind-window-hint'
 import {
   AuthStatusIndicator,
   EgressBindingIndicator,
@@ -1044,6 +1045,7 @@ export function AccountsPage() {
               绑定操作写入 manual，后续 grok2api
               自动均衡不会迁移这些账号。正在执行探针或等待设置恢复的账号会跳过并保留选择。
             </div>
+            <ModelBindWindowHint variant='egress' />
           </div>
           <DialogFooter>
             <Button

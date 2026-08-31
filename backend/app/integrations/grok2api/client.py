@@ -67,6 +67,15 @@ TRANSIENT_GATEWAY_CODES = frozenset(
 )
 MODEL_ACCOUNT_BIND_MISMATCH_HINT = "不存在或与模型来源不匹配"
 MODEL_ACCOUNT_BIND_WINDOW_HINT = "官方 grok2api 校验模型绑定时只看最新约 1000 个账号"
+MODEL_ACCOUNT_BIND_WINDOW_EGRESS_HINT = (
+    "换出口请到账号页选中该账号，使用「批量设置出口」绑定新节点，不依赖模型绑定。"
+)
+MODEL_ACCOUNT_BIND_WINDOW_PROBE_HINT = (
+    "若要钉住该账号做探测：在 grok2api 的 config.yaml 设置 qualityGuard.enabled: true 后重启 grok2api；"
+    "质量守护 sidecar 容器可以不启动。"
+)
+QUALITY_GUARD_UNAVAILABLE_HINT = "质量守护配置暂不可用"
+QUALITY_GUARD_UNAVAILABLE_CODE = "qualityGuardUnavailable"
 ADMIN_REFRESH_COOKIE = "grok2api_admin_refresh"
 ADMIN_TOKEN_REFRESH_SKEW_SECONDS = 30.0
 ACCOUNT_BATCH_UPDATE_SIZE = 10_000
@@ -81,6 +90,8 @@ def model_account_bind_window_message(
     *,
     verified_account_id: int | None = None,
     missing_egress: bool = False,
+    quality_guard_unavailable: bool = False,
+    quality_guard_error: str = "",
 ) -> str:
     """Explain why an old grok2api account cannot be pinned."""
 
@@ -89,13 +100,21 @@ def model_account_bind_window_message(
         f"（{MODEL_ACCOUNT_BIND_WINDOW_HINT}）"
     )
     if missing_egress:
-        return prefix + "，且没有可用出口节点，无法做定向探测。"
-    if verified_account_id is not None:
-        return (
-            prefix
-            + f"，探测无法钉到该账号，实际命中了账号 {verified_account_id}。"
-        )
-    return prefix + "，无法做定向探测。"
+        reason = "，且没有可用出口节点，无法做定向探测。"
+    elif quality_guard_unavailable:
+        reason = "，质量守护未开启，无法做定向探测。"
+    elif verified_account_id is not None:
+        reason = f"，探测无法钉到该账号，实际命中了账号 {verified_account_id}。"
+    elif quality_guard_error:
+        reason = f"，质量守护定向探测失败：{quality_guard_error}。"
+    else:
+        reason = "，无法做定向探测。"
+    return (
+        prefix
+        + reason
+        + MODEL_ACCOUNT_BIND_WINDOW_EGRESS_HINT
+        + MODEL_ACCOUNT_BIND_WINDOW_PROBE_HINT
+    )
 
 
 def is_model_account_bind_mismatch(error: BaseException) -> bool:
@@ -103,8 +122,8 @@ def is_model_account_bind_mismatch(error: BaseException) -> bool:
 
     Older grok2api builds validated bound accounts by listing the newest 1000
     grok_build rows, so existing older IDs returned HTTP 400. Current grok2api
-    counts by ID, but probes still fall back to an unbound route plus a
-    quality-test pin when this error appears.
+    counts by ID, but probes still fall back to quality-guard pinning when
+    this error appears.
     """
 
     if not isinstance(error, IntegrationError) or error.status_code != 400:
@@ -117,6 +136,21 @@ def is_model_account_bind_mismatch(error: BaseException) -> bool:
     return MODEL_ACCOUNT_BIND_MISMATCH_HINT in haystack
 
 
+def is_quality_guard_unavailable(error: BaseException) -> bool:
+    """Return whether grok2api refused quality-guard because it is not configured."""
+
+    if not isinstance(error, IntegrationError):
+        return False
+    if error.error_code == QUALITY_GUARD_UNAVAILABLE_CODE:
+        return True
+    haystack = " ".join(
+        part
+        for part in (error.error_code, str(error), error.response_body)
+        if part
+    )
+    return QUALITY_GUARD_UNAVAILABLE_HINT in haystack
+
+
 def is_transient_gateway_error(*, status_code: int, error_code: str) -> bool:
     """Return whether a failed probe may succeed after a short wait.
 
@@ -127,6 +161,8 @@ def is_transient_gateway_error(*, status_code: int, error_code: str) -> bool:
     as final samples so they are not hidden by retries.
     """
 
+    if error_code == "modelBindWindow":
+        return False
     if error_code in TRANSIENT_GATEWAY_CODES:
         return True
     return status_code in {502, 503, 504}
@@ -1092,11 +1128,15 @@ class Grok2APIClient:
                 timeout=300,
             )
         except IntegrationError as exc:
+            unavailable = is_quality_guard_unavailable(exc)
             raise IntegrationError(
-                "超出 grok2api 模型绑定窗口后，质量守护定向探测失败: "
-                f"{exc}",
+                model_account_bind_window_message(
+                    account_id,
+                    quality_guard_unavailable=unavailable,
+                    quality_guard_error="" if unavailable else str(exc),
+                ),
                 status_code=exc.status_code,
-                error_code=exc.error_code,
+                error_code="modelBindWindow",
                 error_type=exc.error_type,
                 retry_after_seconds=exc.retry_after_seconds,
                 response_body=exc.response_body,

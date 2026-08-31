@@ -46,6 +46,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { ModelBindWindowHint } from '@/features/monitor/components/model-bind-window-hint'
 import { ProfileMultiSelect } from '@/features/monitor/components/profile-multi-select'
 
 type ProbeDialogProps = {
@@ -424,6 +425,10 @@ export function ProbeDialog({
                 快速模式由 grok2api 的出口节点接口执行，仅支持已配置代理的
                 grok_build 出口，不包含上游调度目标。
               </div>
+            )}
+            {(targetMode === 'diagnostic' ||
+              executionMode === 'quality_test') && (
+              <ModelBindWindowHint variant='probe' />
             )}
             {targetMode === 'diagnostic' && selectableEgress.length ? (
               <div className='grid max-h-56 gap-2 overflow-auto sm:grid-cols-2'>

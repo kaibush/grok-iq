@@ -540,6 +540,7 @@ async def test_quality_probe_pin_mismatch_explains_bind_window(
     assert "账号 7" in str(error)
     assert "最新约 1000 个账号" in str(error)
     assert "实际命中了账号 99" in str(error)
+    assert "批量设置出口" in str(error)
 
 
 @pytest.mark.asyncio
@@ -584,3 +585,30 @@ async def test_quality_guard_probe_pins_account_and_verifies_audit(
     assert result.verified_egress_node_id == 110
     assert result.usage["quality_guard"] is True
     assert result.usage["account_bind_skipped"] is True
+
+
+@pytest.mark.asyncio
+async def test_quality_guard_probe_unavailable_explains_enable_steps(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = Grok2APIClient(Settings())
+
+    async def admin_request(*_: Any, **__: Any) -> dict[str, Any]:
+        raise IntegrationError(
+            "grok2api 返回 HTTP 503: 质量守护配置暂不可用",
+            status_code=503,
+            error_code="qualityGuardUnavailable",
+        )
+
+    monkeypatch.setattr(client, "admin_request", admin_request)
+
+    with pytest.raises(IntegrationError) as exc_info:
+        await client.quality_guard_probe(account_id=4725, egress_node_id=110)
+
+    error = exc_info.value
+    assert error.status_code == 503
+    assert error.error_code == "modelBindWindow"
+    assert "质量守护未开启" in str(error)
+    assert "批量设置出口" in str(error)
+    assert "qualityGuard.enabled: true" in str(error)
+    assert "sidecar 容器可以不启动" in str(error)

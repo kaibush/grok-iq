@@ -1014,6 +1014,7 @@ class FakeGrokClient:
         self.quality_guard_calls: list[dict[str, Any]] = []
         self.quality_probe_calls: list[dict[str, Any]] = []
         self.quality_probe_account_id: int | None = None
+        self.quality_guard_unavailable = False
 
     async def get_account(self, account_id: int) -> dict[str, Any]:
         return {
@@ -1120,6 +1121,15 @@ class FakeGrokClient:
     async def quality_guard_probe(self, **kwargs: Any) -> ChatProbeResult:
         self.quality_guard_calls.append(kwargs)
         self.probe_calls += 1
+        if self.quality_guard_unavailable:
+            raise IntegrationError(
+                model_account_bind_window_message(
+                    kwargs["account_id"],
+                    quality_guard_unavailable=True,
+                ),
+                status_code=503,
+                error_code="modelBindWindow",
+            )
         if self.probe_errors:
             raise self.probe_errors.pop(0)
         if self.probe_error is not None:
@@ -2039,7 +2049,7 @@ async def test_quality_test_pins_account_and_node_without_changing_binding(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_bind_window_fallback_pins_via_quality_test(tmp_path: Path):
+async def test_bind_window_fallback_pins_via_quality_guard(tmp_path: Path):
     database = Database(tmp_path / "grokiq.db")
     database.initialize()
     probe_repository = ProbeRepository(database)
@@ -2070,29 +2080,22 @@ async def test_bind_window_fallback_pins_via_quality_test(tmp_path: Path):
         detail = await wait_for_terminal_run(probe_repository, run_id)
         sample = detail["samples"][0]
         assert detail["run"]["status"] == "completed"
-        assert len(client.create_probe_route_calls) == 2
+        assert len(client.create_probe_route_calls) == 1
         assert client.create_probe_route_calls[0]["account_id"] == 10
         assert client.create_probe_route_calls[0]["bind_account"] is True
         assert client.create_probe_route_calls[0]["allow_temporarily_unavailable"] is True
-        assert client.create_probe_route_calls[1]["bind_account"] is False
-        assert client.quality_guard_calls == []
-        assert len(client.quality_probe_calls) == 1
-        probe_call = client.quality_probe_calls[0]
-        assert probe_call["client_key_id"] == "key-1"
-        assert probe_call["public_model"] == "grokiq-probe-test"
-        assert probe_call["account_id"] == 10
-        assert probe_call["egress_node_id"] == 110
-        assert probe_call["pin_account"] is True
-        assert probe_call["max_output_tokens"] == 0
+        assert client.quality_guard_calls == [
+            {"account_id": 10, "egress_node_id": 110}
+        ]
+        assert client.quality_probe_calls == []
         assert client.bindings == []
-        assert client.deleted_route is True
-        assert client.deleted_key is True
-        assert sample["request_id"] == "quality-request-1"
+        assert client.deleted_route is False
+        assert client.deleted_key is False
+        assert sample["request_id"] == "guard-request-1"
         assert sample["verified_account_id"] == 10
         assert sample["verified_egress_node_id"] == 110
-        assert sample["usage"]["quality_test"] is True
+        assert sample["usage"]["quality_guard"] is True
         assert sample["usage"]["account_bind_skipped"] is True
-        assert sample["usage"].get("quality_guard") is not True
     finally:
         await manager.stop()
 
@@ -2130,6 +2133,7 @@ async def test_bind_window_fallback_requires_egress_node(tmp_path: Path):
         assert "模型绑定窗口" in error
         assert "最新约 1000 个账号" in error
         assert "没有可用出口节点" in error
+        assert "批量设置出口" in error
         assert client.quality_guard_calls == []
         assert client.quality_probe_calls == []
         assert client.deleted_route is False
@@ -2138,14 +2142,14 @@ async def test_bind_window_fallback_requires_egress_node(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_bind_window_fallback_explains_unpatched_grok2api(tmp_path: Path):
+async def test_bind_window_fallback_explains_disabled_quality_guard(tmp_path: Path):
     database = Database(tmp_path / "grokiq.db")
     database.initialize()
     probe_repository = ProbeRepository(database)
     client = FakeGrokClient()
     client.account_egress_node_id = 110
     client.bind_mismatch = True
-    client.quality_probe_account_id = 99
+    client.quality_guard_unavailable = True
     manager = ProbeManager(
         settings=Settings(
             database_path=tmp_path / "grokiq.db",
@@ -2172,7 +2176,13 @@ async def test_bind_window_fallback_explains_unpatched_grok2api(tmp_path: Path):
         error = str(sample["error"] or detail["run"]["error"] or "")
         assert "模型绑定窗口" in error
         assert "最新约 1000 个账号" in error
-        assert "实际命中了账号 99" in error
-        assert sample["verified_account_id"] == 99
+        assert "质量守护未开启" in error
+        assert "批量设置出口" in error
+        assert "qualityGuard.enabled: true" in error
+        assert sample["error_code"] == "modelBindWindow"
+        assert client.quality_guard_calls == [
+            {"account_id": 10, "egress_node_id": 110}
+        ]
+        assert client.quality_probe_calls == []
     finally:
         await manager.stop()
