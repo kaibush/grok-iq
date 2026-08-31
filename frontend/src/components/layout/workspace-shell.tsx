@@ -79,12 +79,24 @@ function shouldDropWorkspaceQuery(
 ) {
   const root = queryKey[0]
   const second = queryKey[1]
-  if (id === 'request-audits') return root === 'request-audits'
-  if (id === 'runs') return root === 'runs' || root === 'run'
+  if (id === 'request-audits') {
+    return root === 'request-audits' || root === 'account-samples'
+  }
+  if (id === 'runs') {
+    return (
+      root === 'runs' ||
+      root === 'run' ||
+      root === 'run-preview' ||
+      root === 'run-preview-samples'
+    )
+  }
   if (id === 'quarantine') {
     return (
-      root === 'accounts' &&
-      (second === 'quarantine' || second === 'quarantine-stats')
+      (root === 'accounts' &&
+        (second === 'quarantine' || second === 'quarantine-stats')) ||
+      root === 'account-samples' ||
+      root === 'run-preview' ||
+      root === 'run-preview-samples'
     )
   }
   if (id === 'accounts') {
@@ -92,6 +104,25 @@ function shouldDropWorkspaceQuery(
       root === 'accounts' &&
       second !== 'quarantine' &&
       second !== 'quarantine-stats'
+    )
+  }
+  return false
+}
+
+function shouldDropHeavyWorkspaceQuery(
+  id: WorkspaceTabId,
+  queryKey: readonly unknown[]
+) {
+  const root = queryKey[0]
+  if (id === 'request-audits') {
+    return root === 'request-audits' || root === 'account-samples'
+  }
+  if (id === 'runs' || id === 'quarantine') {
+    return (
+      root === 'run' ||
+      root === 'run-preview' ||
+      root === 'run-preview-samples' ||
+      root === 'account-samples'
     )
   }
   return false
@@ -145,9 +176,16 @@ function WorkspacePageFrame({
   id: WorkspaceTabId
   children: ReactNode
 }) {
+  const queryClient = useQueryClient()
   useLayoutEffect(() => {
     window.dispatchEvent(new Event('resize'))
-  }, [id])
+    return () => {
+      queryClient.removeQueries({
+        predicate: (query) =>
+          shouldDropHeavyWorkspaceQuery(id, query.queryKey),
+      })
+    }
+  }, [id, queryClient])
 
   return (
     <div

@@ -25,6 +25,15 @@ import {
   buildHtmlDocument,
   extractHtmlPreviews,
 } from '@/lib/formatted-content'
+import {
+  HTML_THUMB_FRAME_HEIGHT,
+  HTML_THUMB_FRAME_WIDTH,
+  useHtmlThumbSlot,
+} from '@/lib/html-preview-frame'
+import {
+  RUN_PREVIEW_GC_TIME,
+  slimRunPreview,
+} from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -52,8 +61,8 @@ const AccountProbeDetailDialog = lazy(() =>
 )
 
 const PREVIEW_ISOLATE_NOTE = 'HTML 预览人工判定降智'
-const THUMB_FRAME_WIDTH = 1280
-const THUMB_FRAME_HEIGHT = 800
+const THUMB_FRAME_WIDTH = HTML_THUMB_FRAME_WIDTH
+const THUMB_FRAME_HEIGHT = HTML_THUMB_FRAME_HEIGHT
 const THUMB_GRID_CLASSNAME =
   'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 const PREVIEW_VIEW_STORAGE_KEY = 'grokiq.monitor.result-preview.v1'
@@ -332,6 +341,8 @@ export function ResultPreviewGallery({
       expandRounds &&
       previewRunIds.length > 0,
     staleTime: 30_000,
+    gcTime: RUN_PREVIEW_GC_TIME,
+    refetchOnWindowFocus: false,
   })
   const expandItems = useMemo(
     () =>
@@ -445,18 +456,22 @@ export function ResultPreviewGallery({
   }
   const neighborRunIds = useMemo(() => {
     if (!item || view !== 'split') return []
-    const ids = [item.runId]
+    const ids: string[] = []
     const previous = items[safeIndex - 1]
     const next = items[safeIndex + 1]
-    if (previous?.runId) ids.push(previous.runId)
-    if (next?.runId) ids.push(next.runId)
+    if (previous?.runId && previous.runId !== item.runId) {
+      ids.push(previous.runId)
+    }
+    if (next?.runId && next.runId !== item.runId) {
+      ids.push(next.runId)
+    }
     return Array.from(new Set(ids.filter(Boolean)))
   }, [item, items, safeIndex, view])
 
   useQueries({
     queries: neighborRunIds.map((runId) => ({
-      queryKey: ['run', runId],
-      queryFn: () => api.run(runId),
+      queryKey: ['run-preview', runId],
+      queryFn: async () => slimRunPreview(await api.run(runId)),
       enabled:
         open &&
         Boolean(runId) &&
@@ -465,6 +480,8 @@ export function ResultPreviewGallery({
             entry.runId === runId && Boolean(entry.content || entry.sample)
         ),
       staleTime: 30_000,
+      gcTime: RUN_PREVIEW_GC_TIME,
+      refetchOnWindowFocus: false,
     })),
   })
 
@@ -472,10 +489,12 @@ export function ResultPreviewGallery({
     item && !item.content && !item.sample && item.runId
   )
   const runQuery = useQuery({
-    queryKey: ['run', item?.runId],
-    queryFn: () => api.run(item!.runId),
+    queryKey: ['run-preview', item?.runId],
+    queryFn: async () => slimRunPreview(await api.run(item!.runId)),
     enabled: open && view === 'split' && Boolean(item?.runId),
     staleTime: 30_000,
+    gcTime: RUN_PREVIEW_GC_TIME,
+    refetchOnWindowFocus: false,
   })
   const accountQuery = useQuery({
     queryKey: ['account', item?.accountId],
@@ -526,6 +545,12 @@ export function ResultPreviewGallery({
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
+
+  useEffect(() => {
+    if (open) return
+    client.removeQueries({ queryKey: ['run-preview'] })
+    client.removeQueries({ queryKey: ['run-preview-samples'] })
+  }, [client, open])
 
   useEffect(() => {
     // Reset per-item chrome after the selected preview card changes.
@@ -1487,7 +1512,7 @@ function VirtualizedThumbGrid({
   const rows = Math.ceil(items.length / cols) || 1
   const measured = viewport.width > 0 && cellWidth > 0
   const startRow = measured
-    ? Math.max(0, Math.floor(scrollTop / Math.max(rowHeight, 1)) - 1)
+    ? Math.max(0, Math.floor(scrollTop / Math.max(rowHeight, 1)))
     : 0
   const endRow = measured
     ? Math.min(
@@ -1495,12 +1520,12 @@ function VirtualizedThumbGrid({
         Math.ceil(
           (scrollTop + Math.max(viewport.height, rowHeight)) /
             Math.max(rowHeight, 1)
-        ) + 1
+        )
       )
-    : rows
+    : 0
   const startIndex = startRow * cols
   const endIndex = Math.min(items.length, endRow * cols)
-  const visibleItems = measured ? items.slice(startIndex, endIndex) : items
+  const visibleItems = measured ? items.slice(startIndex, endIndex) : []
   return (
     <div
       ref={hostRef}
@@ -1570,10 +1595,12 @@ function PreviewThumbCard({
   const { ref, inView } = useInView<HTMLButtonElement>()
   const hasLocal = Boolean(item.content || item.sample)
   const runQuery = useQuery({
-    queryKey: ['run', item.runId],
-    queryFn: () => api.run(item.runId),
+    queryKey: ['run-preview', item.runId],
+    queryFn: async () => slimRunPreview(await api.run(item.runId)),
     enabled: inView && !hasLocal && Boolean(item.runId),
     staleTime: 30_000,
+    gcTime: RUN_PREVIEW_GC_TIME,
+    refetchOnWindowFocus: false,
   })
   const sample = item.sample
     ? item.sample
@@ -1636,6 +1663,7 @@ function PreviewThumbCard({
 function ScaledHtmlThumb({ html }: { html: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const slotReady = useHtmlThumbSlot(true)
   const htmlDocument = useMemo(() => buildHtmlDocument(html), [html])
   useLayoutEffect(() => {
     const node = ref.current
@@ -1652,10 +1680,10 @@ function ScaledHtmlThumb({ html }: { html: string }) {
       ref={ref}
       className='pointer-events-none absolute inset-0 z-0 overflow-hidden bg-white'
     >
-      {scale > 0 ? (
+      {scale > 0 && slotReady ? (
         <iframe
           title='HTML thumbnail'
-          sandbox='allow-scripts allow-forms'
+          sandbox='allow-scripts'
           srcDoc={htmlDocument}
           tabIndex={-1}
           className='absolute top-0 left-0 origin-top-left border-0 bg-white'
@@ -1665,7 +1693,11 @@ function ScaledHtmlThumb({ html }: { html: string }) {
             transform: `scale(${scale})`,
           }}
         />
-      ) : null}
+      ) : (
+        <div className='flex h-full w-full items-center justify-center text-muted-foreground'>
+          <Loader2 className='size-4 animate-spin' />
+        </div>
+      )}
     </div>
   )
 }
@@ -1678,7 +1710,7 @@ function useInView<T extends HTMLElement>() {
     if (!node) return
     const observer = new IntersectionObserver(
       ([entry]) => setInView(Boolean(entry?.isIntersecting)),
-      { rootMargin: '280px 0px', threshold: 0.01 }
+      { rootMargin: '80px 0px', threshold: 0.01 }
     )
     observer.observe(node)
     return () => observer.disconnect()

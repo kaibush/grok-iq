@@ -73,6 +73,7 @@ import {
   type RequestAuditWindowInput,
   type RequestAuditWindowPreset,
 } from '@/lib/api'
+import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { EnabledBadge } from '@/components/enabled-badge'
@@ -1336,6 +1337,8 @@ export function RequestAuditsPage() {
     }),
     [selectedWindow]
   )
+  const needsSummary = mainView === 'overview' || mainView === 'workspace'
+  const needsRecords = mainView === 'ledger'
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -1374,7 +1377,8 @@ export function RequestAuditsPage() {
   const egressQuery = useQuery({
     queryKey: ['egress'],
     queryFn: () => api.egress({ pageSize: 500 }),
-    enabled: probeSelection != null || sampleAccount != null,
+    enabled:
+      needsRecords || probeSelection != null || sampleAccount != null,
     staleTime: 60_000,
   })
   const accountSamplesQuery = useQuery({
@@ -1390,6 +1394,8 @@ export function RequestAuditsPage() {
         pageSize: samplePageSize,
       }),
     enabled: sampleAccount?.accountId != null,
+    gcTime: 30_000,
+    refetchOnWindowFocus: false,
   })
   const egressNodeNames = useMemo(
     () => buildEgressNodeNameMap(egressQuery.data?.items),
@@ -1399,9 +1405,11 @@ export function RequestAuditsPage() {
   const summaryQuery = useQuery({
     queryKey: ['request-audits', 'summary', windowParams],
     queryFn: () => api.requestAuditSummary(windowParams),
-    placeholderData: keepPreviousData,
-    refetchInterval: liveRefreshInterval,
+    enabled: needsSummary,
+    gcTime: 30_000,
+    refetchInterval: needsSummary ? liveRefreshInterval : false,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   })
   const pinnedAccountQuery = useQuery({
     queryKey: ['account', pinnedAccountId],
@@ -1422,8 +1430,8 @@ export function RequestAuditsPage() {
       auditNode,
       pinnedAccountId,
     ],
-    queryFn: () =>
-      api.requestAudits({
+    queryFn: async () => {
+      const pageData = await api.requestAudits({
         ...windowParams,
         page,
         pageSize,
@@ -1433,10 +1441,18 @@ export function RequestAuditsPage() {
           deferredAuditClientKey === 'all' ? '' : deferredAuditClientKey.trim(),
         risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
         egressNodeId: auditNode === 'all' ? undefined : Number(auditNode),
-      }),
+      })
+      return {
+        ...pageData,
+        items: pageData.items.map(slimRequestAuditRecord),
+      }
+    },
+    enabled: needsRecords,
     placeholderData: keepPreviousData,
-    refetchInterval: liveRefreshInterval,
+    gcTime: 60_000,
+    refetchInterval: needsRecords ? liveRefreshInterval : false,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   })
   const probeContextQuery = useQuery({
     queryKey: [
@@ -1454,6 +1470,8 @@ export function RequestAuditsPage() {
       }),
     enabled: auditDetailOpen && Boolean(selectedAuditRecord),
     staleTime: 60_000,
+    gcTime: 30_000,
+    refetchOnWindowFocus: false,
   })
 
   const scanMutation = useMutation({
@@ -1610,6 +1628,21 @@ export function RequestAuditsPage() {
     () => summaryQuery.data?.nodes ?? [],
     [summaryQuery.data?.nodes]
   )
+  const ledgerNodeOptions = useMemo(() => {
+    const fromSummary = nodes
+      .filter((item) => item.egressNodeId)
+      .map((item) => ({
+        id: String(item.egressNodeId),
+        name: item.egressNodeName || `节点 #${item.egressNodeId}`,
+      }))
+    if (fromSummary.length) return fromSummary
+    return (egressQuery.data?.items ?? [])
+      .filter((item) => item.id)
+      .map((item) => ({
+        id: String(item.id),
+        name: item.name || `节点 #${item.id}`,
+      }))
+  }, [egressQuery.data?.items, nodes])
   const trend = useMemo(
     () => summaryQuery.data?.trend ?? [],
     [summaryQuery.data?.trend]
@@ -1760,8 +1793,8 @@ export function RequestAuditsPage() {
   const auditNodeLabel =
     auditNode === 'all'
       ? ''
-      : nodes.find((item) => String(item.egressNodeId) === auditNode)
-          ?.egressNodeName || `节点 #${auditNode}`
+      : ledgerNodeOptions.find((item) => item.id === auditNode)?.name ||
+        `节点 #${auditNode}`
   const clientKeyOptions = recordsQuery.data?.clientKeys ?? []
   const selectedClientKey = clientKeyOptions.find(
     (item) => item.id === auditClientKey
@@ -1783,9 +1816,10 @@ export function RequestAuditsPage() {
   const bulkSelectionPending =
     bulkSsoMutation.isPending || bulkIsolationMutation.isPending
 
-  const initialLoading =
-    statusQuery.isLoading || summaryQuery.isLoading || recordsQuery.isLoading
-  if (initialLoading && !statusQuery.data && !summaryQuery.data) {
+  const waitingForTabData =
+    (needsSummary && summaryQuery.isLoading && !summaryQuery.data) ||
+    (needsRecords && recordsQuery.isLoading && !recordsQuery.data)
+  if ((statusQuery.isLoading && !statusQuery.data) || waitingForTabData) {
     return (
       <Page>
         <LoadingState label='正在读取本地请求审计投影' />
@@ -1804,17 +1838,13 @@ export function RequestAuditsPage() {
   const scan =
     selectedWindow.window === 'today'
       ? status?.scan
-      : summaryQuery.isPlaceholderData
-        ? undefined
-        : summaryQuery.data?.scan
+      : summaryQuery.data?.scan
   const needsInitialScan = Boolean(
     status?.configured && config.enabled && scan && !scan.initialComplete
   )
-  const activeWindow = !summaryQuery.isPlaceholderData
-    ? summaryQuery.data?.window
-    : !recordsQuery.isPlaceholderData
-      ? recordsQuery.data?.window
-      : undefined
+  const activeWindow =
+    summaryQuery.data?.window ??
+    (!recordsQuery.isPlaceholderData ? recordsQuery.data?.window : undefined)
   const selectedWindowLabel =
     windowOptions.find((item) => item.value === selectedWindow.window)?.label ??
     '当天'
@@ -2063,12 +2093,13 @@ export function RequestAuditsPage() {
   }
 
   const refreshLocal = () => {
-    void Promise.all([
+    const jobs: Array<Promise<unknown>> = [
       statusQuery.refetch(),
-      summaryQuery.refetch(),
-      recordsQuery.refetch(),
       schedulerQuery.refetch(),
-    ])
+    ]
+    if (needsSummary) jobs.push(summaryQuery.refetch())
+    if (needsRecords) jobs.push(recordsQuery.refetch())
+    void Promise.all(jobs)
   }
 
   const openAuditDetail = (record: RequestAuditRecord) => {
@@ -2140,7 +2171,10 @@ export function RequestAuditsPage() {
             <ListFilter />
             请求流水
             <Badge variant='secondary'>
-              {formatNumber(recordsQuery.data?.total ?? 0, 0)}
+              {formatNumber(
+                recordsQuery.data?.total ?? summary?.requests ?? 0,
+                0
+              )}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value='schedule'>
@@ -3202,17 +3236,11 @@ export function RequestAuditsPage() {
                                   <SelectItem value='all'>
                                     所有代理节点
                                   </SelectItem>
-                                  {nodes
-                                    .filter((item) => item.egressNodeId)
-                                    .map((item) => (
-                                      <SelectItem
-                                        key={item.key}
-                                        value={String(item.egressNodeId)}
-                                      >
-                                        {item.egressNodeName ||
-                                          `节点 #${item.egressNodeId}`}
-                                      </SelectItem>
-                                    ))}
+                                  {ledgerNodeOptions.map((item) => (
+                                    <SelectItem key={item.id} value={item.id}>
+                                      {item.name}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                               <Select
