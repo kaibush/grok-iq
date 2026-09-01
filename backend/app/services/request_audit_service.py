@@ -75,6 +75,10 @@ def _needs_full_ledger_scan(risk: str) -> bool:
     return bool(value) and value != "all"
 
 
+def _audit_error_code(value: Any) -> str:
+    return str(value or "").strip()
+
+
 def _positive_int(value: Any) -> int | None:
     try:
         number = int(value)
@@ -150,7 +154,7 @@ def calculate_audit_tps(item: dict[str, Any]) -> float | None:
     if not bool(item.get("streaming")):
         return None
     status = _int_or_zero(item.get("statusCode"))
-    if status < 200 or status >= 300 or str(item.get("errorCode") or ""):
+    if status < 200 or status >= 300 or _audit_error_code(item.get("errorCode")):
         return None
     output_tokens = _positive_int(item.get("outputTokens"))
     first_token_ms = _nonnegative_int(item.get("firstTokenMs"))
@@ -1523,6 +1527,7 @@ class RequestAuditService:
                 "model_public_id": str(item.get("modelPublicId") or ""),
                 "operation": str(item.get("operation") or ""),
                 "reasoning_tokens_reported": "reasoningTokens" in item,
+                "error_code": _audit_error_code(item.get("errorCode")),
             },
         )
         raw_keys = (
@@ -1576,6 +1581,7 @@ class RequestAuditService:
             "egress_mode": str(item.get("egressMode") or ""),
             "egress_scope": str(item.get("egressScope") or ""),
             "status_code": status_code,
+            "error_code": _audit_error_code(item.get("errorCode")),
             "streaming": bool(item.get("streaming")),
             "input_tokens": _int_or_zero(item.get("inputTokens")),
             "media_input_images": media_input_images,
@@ -2638,6 +2644,7 @@ class RequestAuditService:
                 and account_id is not None
                 and policy.mode in {"required", "observe"}
                 and 200 <= _int_or_zero(row.get("status_code")) < 300
+                and not _audit_error_code(row.get("error_code") or row.get("errorCode"))
                 and bool(row.get("reasoning_tokens_reported"))
                 and _int_or_zero(row.get("output_tokens"))
                 >= policy.minimum_output_tokens
@@ -2770,6 +2777,9 @@ class RequestAuditService:
                 "operation": str(row.get("operation") or ""),
                 "reasoning_tokens_reported": bool(
                     row.get("reasoning_tokens_reported")
+                ),
+                "error_code": _audit_error_code(
+                    row.get("error_code") or row.get("errorCode")
                 ),
             },
         )
@@ -3041,6 +3051,7 @@ class RequestAuditService:
             "egressMode": str(row.get("egress_mode") or ""),
             "egressScope": str(row.get("egress_scope") or ""),
             "statusCode": int(row.get("status_code") or 0),
+            "errorCode": _audit_error_code(row.get("error_code") or row.get("errorCode")),
             "streaming": bool(row.get("streaming")),
             "inputTokens": int(row.get("input_tokens") or 0),
             "mediaInputImages": int(row.get("media_input_images") or 0),

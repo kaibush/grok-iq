@@ -355,6 +355,7 @@ class RequestAuditRecord(Base):
     egress_mode: Mapped[str] = mapped_column(String(24), default="", nullable=False)
     egress_scope: Mapped[str] = mapped_column(String(48), default="", nullable=False)
     status_code: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_code: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     streaming: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     input_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     media_input_images: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

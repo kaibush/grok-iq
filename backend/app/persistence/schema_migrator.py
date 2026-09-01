@@ -264,6 +264,11 @@ COMPATIBILITY_COLUMNS = {
             "ALTER TABLE request_audit_records ADD COLUMN client_key_name "
             "VARCHAR(160) NOT NULL DEFAULT ''",
         ),
+        (
+            "error_code",
+            "ALTER TABLE request_audit_records ADD COLUMN error_code "
+            "VARCHAR(120) NOT NULL DEFAULT ''",
+        ),
     ],
     "request_audit_account_verifications": [
         (
@@ -359,6 +364,7 @@ class DatabaseSchemaMigrator:
             self._backfill_sso_reports(connection, table_names)
             self._backfill_plan_profiles(connection, table_names)
             self._backfill_register_sso_received_at(connection, table_names)
+            self._backfill_request_audit_error_codes(connection, table_names)
 
     @staticmethod
     def _missing_column_statements(inspector, table_names: set[str]) -> list[str]:  # type: ignore[no-untyped-def]
@@ -403,6 +409,20 @@ class DatabaseSchemaMigrator:
             "WHEN 'error' THEN 'http_error' "
             "ELSE risk_rule_id END "
             "WHERE risk_rule_id = ''"
+        )
+
+    @staticmethod
+    def _backfill_request_audit_error_codes(  # type: ignore[no-untyped-def]
+        connection, table_names: set[str]
+    ) -> None:
+        if "request_audit_records" not in table_names:
+            return
+        connection.exec_driver_sql(
+            "UPDATE request_audit_records "
+            "SET error_code = TRIM(CAST(json_extract(raw, '$.errorCode') AS TEXT)) "
+            "WHERE error_code = '' "
+            "AND json_valid(raw) "
+            "AND COALESCE(TRIM(CAST(json_extract(raw, '$.errorCode') AS TEXT)), '') != ''"
         )
 
     @staticmethod

@@ -720,6 +720,7 @@ export type RequestAuditRecord = {
   egressMode: string
   egressScope: string
   statusCode: number
+  errorCode?: string
   streaming: boolean
   inputTokens: number
   mediaInputImages: number

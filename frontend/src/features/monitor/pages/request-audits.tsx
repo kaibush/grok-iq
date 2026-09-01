@@ -317,6 +317,48 @@ function clientKeyLabel(row: { clientKeyName?: string; clientKeyId?: string }) {
   return '—'
 }
 
+const auditErrorLabels: Record<string, string> = {
+  upstream_stream_interrupted: '上游流中断',
+  upstream_stream_idle_timeout: '上游流空闲超时',
+  upstream_stream_error: '上游流错误',
+  upstream_stream_incomplete: '上游流不完整',
+  stream_interrupted: '流中断',
+  upstream_model_cooling: '模型冷却',
+  upstream_cooling: '上游冷却',
+  upstream_quota_exhausted: '配额耗尽',
+  upstream_rate_limited: '上游限流',
+  upstream_rate_limited_subscription_free_usage_exhausted: '免费额度耗尽',
+  upstream_rate_limited_resource_exhausted: '资源耗尽',
+  upstream_rate_limited_someresourcehasbeenexhausted: '资源耗尽',
+  upstream_network_error: '上游网络错误',
+  upstream_saturated: '上游饱和',
+  upstream_unavailable: '上游不可用',
+  upstream_server_error_unavailable: '上游服务不可用',
+  upstream_header_timeout: '上游头超时',
+  upstream_error: '上游错误',
+  upstream_forbidden_permission_denied: '上游拒绝访问',
+  quality_degraded: '质量降级',
+  request_canceled: '请求已取消',
+  client_key_account_scope_unavailable: 'Key 账号范围不可用',
+}
+
+function auditErrorCode(row: { errorCode?: string | null }) {
+  return row.errorCode?.trim() || ''
+}
+
+function auditErrorLabel(code: string) {
+  return auditErrorLabels[code] || code
+}
+
+function isSuccessfulAuditStatus(row: {
+  statusCode: number
+  errorCode?: string | null
+}) {
+  return (
+    row.statusCode >= 200 && row.statusCode < 300 && !auditErrorCode(row)
+  )
+}
+
 type AuditBulkActionSource = 'risk' | 'ledger'
 
 type AuditProbeSelection = {
@@ -4022,9 +4064,21 @@ function AuditRecordDetailDialog({
               />
               <AuditDetailField
                 label='状态码'
-                value={String(record.statusCode || '—')}
+                value={
+                  auditErrorCode(record)
+                    ? `${record.statusCode || '—'} · ${auditErrorLabel(auditErrorCode(record))}`
+                    : String(record.statusCode || '—')
+                }
                 mono
               />
+              {auditErrorCode(record) ? (
+                <AuditDetailField
+                  label='上游错误'
+                  value={`${auditErrorLabel(auditErrorCode(record))} · ${auditErrorCode(record)}`}
+                  mono
+                  copyValue={auditErrorCode(record)}
+                />
+              ) : null}
               <AuditDetailField
                 label='输入 Token'
                 value={formatNumber(record.inputTokens, 0)}
@@ -5123,14 +5177,23 @@ function AuditRow({
       </TableCell>
       <TableCell className='align-middle'>
         <Badge
-          variant={
-            row.statusCode >= 200 && row.statusCode < 300
-              ? 'success'
-              : 'destructive'
+          variant={isSuccessfulAuditStatus(row) ? 'success' : 'destructive'}
+          title={
+            auditErrorCode(row)
+              ? `${row.statusCode || '—'} · ${auditErrorCode(row)}`
+              : undefined
           }
         >
           {row.statusCode || '—'}
         </Badge>
+        {auditErrorCode(row) ? (
+          <div
+            className='mt-0.5 max-w-[9rem] truncate text-[10px] text-destructive'
+            title={auditErrorCode(row)}
+          >
+            {auditErrorLabel(auditErrorCode(row))}
+          </div>
+        ) : null}
       </TableCell>
       <TableCell className='align-middle'>
         <div className='flex flex-wrap items-center gap-1.5'>

@@ -253,3 +253,33 @@ async def test_list_page_risk_filter_still_scans_window(tmp_path: Path):
     assert page["total"] >= 1
     assert all(item["riskLevel"] == "high" for item in page["items"])
     assert page["items"][0]["reasoningZeroStreak"] == 4
+
+
+
+async def test_list_page_exposes_upstream_error_code(tmp_path: Path):
+    repository, service = _build(tmp_path)
+    now = utc_now()
+    repository.upsert_records(
+        [
+            _record(
+                now,
+                upstream_id="63707",
+                request_id="D9pqBOfqr7K8qoW9",
+                status_code=200,
+                error_code="upstream_stream_interrupted",
+                output_tokens=0,
+                reasoning_tokens=0,
+                reasoning_tokens_reported=False,
+                first_token_ms=None,
+                duration_ms=129727,
+                tps=None,
+            )
+        ]
+    )
+
+    page = await service.list_page(page=1, page_size=10, window_preset="7d")
+    assert page["total"] == 1
+    item = page["items"][0]
+    assert item["requestId"] == "D9pqBOfqr7K8qoW9"
+    assert item["statusCode"] == 200
+    assert item["errorCode"] == "upstream_stream_interrupted"

@@ -54,6 +54,7 @@ def test_normalize_record_keeps_client_key_identity():
             "durationMs": 110,
             "firstTokenMs": 10,
             "createdAt": created_at.isoformat(),
+            "errorCode": "upstream_stream_interrupted",
         },
         "99",
         created_at.date().isoformat(),
@@ -62,7 +63,9 @@ def test_normalize_record_keeps_client_key_identity():
     )
     assert record["client_key_id"] == "42"
     assert record["client_key_name"] == "production"
+    assert record["error_code"] == "upstream_stream_interrupted"
     assert record["raw"]["clientKeyName"] == "production"
+    assert record["raw"]["errorCode"] == "upstream_stream_interrupted"
 
 
 async def test_list_page_filters_client_key_name():

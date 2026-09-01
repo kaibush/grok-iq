@@ -103,6 +103,7 @@ class RequestAuditRepository:
             "egress_mode",
             "egress_scope",
             "status_code",
+            "error_code",
             "streaming",
             "input_tokens",
             "media_input_images",

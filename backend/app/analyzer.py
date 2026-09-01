@@ -453,9 +453,16 @@ def _match_classification(
     )
 
 
+def _context_error_code(context: RuleContext) -> str:
+    extra = context.extra or {}
+    return str(extra.get("error_code") or extra.get("errorCode") or "").strip()
+
+
 def _rule_http_error(context: RuleContext, _thresholds: Thresholds) -> RuleMatch | None:
-    if context.status_code < 200 or context.status_code >= 300:
-        return RuleMatch("error", severity=1)
+    error_code = _context_error_code(context)
+    if context.status_code < 200 or context.status_code >= 300 or error_code:
+        reason = f"上游异常：{error_code}" if error_code else ""
+        return RuleMatch("error", severity=1, reason=reason)
     return None
 
 
@@ -532,6 +539,7 @@ def reasoning_zero_applicable(
         and reported is True
         and context.status_code >= 200
         and context.status_code < 300
+        and not _context_error_code(context)
         and context.output_tokens >= policy.minimum_output_tokens
     )
     return policy, applicable
@@ -652,7 +660,7 @@ for _builtin_rule in (
     RiskRule(
         "http_error",
         "请求错误",
-        "非 2xx 响应不参与风险统计",
+        "非 2xx 或带上游错误码的响应不参与风险统计",
         _rule_http_error,
         priority=10,
         configurable=False,

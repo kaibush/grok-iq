@@ -255,6 +255,7 @@ def _audit_row(item: dict[str, Any]) -> dict[str, Any]:
         "risk_level": str(item.get("riskLevel") or item.get("risk_level") or ""),
         "tps": item.get("tps"),
         "status_code": item.get("statusCode") or item.get("status_code"),
+        "error_code": str(item.get("errorCode") or item.get("error_code") or ""),
         "duration_ms": item.get("durationMs") or item.get("duration_ms"),
         "client_key_name": str(
             item.get("clientKeyName") or item.get("client_key_name") or ""

@@ -576,3 +576,20 @@ def test_custom_cumulative_rate_and_hard_count_change_status():
     assert suspect == "watch"
     assert not any("达到 80%" in reason for reason in reasons)
     assert high_risk == "high_risk"
+
+
+def test_audit_upstream_error_code_is_not_a_successful_2xx():
+    result = classify_audit_sample(
+        status_code=200,
+        output_tokens=0,
+        reasoning_tokens=0,
+        first_token_ms=None,
+        duration_ms=129_727,
+        tps=None,
+        thresholds=Thresholds(),
+        extra={"errorCode": "upstream_stream_interrupted"},
+    )
+
+    assert result.name == "error"
+    assert result.rule_id == "http_error"
+    assert "upstream_stream_interrupted" in result.reasons[0]
