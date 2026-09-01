@@ -1735,9 +1735,6 @@ export function RunsPage() {
                   onAction={(action) =>
                     mutate.mutate({ action, id: detail.data.run.id })
                   }
-                  onPreviewSample={(sampleId) =>
-                    openRunPreview(detail.data.run.id, sampleId)
-                  }
                 />
               )
             )}
@@ -2262,12 +2259,10 @@ function RunDetail({
   data,
   egressNodeNames,
   onAction,
-  onPreviewSample,
 }: {
   data: { run: ProbeRun; profile: ProbeProfile; samples: ProbeSample[] }
   egressNodeNames: EgressNodeNameMap
   onAction: (action: 'cancel' | 'retry' | 'delete' | 'restore') => void
-  onPreviewSample?: (sampleId: string) => void
 }) {
   const run = data.run
   const profile = data.profile
@@ -2408,11 +2403,6 @@ function RunDetail({
             expectedImageUrl={profile.expected_image_url}
             executionMode={run.execution_mode}
             egressNodeNames={egressNodeNames}
-            onPreview={
-              onPreviewSample
-                ? () => onPreviewSample(sample.id)
-                : undefined
-            }
           />
         ))}
         {!data.samples.length && (
@@ -2735,13 +2725,11 @@ function SampleCard({
   expectedImageUrl,
   executionMode,
   egressNodeNames,
-  onPreview,
 }: {
   sample: ProbeSample
   expectedImageUrl?: string
   executionMode: ExecutionMode
   egressNodeNames: EgressNodeNameMap
-  onPreview?: () => void
 }) {
   const responseText = sample.response_text || '（空响应）'
   const isLongResponse = responseText.length > 4_000
@@ -3003,7 +2991,6 @@ function SampleCard({
                   <HtmlPreviewButton
                     content={responseText}
                     expectedImageUrl={expectedImageUrl}
-                    onPreview={onPreview}
                   />
                   {responseCollapsible && responseExpanded && (
                     <Button

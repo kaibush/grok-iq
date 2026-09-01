@@ -359,22 +359,12 @@ export function FormattedContentPreviewButton({
 export function HtmlPreviewButton({
   content,
   expectedImageUrl,
-  onPreview,
 }: {
   content: string
   expectedImageUrl?: string
-  onPreview?: () => void
 }) {
   const previews = useMemo(() => extractHtmlPreviews(content), [content])
   if (!previews.length) return null
-  if (onPreview) {
-    return (
-      <Button type='button' size='sm' variant='outline' onClick={onPreview}>
-        <Eye />
-        预览 HTML
-      </Button>
-    )
-  }
   return (
     <FormattedContentPreviewButton
       content={content}
