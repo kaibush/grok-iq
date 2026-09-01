@@ -136,26 +136,51 @@ async def test_pre_disable_skips_already_disabled_records():
     assert result is existing
 
 
-async def test_pre_disable_isolates_tps_only_without_sso():
+async def test_pre_disable_cools_tps_only_without_sso():
+    service, _repository, account_service = build_service()
+    service.repository.create_verification.return_value = {
+        "status": "pending",
+        "action_status": "pending",
+    }
+    account_service.apply_tps_cooldown.return_value = {
+        "actionStatus": "cooled",
+        "cooldownUntil": utc_now(),
+        "disabledByCooldown": True,
+    }
+
+    result = await service._process_pre_disable_candidate(tps_record())
+
+    account_service.apply_tps_only_deprioritization.assert_not_called()
+    account_service.apply_auto_quarantine.assert_not_called()
+    account_service.apply_tps_cooldown.assert_awaited()
+    note = account_service.apply_tps_cooldown.await_args.kwargs["note"]
+    detail = account_service.apply_tps_cooldown.await_args.kwargs["detail"]
+    assert "冷却" in note
+    assert "SSO" not in note
+    assert detail["riskRuleId"] == "fast_risk"
+    assert detail["tpsStreak"] == 2
+    assert result["status"] == "sso_skipped"
+    assert result["action_status"] == "cooled"
+    assert result["egress_recommendation"]["kind"] == "tps_cooldown"
+
+
+async def test_pre_disable_isolates_tps_only_after_cooldown():
     service, _repository, account_service = build_service()
     service.repository.create_verification.return_value = {
         "status": "pending",
         "action_status": "pending",
     }
     account_service.apply_auto_quarantine.return_value = {"actionStatus": "disabled"}
+    record = tps_record()
+    record["_tps_disposition"] = "disable"
 
-    result = await service._process_pre_disable_candidate(tps_record())
+    result = await service._process_pre_disable_candidate(record)
 
-    account_service.apply_tps_only_deprioritization.assert_not_called()
+    account_service.apply_tps_cooldown.assert_not_called()
     account_service.apply_auto_quarantine.assert_awaited()
     note = account_service.apply_auto_quarantine.await_args.kwargs["note"]
-    detail = account_service.apply_auto_quarantine.await_args.kwargs["detail"]
-    assert "TPS" in note
-    assert "SSO" not in note
+    assert "冷却后" in note
     assert account_service.apply_auto_quarantine.await_args.kwargs["permanent"] is True
-    assert detail["riskRuleId"] == "fast_risk"
-    assert detail["tpsAnomalyCount"] == 2
-    assert result["status"] == "sso_skipped"
     assert result["action_status"] == "disabled"
 
 

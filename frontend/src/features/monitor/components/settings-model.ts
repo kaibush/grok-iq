@@ -64,6 +64,7 @@ export type SettingsForm = {
   requestAuditTpsOnlyDeprioritizeEnabled: boolean
   requestAuditTpsOnlyPriority: number
   requestAuditTpsOnlyMinCount: number
+  requestAuditTpsCooldownMinutes: number
   analysisWindowHours: number
   degradationTps: number
   strongDegradationTps: number
@@ -384,6 +385,8 @@ export function toSettingsForm(
     requestAuditTpsOnlyPriority:
       settings.requestAuditTpsOnlyPriority ?? -1_000_000,
     requestAuditTpsOnlyMinCount: settings.requestAuditTpsOnlyMinCount ?? 2,
+    requestAuditTpsCooldownMinutes:
+      settings.requestAuditTpsCooldownMinutes ?? 30,
     analysisWindowHours: settings.analysisWindowHours,
     degradationTps: settings.degradationTps,
     strongDegradationTps: settings.strongDegradationTps,
@@ -496,6 +499,7 @@ export function buildSettingsPayload(
       form.requestAuditTpsOnlyDeprioritizeEnabled,
     requestAuditTpsOnlyPriority: form.requestAuditTpsOnlyPriority,
     requestAuditTpsOnlyMinCount: form.requestAuditTpsOnlyMinCount,
+    requestAuditTpsCooldownMinutes: form.requestAuditTpsCooldownMinutes,
     analysisWindowHours: form.analysisWindowHours,
     degradationTps: form.degradationTps,
     strongDegradationTps: form.strongDegradationTps,

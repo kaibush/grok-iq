@@ -376,6 +376,73 @@ class RequestAuditRepository:
             result.setdefault(int(row.account_id), model_dict(row))
         return result
 
+    def latest_tps_cooldowns_for_accounts(
+        self,
+        account_ids: Iterable[int],
+    ) -> dict[int, dict[str, Any]]:
+        """Return the newest TPS cooldown record per account.
+
+        Active rows stay ``cooled`` until expiry rewrites them to
+        ``cooldown_expired``. Either status is enough for the next consecutive
+        burst to decide between another cooldown and isolation.
+        """
+
+        normalized = {int(item) for item in account_ids if int(item) > 0}
+        if not normalized:
+            return {}
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RequestAuditAccountVerification)
+                .where(
+                    RequestAuditAccountVerification.account_id.in_(normalized),
+                    RequestAuditAccountVerification.action_status.in_(
+                        ("cooled", "cooldown_expired")
+                    ),
+                )
+                .order_by(
+                    RequestAuditAccountVerification.account_id.asc(),
+                    func.coalesce(
+                        RequestAuditAccountVerification.checked_at,
+                        RequestAuditAccountVerification.updated_at,
+                    ).desc(),
+                    RequestAuditAccountVerification.id.desc(),
+                )
+            ).all()
+        result: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            account_id = int(row.account_id)
+            if account_id in result:
+                continue
+            payload = model_dict(row)
+            recommendation = payload.get("egress_recommendation")
+            if (
+                not isinstance(recommendation, dict)
+                or recommendation.get("kind") != "tps_cooldown"
+            ):
+                continue
+            result[account_id] = payload
+        return result
+
+    def cooling_verifications(self) -> list[dict[str, Any]]:
+        """Return TPS cooldown rows that still need expiry / re-enable."""
+
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RequestAuditAccountVerification).where(
+                    RequestAuditAccountVerification.action_status == "cooled"
+                )
+            ).all()
+        values: list[dict[str, Any]] = []
+        for row in rows:
+            payload = model_dict(row)
+            recommendation = payload.get("egress_recommendation")
+            if (
+                isinstance(recommendation, dict)
+                and recommendation.get("kind") == "tps_cooldown"
+            ):
+                values.append(payload)
+        return values
+
     def retryable_verification_account_ids(self) -> set[int]:
         """Return accounts whose confirmed verdict still needs an action retry.
 

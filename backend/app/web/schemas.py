@@ -476,6 +476,9 @@ class RuntimeSettingsInput(BaseModel):
     request_audit_tps_only_min_count: int | None = Field(
         default=None, alias="requestAuditTpsOnlyMinCount", ge=2, le=100
     )
+    request_audit_tps_cooldown_minutes: int | None = Field(
+        default=None, alias="requestAuditTpsCooldownMinutes", ge=1, le=1440
+    )
     request_audit_isolation_enabled: bool | None = Field(
         default=None, alias="requestAuditIsolationEnabled"
     )

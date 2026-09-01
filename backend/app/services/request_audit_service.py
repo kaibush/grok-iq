@@ -635,6 +635,7 @@ class RequestAuditService:
         egress_error = ""
         egress_updated = 0
         try:
+            await self._expire_tps_cooldowns()
             media_backfill = await self._backfill_media_input_projection()
             client_key_backfill = await self._backfill_client_key_projection()
             try:
@@ -896,6 +897,7 @@ class RequestAuditService:
             "skipped": 0,
             "disabled": 0,
             "deprioritized": 0,
+            "cooled": 0,
             "failed": 0,
         }
         if not records:
@@ -948,6 +950,8 @@ class RequestAuditService:
                     stats["disabled"] += 1
                 if action_status in {"deprioritized", "already_deprioritized"}:
                     stats["deprioritized"] += 1
+                if action_status in {"cooled", "already_cooling"}:
+                    stats["cooled"] += 1
             if status == "check_failed" or action_status in failed_action_statuses:
                 stats["failed"] += 1
         return stats
@@ -969,6 +973,8 @@ class RequestAuditService:
 
         candidates: list[dict[str, Any]] = []
         thresholds = self._rule_thresholds()
+        cooldowns = self._tps_cooldowns_by_account(grouped.keys())
+        now = utc_now()
         for account_id, rows in grouped.items():
             if (
                 trigger_account_ids is not None
@@ -1009,10 +1015,19 @@ class RequestAuditService:
                     continue
                 min_count = rule_candidate_min_count(rule, thresholds)
                 if rule.audit_action_mode == "tps_only":
-                    min_count = max(
-                        min_count,
-                        int(self.settings.request_audit_tps_only_min_count),
+                    candidate = self._tps_only_candidate(
+                        rows,
+                        evaluations=evaluations,
+                        min_count=max(
+                            min_count,
+                            int(self.settings.request_audit_tps_only_min_count),
+                        ),
+                        prior=cooldowns.get(account_id),
+                        now=now,
                     )
+                    if candidate is not None:
+                        matched.append(candidate)
+                    continue
                 evidence_count = max(
                     len(rule_pairs),
                     max(
@@ -1037,35 +1052,20 @@ class RequestAuditService:
                     for row, evaluation in rule_pairs
                     if row is latest
                 )
-                candidate = {
-                    **latest,
-                    "_action_mode": rule.audit_action_mode,
-                    "_risk_rule_id": rule.id,
-                    "_risk_rule_count": evidence_count,
-                    "_risk_rule_min_count": min_count,
-                    "_risk_reasons": list(latest_evaluation.classification.reasons),
-                    "_reasoning_streak": latest_evaluation.reasoning_streak,
-                    "_reasoning_min_count": latest_evaluation.reasoning_min_count,
-                }
-                if rule.audit_action_mode == "tps_only":
-                    candidate.update(
-                        {
-                            "_tps_anomaly_count": evidence_count,
-                            "_tps_min_count": min_count,
-                            "_tps_max": max(
-                                float(row.get("tps") or 0) for row in rule_rows
-                            ),
-                            "_tps_egress_node_ids": sorted(
-                                {
-                                    int(row["egress_node_id"])
-                                    for row in rule_rows
-                                    if _positive_int(row.get("egress_node_id"))
-                                    is not None
-                                }
-                            ),
-                        }
-                    )
-                matched.append(candidate)
+                matched.append(
+                    {
+                        **latest,
+                        "_action_mode": rule.audit_action_mode,
+                        "_risk_rule_id": rule.id,
+                        "_risk_rule_count": evidence_count,
+                        "_risk_rule_min_count": min_count,
+                        "_risk_reasons": list(
+                            latest_evaluation.classification.reasons
+                        ),
+                        "_reasoning_streak": latest_evaluation.reasoning_streak,
+                        "_reasoning_min_count": latest_evaluation.reasoning_min_count,
+                    }
+                )
             if matched:
                 matched.sort(
                     key=lambda row: (
@@ -1077,6 +1077,175 @@ class RequestAuditService:
                 )
                 candidates.append(matched[0])
         return candidates
+
+    def _tps_cooldowns_by_account(
+        self,
+        account_ids: Any,
+    ) -> dict[int, dict[str, Any]]:
+        loader = getattr(self.repository, "latest_tps_cooldowns_for_accounts", None)
+        if not callable(loader):
+            return {}
+        values = loader(account_ids)
+        if not isinstance(values, dict):
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        for key, item in values.items():
+            account_id = _positive_int(key)
+            if account_id is None or not isinstance(item, dict):
+                continue
+            result[account_id] = item
+        return result
+
+    @staticmethod
+    def _tps_cooldown_bounds(
+        prior: dict[str, Any] | None,
+        now: datetime,
+    ) -> tuple[datetime | None, datetime | None, bool]:
+        if not isinstance(prior, dict):
+            return None, None, False
+        recommendation = prior.get("egress_recommendation")
+        if not isinstance(recommendation, dict):
+            recommendation = {}
+        until = _parse_datetime(recommendation.get("cooldownUntil"))
+        cooled_at = (
+            ensure_utc(prior.get("checked_at"))
+            or _parse_datetime(recommendation.get("cooledAt"))
+        )
+        active = (
+            str(prior.get("action_status") or "") == "cooled"
+            and until is not None
+            and until > now
+        )
+        return until, cooled_at, active
+
+    def _is_high_tps_row(
+        self,
+        row: dict[str, Any],
+        evaluations: dict[str, AuditRiskEvaluation] | None = None,
+    ) -> bool:
+        classified = self._evaluation_for(row, evaluations).classification
+        return classified.name == "high" and classified.rule_id == "fast_risk"
+
+    def _measurable_tps_row(self, row: dict[str, Any]) -> bool:
+        status = _int_or_zero(row.get("status_code"))
+        if status < 200 or status >= 300:
+            return False
+        if _audit_error_code(row.get("error_code") or row.get("errorCode")):
+            return False
+        return _finite_float(row.get("tps")) is not None
+
+    def _consecutive_high_tps(
+        self,
+        rows: list[dict[str, Any]],
+        evaluations: dict[str, AuditRiskEvaluation] | None = None,
+        *,
+        after: datetime | None = None,
+    ) -> tuple[int, dict[str, Any] | None, float]:
+        """Count consecutive hard-high TPS rows ending at the latest measurable one."""
+
+        ordered = sorted(
+            rows,
+            key=lambda row: (
+                ensure_utc(row.get("created_at"))
+                or datetime.min.replace(tzinfo=UTC),
+                self._audit_row_key(row),
+            ),
+        )
+        streak = 0
+        latest: dict[str, Any] | None = None
+        max_tps = 0.0
+        for row in ordered:
+            created = ensure_utc(row.get("created_at"))
+            if after is not None and (created is None or created <= after):
+                continue
+            if not self._measurable_tps_row(row):
+                continue
+            tps = _finite_float(row.get("tps")) or 0.0
+            if self._is_high_tps_row(row, evaluations):
+                streak += 1
+                latest = row
+                max_tps = max(max_tps, tps)
+                continue
+            streak = 0
+            latest = None
+            max_tps = 0.0
+        if latest is None:
+            return 0, None, 0.0
+        return streak, latest, max_tps
+
+    def _has_healthy_tps_after(
+        self,
+        rows: list[dict[str, Any]],
+        evaluations: dict[str, AuditRiskEvaluation] | None,
+        after: datetime,
+    ) -> bool:
+        for row in rows:
+            created = ensure_utc(row.get("created_at"))
+            if created is None or created <= after:
+                continue
+            if not self._measurable_tps_row(row):
+                continue
+            if not self._is_high_tps_row(row, evaluations):
+                return True
+        return False
+
+    def _tps_only_candidate(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        evaluations: dict[str, AuditRiskEvaluation] | None,
+        min_count: int,
+        prior: dict[str, Any] | None,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        until, cooled_at, active = self._tps_cooldown_bounds(prior, now)
+        if active:
+            return None
+        streak, latest, max_tps = self._consecutive_high_tps(
+            rows,
+            evaluations,
+            after=until,
+        )
+        if streak < min_count or latest is None:
+            return None
+        latest_evaluation = self._evaluation_for(latest, evaluations)
+        healthy_after = (
+            self._has_healthy_tps_after(rows, evaluations, cooled_at)
+            if cooled_at is not None
+            else False
+        )
+        disposition = (
+            "disable"
+            if (
+                isinstance(prior, dict)
+                and until is not None
+                and until <= now
+                and not healthy_after
+            )
+            else "cool"
+        )
+        return {
+            **latest,
+            "_action_mode": "tps_only",
+            "_risk_rule_id": "fast_risk",
+            "_risk_rule_count": streak,
+            "_risk_rule_min_count": min_count,
+            "_risk_reasons": list(latest_evaluation.classification.reasons),
+            "_reasoning_streak": latest_evaluation.reasoning_streak,
+            "_reasoning_min_count": latest_evaluation.reasoning_min_count,
+            "_tps_disposition": disposition,
+            "_tps_anomaly_count": streak,
+            "_tps_min_count": min_count,
+            "_tps_max": max_tps,
+            "_tps_egress_node_ids": sorted(
+                {
+                    int(row["egress_node_id"])
+                    for row in rows
+                    if _positive_int(row.get("egress_node_id")) is not None
+                    and self._is_high_tps_row(row, evaluations)
+                }
+            ),
+        }
 
     def _new_risk_account_ids(
         self,
@@ -1129,6 +1298,9 @@ class RequestAuditService:
         finished_actions = {
             "disabled",
             "already_disabled",
+            "cooled",
+            "already_cooling",
+            "cooldown_expired",
         }
         if existing_action in finished_actions:
             return verification
@@ -1181,12 +1353,236 @@ class RequestAuditService:
             "check_error": "",
             "checked_at": utc_now(),
         }
+        if str(record.get("_action_mode") or "quarantine") == "tps_only":
+            return await self._apply_tps_only_action(
+                record,
+                verification,
+                common=common,
+                status="sso_skipped",
+            )
         return await self._apply_flagged_quarantine(
             record,
             verification,
             common=common,
             status="sso_skipped",
         )
+
+    def _legacy_tps_deprioritized(self, account_id: int, verification: dict[str, Any]) -> bool:
+        existing_action = str(verification.get("action_status") or "")
+        if existing_action in {"deprioritized", "already_deprioritized"}:
+            return True
+        loader = getattr(self.repository, "latest_verifications_for_accounts", None)
+        if not callable(loader):
+            return False
+        values = loader([account_id])
+        if not isinstance(values, dict):
+            return False
+        latest = values.get(account_id)
+        return isinstance(latest, dict) and str(latest.get("action_status") or "") in {
+            "deprioritized",
+            "already_deprioritized",
+        }
+
+    async def _apply_tps_only_action(
+        self,
+        record: dict[str, Any],
+        verification: dict[str, Any],
+        *,
+        common: dict[str, Any],
+        status: str = "sso_skipped",
+    ) -> dict[str, Any]:
+        account_id = int(record.get("account_id") or 0)
+        if self._legacy_tps_deprioritized(account_id, verification):
+            return await self._apply_flagged_quarantine(
+                record,
+                verification,
+                common=common,
+                status=status,
+            )
+        if str(record.get("_tps_disposition") or "cool") == "disable":
+            return await self._apply_flagged_quarantine(
+                record,
+                verification,
+                common=common,
+                status=status,
+            )
+        return await self._apply_tps_cooldown(
+            record,
+            verification,
+            common=common,
+            status=status,
+        )
+
+    async def _apply_tps_cooldown(
+        self,
+        record: dict[str, Any],
+        verification: dict[str, Any],
+        *,
+        common: dict[str, Any],
+        status: str = "sso_skipped",
+    ) -> dict[str, Any]:
+        account_id = int(record.get("account_id") or 0)
+        audit_id = str(record.get("upstream_id") or "")
+        created_at = ensure_utc(record.get("created_at")) or utc_now()
+        minutes = max(
+            1,
+            min(int(self.settings.request_audit_tps_cooldown_minutes), 1440),
+        )
+        if not self.settings.request_audit_isolation_enabled:
+            return self.repository.update_verification(
+                audit_id,
+                {
+                    **common,
+                    "status": status,
+                    "action_status": "auto_quarantine_disabled",
+                    "action_error": "",
+                },
+            ) or verification
+        if self.account_service is None:
+            return self.repository.update_verification(
+                audit_id,
+                {
+                    **common,
+                    "status": status,
+                    "action_status": "action_failed",
+                    "action_error": "自动冷却服务尚未接入",
+                },
+            ) or verification
+        raw_risk_reasons = record.get("_risk_reasons")
+        if isinstance(raw_risk_reasons, (list, tuple)):
+            risk_reasons = [str(value) for value in raw_risk_reasons if str(value)]
+        else:
+            risk_reasons = list(self._evaluation_for(record).classification.reasons)
+        streak = int(
+            record.get("_tps_anomaly_count") or record.get("_risk_rule_count") or 0
+        )
+        detail = {
+            "auditId": audit_id,
+            "riskRuleId": str(record.get("_risk_rule_id") or "fast_risk"),
+            "riskRuleCount": streak,
+            "auditCreatedAt": _iso(created_at),
+            "auditTps": round(float(record.get("tps") or 0), 2),
+            "tpsStreak": streak,
+            "tpsMinCount": int(
+                record.get("_tps_min_count") or record.get("_risk_rule_min_count") or 0
+            ),
+            "maxTps": round(
+                float(record.get("_tps_max") or record.get("tps") or 0),
+                2,
+            ),
+            "riskReasons": risk_reasons,
+            "cooldownMinutes": minutes,
+            "recommendation": "tps_cooldown",
+        }
+        try:
+            action = await self.account_service.apply_tps_cooldown(
+                account_id,
+                source="request_audit",
+                note="请求审计连续高速 TPS 达到阈值后先冷却账号",
+                minutes=minutes,
+                detail=detail,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "request audit tps cooldown failed account=%s audit=%s",
+                account_id,
+                audit_id,
+            )
+            return self.repository.update_verification(
+                audit_id,
+                {
+                    **common,
+                    "status": status,
+                    "action_status": "action_failed",
+                    "action_error": str(exc)[:1000],
+                },
+            ) or verification
+        action_status = str(action.get("actionStatus") or "action_failed")
+        payload: dict[str, Any] = {
+            **common,
+            "status": status,
+            "action_status": action_status,
+            "action_error": str(action.get("actionError") or "")[:1000],
+        }
+        if action_status == "cooled":
+            cooldown_until = action.get("cooldownUntil")
+            if isinstance(cooldown_until, datetime):
+                until_text = cooldown_until.isoformat()
+            else:
+                until_text = str(cooldown_until or "")
+            payload["egress_recommendation"] = {
+                "kind": "tps_cooldown",
+                "type": "tps_cooldown",
+                "label": "高速 TPS 冷却",
+                "reason": f"连续 {streak} 次高速 TPS，冷却 {minutes} 分钟",
+                "cooldownUntil": until_text,
+                "cooledAt": utc_now().isoformat(),
+                "disabledByCooldown": bool(action.get("disabledByCooldown")),
+                "minutes": minutes,
+                "tpsStreak": streak,
+            }
+        return self.repository.update_verification(audit_id, payload) or verification
+
+    async def _expire_tps_cooldowns(self) -> dict[str, int]:
+        stats = {"expired": 0, "reenabled": 0, "skipped": 0, "failed": 0}
+        loader = getattr(self.repository, "cooling_verifications", None)
+        if self.account_service is None or not callable(loader):
+            return stats
+        rows = loader()
+        if not isinstance(rows, list):
+            return stats
+        now = utc_now()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            recommendation = row.get("egress_recommendation")
+            if not isinstance(recommendation, dict):
+                continue
+            until = _parse_datetime(recommendation.get("cooldownUntil"))
+            if until is not None and until > now:
+                continue
+            audit_id = str(row.get("audit_upstream_id") or "")
+            account_id = int(row.get("account_id") or 0)
+            if not audit_id or account_id <= 0:
+                continue
+            try:
+                result = await self.account_service.release_tps_cooldown(
+                    account_id,
+                    disabled_by_cooldown=bool(
+                        recommendation.get("disabledByCooldown")
+                    ),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "request audit tps cooldown expiry failed account=%s audit=%s",
+                    account_id,
+                    audit_id,
+                )
+                stats["failed"] += 1
+                continue
+            action_status = str(result.get("actionStatus") or "cooldown_expired")
+            if action_status == "task_protected":
+                stats["skipped"] += 1
+                continue
+            self.repository.update_verification(
+                audit_id,
+                {
+                    "action_status": "cooldown_expired",
+                    "action_error": "",
+                    "egress_recommendation": {
+                        **recommendation,
+                        "expiredAt": now.isoformat(),
+                    },
+                },
+            )
+            stats["expired"] += 1
+            if result.get("reenabled"):
+                stats["reenabled"] += 1
+        return stats
 
     async def _apply_flagged_quarantine(
         self,
@@ -1239,7 +1635,7 @@ class RequestAuditService:
             ) or verification
         action_mode = str(record.get("_action_mode") or "quarantine")
         note = (
-            "请求审计 TPS 多次异常已达处置阈值后自动停用"
+            "冷却后再次连续高速 TPS，自动停用并移入隔离区"
             if action_mode == "tps_only"
             else "请求审计高风险已达处置阈值后自动停用"
         )
@@ -1626,6 +2022,7 @@ class RequestAuditService:
             ),
             "tpsOnlyPriority": self.settings.request_audit_tps_only_priority,
             "tpsOnlyMinCount": self.settings.request_audit_tps_only_min_count,
+            "tpsOnlyCooldownMinutes": self.settings.request_audit_tps_cooldown_minutes,
             "isolationEnabled": self.settings.request_audit_isolation_enabled,
             "ssoRecheckEnabled": False,
             "retentionDays": self.settings.request_audit_retention_days,

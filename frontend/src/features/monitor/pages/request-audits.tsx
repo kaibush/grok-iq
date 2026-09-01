@@ -201,6 +201,7 @@ const fallbackConfig: RequestAuditConfig = {
   tpsOnlyDeprioritizeEnabled: true,
   tpsOnlyPriority: -1_000_000,
   tpsOnlyMinCount: 2,
+  tpsOnlyCooldownMinutes: 30,
   isolationEnabled: true,
   ssoRecheckEnabled: false,
   retentionDays: 90,
@@ -215,7 +216,7 @@ const requestAuditPageHelp = (
     <p>
       页面「高风险」只表示当前窗口里有 high 请求，一条高速 TPS
       就会显示，不等于已经停用。隔离就是停用 grok2api
-      账号；请求审计自动停用是永久的，会进入隔离区，需要人工恢复。
+      账号并移入隔离区，需要人工恢复。高速 TPS 会先冷却，冷却后仍连续异常才永久停用。
     </p>
     <p>
       单条 high：高速 TPS（达到强异常阈值）直接高风险；无媒体输入时思考连续为 0
@@ -223,8 +224,9 @@ const requestAuditPageHelp = (
       0）只观察。
     </p>
     <p>
-      自动停用看累计次数，不是看这一条：高速 TPS 默认 2 次，思考为 0
-      按策略连续次数。探针监控判定是另一套累计规则，不会处理这里的高风险。
+      自动处置看连续次数，不是看这一条：高速 TPS 默认连续 2 次先冷却，冷却后
+      仍连续 2 次且没有正常 TPS 才停用；思考为 0 按策略连续次数直接停用。
+      探针监控判定是另一套累计规则，不会处理这里的高风险。
     </p>
   </div>
 )
@@ -235,8 +237,9 @@ const requestAuditAutoDisableHelp = (
       自动停用要同时满足：命中停用规则、达到次数，且「请求审计账号处置」已开启。
     </p>
     <p>
-      页面高风险本身不会停用。高速 TPS 累计达到次数，或无媒体输入时思考为 0
-      连续达到策略次数后，会永久停用并移入隔离区。Media Input 不会因此停用。
+      页面高风险本身不会停用。高速 TPS 连续达到次数后先冷却账号；冷却后再连续
+      达到次数且没有正常 TPS，才永久停用并移入隔离区。无媒体输入时思考为 0
+      连续达到策略次数后仍会直接停用。Media Input 不会因此停用。
     </p>
     <p>
       不再做停用前 SSO 复检，也不再把 TPS-only
@@ -249,7 +252,7 @@ const requestAuditRiskEvidenceHelp = (
   <div className='space-y-2'>
     <p>
       账号高风险 = 窗口内任意一条 high，不是探针那种累计判定。一条高速 TPS
-      就会标高风险，但要达到次数才自动停用。
+      就会标高风险，但高速 TPS 要连续达到次数才先冷却。
     </p>
     <p>
       思考 0、Media Input
@@ -264,7 +267,7 @@ const requestAuditRecordRiskHelp = (
     <p>
       高速 TPS 直接高风险；无媒体输入时思考为 0
       先观察，连续达到策略次数后升为高风险。普通 TPS 和 Media Input（含思考为
-      0）保持观察，避免误判隔离或停用。自动停用看累计次数。
+      0）保持观察，避免误判隔离或停用。高速 TPS 自动处置看连续次数。
     </p>
   </div>
 )
@@ -515,6 +518,9 @@ function preDisableStatusLabel(check: RequestAuditPreDisableCheck | null) {
   if (check.actionStatus === 'already_quarantined') return '已隔离'
   if (check.actionStatus === 'task_protected') return '任务保护'
   if (check.actionStatus === 'auto_quarantine_disabled') return '自动停用未开启'
+  if (check.actionStatus === 'cooled') return '已冷却'
+  if (check.actionStatus === 'already_cooling') return '冷却中'
+  if (check.actionStatus === 'cooldown_expired') return '冷却已结束'
   if (check.actionStatus === 'deprioritized') return '已降低优先级'
   if (check.actionStatus === 'already_deprioritized') return '已是低优先级'
   if (check.actionStatus === 'deprioritize_disabled') return '优先级降级未开启'
@@ -550,7 +556,9 @@ function PreDisableCheckBadge({
     check?.status === 'flagged'
       ? 'destructive'
       : check?.actionStatus === 'deprioritized' ||
-          check?.actionStatus === 'already_deprioritized'
+          check?.actionStatus === 'already_deprioritized' ||
+          check?.actionStatus === 'cooled' ||
+          check?.actionStatus === 'already_cooling'
         ? 'warning'
         : check?.status === 'clean' || check?.status === 'session_confirmed'
           ? check?.egressRecommendation?.type === 'change_egress'

@@ -851,6 +851,103 @@ class AccountService:
             "previousPriority": current_priority,
         }
 
+    async def apply_tps_cooldown(
+        self,
+        account_id: int,
+        *,
+        source: str,
+        note: str,
+        minutes: int,
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Temporarily disable an account without moving it to isolation."""
+
+        normalized_account_id = int(account_id)
+        cooldown_minutes = max(1, min(int(minutes), 1440))
+        until = utc_now() + timedelta(minutes=cooldown_minutes)
+        if normalized_account_id in self.probes.account_settings_locked_ids(
+            {normalized_account_id}
+        ):
+            return {
+                "accountId": normalized_account_id,
+                "actionStatus": "task_protected",
+                "cooldownUntil": until,
+                "disabledByCooldown": False,
+                "actionError": "账号正在执行探针任务，任务释放设置锁后重试",
+            }
+        account = await self.client.get_account(normalized_account_id)
+        was_enabled = bool(account.get("enabled"))
+        if was_enabled:
+            await self.client.set_account_enabled(normalized_account_id, False)
+        normalized_source = str(source or "request_audit").strip() or "request_audit"
+        self.accounts.create_alert(
+            account_id=normalized_account_id,
+            kind="request_audit_tps_cooldown",
+            severity="warning",
+            title="连续高速 TPS，账号已冷却",
+            detail={
+                "source": normalized_source,
+                "actionStatus": "cooled",
+                "note": note,
+                "cooldownUntil": app_isoformat(until),
+                "cooldownMinutes": cooldown_minutes,
+                "disabledByCooldown": was_enabled,
+                **(detail or {}),
+            },
+        )
+        return {
+            "accountId": normalized_account_id,
+            "actionStatus": "cooled",
+            "cooldownUntil": until,
+            "cooldownMinutes": cooldown_minutes,
+            "disabledByCooldown": was_enabled,
+        }
+
+    async def release_tps_cooldown(
+        self,
+        account_id: int,
+        *,
+        disabled_by_cooldown: bool,
+    ) -> dict[str, Any]:
+        """Re-enable an account after a TPS cooldown expires."""
+
+        normalized_account_id = int(account_id)
+        assessment = self.accounts.get_assessment(normalized_account_id) or {}
+        if str(assessment.get("monitor_status") or "") == "quarantined":
+            return {
+                "accountId": normalized_account_id,
+                "actionStatus": "already_quarantined",
+                "reenabled": False,
+            }
+        if normalized_account_id in self.probes.account_settings_locked_ids(
+            {normalized_account_id}
+        ):
+            return {
+                "accountId": normalized_account_id,
+                "actionStatus": "task_protected",
+                "reenabled": False,
+            }
+        if not disabled_by_cooldown:
+            return {
+                "accountId": normalized_account_id,
+                "actionStatus": "cooldown_expired",
+                "reenabled": False,
+            }
+        account = await self.client.get_account(normalized_account_id)
+        if bool(account.get("enabled")):
+            return {
+                "accountId": normalized_account_id,
+                "actionStatus": "cooldown_expired",
+                "reenabled": False,
+                "alreadyEnabled": True,
+            }
+        await self.client.set_account_enabled(normalized_account_id, True)
+        return {
+            "accountId": normalized_account_id,
+            "actionStatus": "cooldown_expired",
+            "reenabled": True,
+        }
+
     async def set_accounts_enabled(
         self,
         *,

@@ -171,9 +171,8 @@ class Settings(BaseSettings):
     # by a later integration can be configured without adding another column.
     # Example: [{"id": "reasoning_zero", "enabled": True, "priority": 50}]
     risk_rule_overrides: list[dict[str, Any]] = Field(default_factory=list)
-    # Repeated TPS-only anomalies used to deprioritize when SSO was clean.
-    # SSO bot markers are gone, so these rows now isolate like other
-    # request-audit high-risk rules. Min-count still gates the action.
+    # Consecutive high-TPS rows cool the account first; a later consecutive
+    # burst without a healthy TPS after cooldown then isolates.
     request_audit_tps_only_deprioritize_enabled: bool = True
     request_audit_tps_only_priority: int = Field(
         default=-1_000_000,
@@ -181,6 +180,7 @@ class Settings(BaseSettings):
         le=0,
     )
     request_audit_tps_only_min_count: int = Field(default=2, ge=2, le=100)
+    request_audit_tps_cooldown_minutes: int = Field(default=30, ge=1, le=1440)
     request_audit_isolation_enabled: bool = True
     request_audit_retention_days: int = Field(default=90, ge=1, le=90)
 
@@ -293,6 +293,7 @@ class Settings(BaseSettings):
         "request_audit_tps_only_deprioritize_enabled",
         "request_audit_tps_only_priority",
         "request_audit_tps_only_min_count",
+        "request_audit_tps_cooldown_minutes",
         "request_audit_isolation_enabled",
         "request_audit_retention_days",
         "probe_worker_concurrency",

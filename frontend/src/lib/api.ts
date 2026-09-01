@@ -549,6 +549,12 @@ export type EgressRecommendation = {
   priorityAction?: string
   priority?: number | null
   egressNodeIds?: number[]
+  kind?: string
+  cooldownUntil?: string | null
+  cooledAt?: string | null
+  minutes?: number
+  tpsStreak?: number
+  disabledByCooldown?: boolean
 }
 
 export type AccountOption = {
@@ -965,6 +971,7 @@ export type RequestAuditConfig = {
   tpsOnlyDeprioritizeEnabled: boolean
   tpsOnlyPriority: number
   tpsOnlyMinCount: number
+  tpsOnlyCooldownMinutes: number
   isolationEnabled: boolean
   ssoRecheckEnabled?: boolean
   retentionDays: number
@@ -1445,6 +1452,7 @@ export type RuntimeSettings = {
   requestAuditTpsOnlyDeprioritizeEnabled: boolean
   requestAuditTpsOnlyPriority: number
   requestAuditTpsOnlyMinCount: number
+  requestAuditTpsCooldownMinutes: number
   requestAuditIsolationEnabled: boolean
   requestAuditRetentionDays: number
   probeWorkerConcurrency: number
@@ -1558,6 +1566,7 @@ export type RuntimeSettingsUpdate = Partial<
     | 'requestAuditTpsOnlyDeprioritizeEnabled'
     | 'requestAuditTpsOnlyPriority'
     | 'requestAuditTpsOnlyMinCount'
+    | 'requestAuditTpsCooldownMinutes'
     | 'requestAuditIsolationEnabled'
     | 'requestAuditRetentionDays'
     | 'probeWorkerConcurrency'
@@ -1674,6 +1683,7 @@ type RuntimeSettingsWire = Omit<
   | 'requestAuditTpsOnlyDeprioritizeEnabled'
   | 'requestAuditTpsOnlyPriority'
   | 'requestAuditTpsOnlyMinCount'
+  | 'requestAuditTpsCooldownMinutes'
   | 'requestAuditIsolationEnabled'
   | 'requestAuditRetentionDays'
 > & {
@@ -1740,6 +1750,7 @@ type RuntimeSettingsWire = Omit<
   requestAuditTpsOnlyDeprioritizeEnabled?: boolean
   requestAuditTpsOnlyPriority?: number
   requestAuditTpsOnlyMinCount?: number
+  requestAuditTpsCooldownMinutes?: number
   requestAuditIsolationEnabled?: boolean
   requestAuditRetentionDays?: number
 }
@@ -1888,6 +1899,7 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
       value.requestAuditTpsOnlyDeprioritizeEnabled ?? true,
     requestAuditTpsOnlyPriority: value.requestAuditTpsOnlyPriority ?? -1000000,
     requestAuditTpsOnlyMinCount: value.requestAuditTpsOnlyMinCount ?? 2,
+    requestAuditTpsCooldownMinutes: value.requestAuditTpsCooldownMinutes ?? 30,
     requestAuditIsolationEnabled: value.requestAuditIsolationEnabled ?? true,
     requestAuditRetentionDays: value.requestAuditRetentionDays ?? 90,
     wechatNotificationEnabled: value.wechatNotificationEnabled ?? false,
