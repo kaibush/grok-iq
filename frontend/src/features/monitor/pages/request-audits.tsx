@@ -1465,7 +1465,8 @@ export function RequestAuditsPage() {
     queryKey: ['request-audits', 'summary', windowParams],
     queryFn: () => api.requestAuditSummary(windowParams),
     enabled: needsSummary,
-    gcTime: 30_000,
+    placeholderData: keepPreviousData,
+    gcTime: 5 * 60_000,
     refetchInterval: needsSummary ? liveRefreshInterval : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
@@ -1886,10 +1887,13 @@ export function RequestAuditsPage() {
   const bulkSelectionPending =
     bulkSsoMutation.isPending || bulkIsolationMutation.isPending
 
+  const hasSummary = Boolean(summaryQuery.data)
   const waitingForTabData =
-    (needsSummary && summaryQuery.isLoading && !summaryQuery.data) ||
-    (needsRecords && recordsQuery.isLoading && !recordsQuery.data)
-  if ((statusQuery.isLoading && !statusQuery.data) || waitingForTabData) {
+    needsRecords &&
+    !recordsQuery.data &&
+    !recordsQuery.isPlaceholderData &&
+    !recordsQuery.isError
+  if ((!statusQuery.data && !statusQuery.isError) || waitingForTabData) {
     return (
       <Page>
         <LoadingState label='正在读取本地请求审计投影' />
@@ -2226,7 +2230,7 @@ export function RequestAuditsPage() {
             <ShieldAlert />
             风险定位
             <Badge variant='secondary'>
-              {formatNumber(summary?.watchAccounts ?? 0, 0)}
+              {hasSummary ? formatNumber(summary?.watchAccounts ?? 0, 0) : '—'}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value='ledger'>
@@ -2419,7 +2423,16 @@ export function RequestAuditsPage() {
         )}
 
         <TabsContent value='overview' className='mt-0 space-y-4'>
-          <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-5'>
+          {!hasSummary ? (
+            <LoadingState
+              label={
+                summaryQuery.isError
+                  ? `风险总览读取失败：${getErrorMessage(summaryQuery.error)}`
+                  : '正在读取风险总览'
+              }
+            />
+          ) : null}
+          <div className={hasSummary ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-5' : 'hidden'}>
             <MetricCard
               icon={Activity}
               label='窗口内请求'
@@ -2463,7 +2476,7 @@ export function RequestAuditsPage() {
             />
           </div>
 
-          <div className='grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.55fr)]'>
+          <div className={hasSummary ? 'grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.55fr)]' : 'hidden'}>
             <Card>
               <CardHeader className='gap-2 sm:flex-row sm:items-start sm:justify-between'>
                 <div>
@@ -2706,14 +2719,14 @@ export function RequestAuditsPage() {
                           <UsersRound />
                           账号视角
                           <Badge variant='secondary' className='ml-1'>
-                            {visibleAccounts.length}
+                            {hasSummary ? visibleAccounts.length : '—'}
                           </Badge>
                         </TabsTrigger>
                         <TabsTrigger value='nodes'>
                           <Layers3 />
                           代理节点视角
                           <Badge variant='secondary' className='ml-1'>
-                            {visibleNodes.length}
+                            {hasSummary ? visibleNodes.length : '—'}
                           </Badge>
                         </TabsTrigger>
                       </TabsList>
@@ -3061,7 +3074,19 @@ export function RequestAuditsPage() {
                             }
                           />
                         ))}
-                        {!visibleAccounts.length && (
+                        {!hasSummary ? (
+                          <TableRow>
+                            <TableCell colSpan={11}>
+                              <LoadingState
+                                label={
+                                  summaryQuery.isError
+                                    ? `风险账号读取失败：${getErrorMessage(summaryQuery.error)}`
+                                    : '正在读取风险账号'
+                                }
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ) : !visibleAccounts.length ? (
                           <TableRow>
                             <TableCell colSpan={11}>
                               <EmptyState
@@ -3072,7 +3097,7 @@ export function RequestAuditsPage() {
                               />
                             </TableCell>
                           </TableRow>
-                        )}
+                        ) : null}
                       </TableBody>
                     </Table>
                   </div>
@@ -3097,6 +3122,17 @@ export function RequestAuditsPage() {
                 </TabsContent>
 
                 <TabsContent value='nodes' className='mt-0'>
+                  {!hasSummary ? (
+                    <div className='p-4'>
+                      <LoadingState
+                        label={
+                          summaryQuery.isError
+                            ? `风险节点读取失败：${getErrorMessage(summaryQuery.error)}`
+                            : '正在读取风险节点'
+                        }
+                      />
+                    </div>
+                  ) : (
                   <NodePerspective
                     nodes={visibleNodes}
                     selected={selectedNode}
@@ -3119,6 +3155,7 @@ export function RequestAuditsPage() {
                       goToTab('ledger')
                     }}
                   />
+                  )}
                 </TabsContent>
               </Tabs>
             </CardContent>
@@ -4455,12 +4492,12 @@ function AuditThroughputCell({ row }: { row: RequestAuditRecord }) {
             className={
               diagnostics.reasoningMismatch
                 ? 'text-amber-700 dark:text-amber-300'
-                : diagnostics.hasThinking || diagnostics.hasEncryptedThinking
+                : diagnostics.hasThinking
                   ? 'text-emerald-700 dark:text-emerald-300'
                   : 'text-muted-foreground'
             }
           >
-            思{diagnostics.hasThinking || diagnostics.hasEncryptedThinking ? '✓' : '✗'}
+            思{diagnostics.hasThinking ? '✓' : '✗'}
           </span>
           {' · '}
           <span
