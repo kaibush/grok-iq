@@ -216,20 +216,20 @@ function expandPreviewItems(
         sameRoundCount > 1 && sample.egress_name
           ? `第 ${sample.round_number || 1} 轮 · ${sample.egress_name}`
           : `第 ${sample.round_number || 1} 轮`
-      const heading =
+      const sampleLabel =
         item.source === 'account'
+          ? `样本 ${sample.round_number || 1}`
+          : roundLabel
+      const heading =
+        variant === 'task'
           ? rounds.length > 1
-            ? `${item.accountName} · 样本 ${sample.round_number || 1}`
+            ? `${item.accountName} · ${sampleLabel}`
             : item.accountName
-          : variant === 'task'
+          : item.profileName
             ? rounds.length > 1
-              ? `${item.accountName} · ${roundLabel}`
-              : item.accountName
-            : item.profileName
-              ? rounds.length > 1
-                ? `${item.profileName} · ${roundLabel}`
-                : item.profileName
-              : roundLabel
+              ? `${item.profileName} · ${roundLabel}`
+              : item.profileName
+            : sampleLabel
       leaves.push({
         ...item,
         id: `${item.id}:${sample.id}`,
@@ -409,8 +409,11 @@ export function ResultPreviewGallery({
   const itemNoun = accountPerspective ? '账号' : '任务'
   const showGroupToggle =
     !accountPerspective && !sampleLeaves && groups.length > 1
-  const effectiveGroup =
-    accountPerspective || sampleLeaves || !showGroupToggle ? 'task' : groupMode
+  const effectiveGroup = accountPerspective
+    ? 'account'
+    : sampleLeaves || !showGroupToggle
+      ? 'task'
+      : groupMode
   const expandRounds = !sampleLeaves && roundLayout === 'expand'
   const previewRunIds = useMemo(
     () =>
@@ -851,7 +854,9 @@ export function ResultPreviewGallery({
             .filter(Boolean)
             .join(' · ')
         : effectiveGroup === 'account'
-          ? `${accountCounter} · 任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`
+          ? accountPerspective
+            ? accountCounter
+            : `${accountCounter} · 任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`
           : `${itemNoun} ${items.length ? safeIndex + 1 : 0} / ${items.length}`,
     pageLabel,
     totalLabel,
@@ -1121,25 +1126,18 @@ export function ResultPreviewGallery({
                                 {group.accountName}
                               </div>
                               <div className='truncate text-xs font-normal text-muted-foreground'>
-                                {accountMeta(group.items[0], {
-                                  includeTaskTime: false,
-                                })}
-                                {` · ${group.items.length} 个任务`}
-                                {leaves.length > group.items.length
-                                  ? ` · ${leaves.length} 轮`
-                                  : groupRoundCount(group.items) >
-                                      group.items.length
-                                    ? ` · ${groupRoundCount(group.items)} 轮`
-                                    : ''}
+                                {groupAccountSubtitle(
+                                  group.items,
+                                  leaves.length,
+                                  accountPerspective
+                                )}
                               </div>
                             </div>
                             <div
                               className={`${THUMB_GRID_CLASSNAME} pt-3 pb-6`}
                             >
                               {leaves.map((entry) => {
-                                const index = items.findIndex(
-                                  (candidate) => candidate.runId === entry.runId
-                                )
+                                const index = parentPreviewIndex(items, entry)
                                 const selected =
                                   entry.id ===
                                   (expandRounds
@@ -1154,10 +1152,18 @@ export function ResultPreviewGallery({
                                     sampleLeaves={Boolean(entry.sampleId)}
                                     heading={entry.heading}
                                     onSelect={() =>
-                                      selectPreviewItem(index, entry.sampleId)
+                                      selectPreviewItem(
+                                        index,
+                                        entry.sampleId,
+                                        entry.roundNumber
+                                      )
                                     }
                                     onOpen={() =>
-                                      openPreviewItem(index, entry.sampleId)
+                                      openPreviewItem(
+                                        index,
+                                        entry.sampleId,
+                                        entry.roundNumber
+                                      )
                                     }
                                   />
                                 )
@@ -1243,6 +1249,9 @@ export function ResultPreviewGallery({
                               >
                                 <button
                                   type='button'
+                                  data-preview-index={items.findIndex(
+                                    (entry) => entry.id === group.items[0].id
+                                  )}
                                   className='w-full px-3 py-2.5 text-left'
                                   onClick={() =>
                                     onIndexChange(
@@ -1257,17 +1266,44 @@ export function ResultPreviewGallery({
                                     {group.accountName}
                                   </div>
                                   <div className='mt-1 truncate text-[11px] text-muted-foreground'>
-                                    {accountMeta(group.items[0], {
-                                      includeTaskTime: false,
-                                    })}
-                                    {` · ${group.items.length} 个任务`}
-                                    {groupRoundCount(group.items) >
-                                    group.items.length
-                                      ? ` · ${groupRoundCount(group.items)} 轮`
-                                      : ''}
+                                    {groupAccountSubtitle(
+                                      group.items,
+                                      groupRoundCount(group.items),
+                                      accountPerspective
+                                    )}
                                   </div>
                                 </button>
-                                {selected ? (
+                                {selected && accountPerspective ? (
+                                  runSamples.length > 1 ? (
+                                    <div className='flex flex-wrap gap-1 border-t px-3 py-2'>
+                                      {runSamples.map((entrySample, offset) => {
+                                        const selectedSample =
+                                          entrySample.id === sample?.id
+                                        return (
+                                          <Button
+                                            key={entrySample.id}
+                                            type='button'
+                                            size='sm'
+                                            variant={
+                                              selectedSample
+                                                ? 'secondary'
+                                                : 'outline'
+                                            }
+                                            className='h-7 px-2 text-xs'
+                                            onClick={() => {
+                                              setSampleOverrideId(
+                                                entrySample.id
+                                              )
+                                              setSampleOverrideRound(offset + 1)
+                                            }}
+                                          >
+                                            样本 {offset + 1}
+                                          </Button>
+                                        )
+                                      })}
+                                    </div>
+                                  ) : null
+                                ) : selected ? (
                                   <div className='space-y-1 border-t px-2 py-2'>
                                     {group.items.map((entry) => {
                                       const itemIndex = items.findIndex(
@@ -1645,6 +1681,23 @@ function groupRoundCount(items: ResultPreviewItem[]) {
     (sum, entry) => sum + Math.max(1, entry.completedSteps || 1),
     0
   )
+}
+
+function groupAccountSubtitle(
+  items: ResultPreviewItem[],
+  leavesCount: number,
+  accountPerspective: boolean
+) {
+  const parts = [accountMeta(items[0], { includeTaskTime: false })]
+  if (!accountPerspective) {
+    parts.push(`${items.length} 个任务`)
+  }
+  const roundCount = Math.max(leavesCount, groupRoundCount(items))
+  const baseline = accountPerspective ? 1 : items.length
+  if (roundCount > baseline) {
+    parts.push(`${roundCount} 轮`)
+  }
+  return parts.filter(Boolean).join(' · ')
 }
 
 function VirtualizedThumbGrid({
