@@ -330,6 +330,26 @@ class RequestAuditRepository:
             )
             return int(result.rowcount or 0)
 
+    def mark_actions_restored(self, account_id: int) -> int:
+        """Clear stale auto-disable flags after an operator restores the account."""
+
+        with self.database.transaction() as session:
+            result = session.execute(
+                update(RequestAuditAccountVerification)
+                .where(
+                    RequestAuditAccountVerification.account_id == int(account_id),
+                    RequestAuditAccountVerification.action_status.in_(
+                        ("disabled", "already_disabled", "already_quarantined")
+                    ),
+                )
+                .values(
+                    action_status="restored",
+                    action_error="",
+                    updated_at=utc_now(),
+                )
+            )
+            return int(result.rowcount or 0)
+
     def verifications_for_audits(
         self,
         audit_upstream_ids: Iterable[str],

@@ -458,6 +458,8 @@ class AccountService:
                 await self.client.set_account_priority(account_id, int(priority))
             disabled_by_monitor = False
             previous_enabled = None
+            if self.request_audits is not None:
+                self.request_audits.mark_actions_restored(account_id)
 
         assessment = self.accounts.set_manual_status(
             account_id=account_id,

@@ -515,6 +515,7 @@ function preDisableStatusLabel(check: RequestAuditPreDisableCheck | null) {
   if (!check) return ''
   if (check.actionStatus === 'disabled') return '已自动停用'
   if (check.actionStatus === 'already_disabled') return '已记录停用'
+  if (check.actionStatus === 'restored') return '已恢复'
   if (check.actionStatus === 'already_quarantined') return '已隔离'
   if (check.actionStatus === 'task_protected') return '任务保护'
   if (check.actionStatus === 'auto_quarantine_disabled') return '自动停用未开启'

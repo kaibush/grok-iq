@@ -2452,7 +2452,7 @@ class RequestAuditService:
         evaluations = self._audit_risk_evaluations(records)
         assessments = self._assessment_payloads(records)
         account_ids = self._record_account_ids(records)
-        verifications = self._latest_account_verifications(account_ids)
+        verifications = self._window_account_verifications(records)
         upstream_result, nodes_result = await asyncio.gather(
             self._upstream_account_map(account_ids),
             self._egress_map(),
@@ -2590,9 +2590,7 @@ class RequestAuditService:
             assessments = self._assessment_payloads(records)
         upstream_accounts = upstream_accounts or {}
         if verifications is None:
-            verifications = self._latest_account_verifications(
-                self._record_account_ids(records)
-            )
+            verifications = self._window_account_verifications(records)
         result = [
             self._account_payload(
                 rows,
@@ -2631,6 +2629,62 @@ class RequestAuditService:
         if self.account_service is not None:
             return self.account_service.latest_sso_verifications(account_ids)
         return self.repository.latest_verifications_for_accounts(account_ids)
+
+    def _window_account_verifications(
+        self,
+        records: list[dict[str, Any]],
+    ) -> dict[int, dict[str, Any]]:
+        """Attach only verdicts whose triggering audit is in the current window."""
+
+        loader = getattr(self.repository, "verifications_for_audits", None)
+        if not callable(loader):
+            return {}
+        by_audit = loader(
+            str(row.get("upstream_id") or "")
+            for row in records
+            if str(row.get("upstream_id") or "")
+        )
+        if not isinstance(by_audit, dict):
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        for row in records:
+            account_id = _positive_int(row.get("account_id"))
+            verification = by_audit.get(str(row.get("upstream_id") or ""))
+            if account_id is None or not isinstance(verification, dict):
+                continue
+            current = result.get(account_id)
+            if (
+                current is None
+                or self._verification_sort_key(verification)
+                > self._verification_sort_key(current)
+            ):
+                result[account_id] = verification
+        return result
+
+    @staticmethod
+    def _verification_sort_key(value: dict[str, Any]) -> tuple[datetime, datetime, datetime, int]:
+        empty = datetime.min.replace(tzinfo=UTC)
+        return (
+            ensure_utc(value.get("checked_at")) or empty,
+            ensure_utc(value.get("updated_at")) or empty,
+            ensure_utc(value.get("audit_created_at")) or empty,
+            int(value.get("id") or 0),
+        )
+
+    @staticmethod
+    def _effective_account_verification(
+        verification: dict[str, Any] | None,
+        *,
+        assessment: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not verification:
+            return {}
+        action = str(verification.get("action_status") or "")
+        if action not in {"disabled", "already_disabled"}:
+            return verification
+        if str(assessment.get("monitor_status") or "") == "quarantined":
+            return verification
+        return {**verification, "action_status": "restored"}
 
     def _account_payload(
         self,
@@ -2712,7 +2766,12 @@ class RequestAuditService:
         )
         watch_count = sum(1 for value in row_risks if value in {"watch", "high"})
         high_count = sum(1 for value in row_risks if value == "high")
-        verification_payload = self._verification_payload(verification)
+        verification_payload = self._verification_payload(
+            self._effective_account_verification(
+                verification,
+                assessment=assessment,
+            )
+        )
         egress_recommendation = (
             verification_payload.get("egressRecommendation")
             if verification_payload
