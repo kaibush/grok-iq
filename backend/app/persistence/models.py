@@ -364,6 +364,9 @@ class RequestAuditRecord(Base):
     reasoning_tokens_reported: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    reasoning_effort: Mapped[str] = mapped_column(
+        String(16), default="", server_default="", nullable=False
+    )
     total_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     first_token_ms: Mapped[int | None] = mapped_column(BigInteger)
     duration_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

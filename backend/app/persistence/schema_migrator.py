@@ -274,6 +274,11 @@ COMPATIBILITY_COLUMNS = {
             "ALTER TABLE request_audit_records ADD COLUMN stream_sample "
             "JSON NOT NULL DEFAULT '{}'",
         ),
+        (
+            "reasoning_effort",
+            "ALTER TABLE request_audit_records ADD COLUMN reasoning_effort "
+            "VARCHAR(16) NOT NULL DEFAULT ''",
+        ),
     ],
     "request_audit_account_verifications": [
         (

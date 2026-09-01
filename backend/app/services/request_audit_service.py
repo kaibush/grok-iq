@@ -52,6 +52,8 @@ REQUEST_AUDIT_CLIENT_KEY_BACKFILL_KEY = "request_audit_client_key_projection_v1"
 REQUEST_AUDIT_CLIENT_KEY_BACKFILL_MAX_PAGES = 10
 REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY = "request_audit_stream_sample_projection_v1"
 REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES = 10
+REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY = "request_audit_reasoning_effort_projection_v1"
+REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_MAX_PAGES = 10
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,32 @@ def _stream_sample_has_content(value: dict[str, Any]) -> bool:
         or value.get("firstOutputMs") is not None
         or value.get("lastOutputMs") is not None
     )
+
+
+_REASONING_EFFORTS = frozenset(
+    {"auto", "none", "low", "medium", "high", "xhigh", "fixed"}
+)
+
+
+def _normalize_reasoning_effort(value: Any) -> str:
+    text_value = str(value or "").strip().lower()
+    return text_value if text_value in _REASONING_EFFORTS else ""
+
+
+def _reasoning_effort_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider") or "") != "grok_build":
+            continue
+        effort = _normalize_reasoning_effort(item.get("reasoningEffort"))
+        if not effort:
+            continue
+        upstream_id = str(item.get("id") or item.get("requestId") or "").strip()
+        if upstream_id:
+            values.append({"id": upstream_id, "reasoningEffort": effort})
+    return values
 
 
 def _stream_sample_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
@@ -552,6 +580,9 @@ class RequestAuditService:
                 updated += self.repository.refresh_stream_samples(
                     _stream_sample_refresh_items(items)
                 )
+                self.repository.refresh_reasoning_efforts(
+                    _reasoning_effort_refresh_items(items)
+                )
                 next_cursor = str(payload.get("nextCursor") or "")
                 has_more = bool(payload.get("hasMore")) and bool(next_cursor)
                 if not has_more:
@@ -577,6 +608,75 @@ class RequestAuditService:
             if getattr(exc, "error_code", "") == "invalidCursor":
                 self.repository.set_metadata_value(
                     REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, ""
+                )
+            return {
+                "complete": False,
+                "pages": pages,
+                "updated": updated,
+                "error": str(exc),
+            }
+        return {"complete": False, "pages": pages, "updated": updated, "error": ""}
+
+    async def _backfill_reasoning_effort_projection(self) -> dict[str, Any]:
+        raw_state = self.repository.metadata_value(
+            REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY
+        )
+        if raw_state == "completed":
+            return {"complete": True, "pages": 0, "updated": 0, "error": ""}
+        try:
+            state = json.loads(raw_state) if raw_state else {}
+        except (TypeError, ValueError):
+            state = {}
+        cursor = str(state.get("cursor") or "") if isinstance(state, dict) else ""
+        pages = 0
+        updated = 0
+        try:
+            while pages < REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_MAX_PAGES:
+                payload = await self.client.list_request_audits(
+                    cursor=cursor,
+                    page_size=REQUEST_AUDIT_PAGE_SIZE,
+                    period="90d",
+                )
+                items = payload.get("items", [])
+                if not isinstance(items, list) or not items:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                pages += 1
+                updated += self.repository.refresh_reasoning_efforts(
+                    _reasoning_effort_refresh_items(items)
+                )
+                next_cursor = str(payload.get("nextCursor") or "")
+                has_more = bool(payload.get("hasMore")) and bool(next_cursor)
+                if not has_more:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                if next_cursor == cursor:
+                    raise RuntimeError("思考等级回填游标未推进")
+                cursor = next_cursor
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY,
+                    json.dumps({"cursor": cursor}),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if getattr(exc, "error_code", "") == "invalidCursor":
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY, ""
                 )
             return {
                 "complete": False,
@@ -798,6 +898,7 @@ class RequestAuditService:
             media_backfill = await self._backfill_media_input_projection()
             client_key_backfill = await self._backfill_client_key_projection()
             stream_sample_backfill = await self._backfill_stream_sample_projection()
+            reasoning_effort_backfill = await self._backfill_reasoning_effort_projection()
             try:
                 egress_map = await self._egress_map()
             except Exception as exc:  # node labels are supplemental
@@ -855,6 +956,9 @@ class RequestAuditService:
                 )
                 self.repository.refresh_stream_samples(
                     _stream_sample_refresh_items(items)
+                )
+                self.repository.refresh_reasoning_efforts(
+                    _reasoning_effort_refresh_items(items)
                 )
                 page_has_overlap = False
                 page_records: list[dict[str, Any]] = []
@@ -1007,6 +1111,7 @@ class RequestAuditService:
                 "mediaInputBackfill": media_backfill,
                 "clientKeyBackfill": client_key_backfill,
                 "streamSampleBackfill": stream_sample_backfill,
+                "reasoningEffortBackfill": reasoning_effort_backfill,
                 "preDisableChecks": pre_disable_checks,
                 "state": self._state_payload(saved_state, window=window),
                 "activity": activity,
@@ -2111,6 +2216,7 @@ class RequestAuditService:
             "mediaInputImages",
             "outputTokens",
             "reasoningTokens",
+            "reasoningEffort",
             "totalTokens",
             "firstTokenMs",
             "durationMs",
@@ -2148,6 +2254,7 @@ class RequestAuditService:
             "output_tokens": output_tokens,
             "reasoning_tokens": reasoning_tokens,
             "reasoning_tokens_reported": "reasoningTokens" in item,
+            "reasoning_effort": _normalize_reasoning_effort(item.get("reasoningEffort")),
             "total_tokens": _int_or_zero(item.get("totalTokens")),
             "first_token_ms": _nonnegative_int(item.get("firstTokenMs")),
             "duration_ms": _int_or_zero(item.get("durationMs")),
@@ -3700,6 +3807,9 @@ class RequestAuditService:
             "outputTokens": int(row.get("output_tokens") or 0),
             "reasoningTokens": int(row.get("reasoning_tokens") or 0),
             "reasoningTokensReported": bool(row.get("reasoning_tokens_reported")),
+            "reasoningEffort": _normalize_reasoning_effort(
+                row.get("reasoning_effort") or row.get("reasoningEffort")
+            ),
             "totalTokens": int(row.get("total_tokens") or 0),
             "firstTokenMs": (
                 int(row["first_token_ms"])

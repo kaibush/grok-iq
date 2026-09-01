@@ -722,6 +722,41 @@ function Tps({
   )
 }
 
+const reasoningEffortLabels: Record<string, string> = {
+  auto: '自动',
+  none: '关闭',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  fixed: '固定',
+}
+
+function reasoningEffortLabel(value?: string | null) {
+  return reasoningEffortLabels[value?.trim().toLowerCase() || ''] || ''
+}
+
+function reasoningEffortClass(value?: string | null) {
+  switch (value?.trim().toLowerCase()) {
+    case 'none':
+      return 'text-muted-foreground'
+    case 'low':
+      return 'text-sky-700 dark:text-sky-300'
+    case 'medium':
+      return 'text-amber-700 dark:text-amber-300'
+    case 'high':
+      return 'text-orange-700 dark:text-orange-300'
+    case 'xhigh':
+      return 'text-rose-700 dark:text-rose-300'
+    case 'auto':
+      return 'text-violet-700 dark:text-violet-300'
+    case 'fixed':
+      return 'text-indigo-700 dark:text-indigo-300'
+    default:
+      return 'text-muted-foreground'
+  }
+}
+
 function accountHasRiskEvidence(account: RequestAuditAccountRisk) {
   return (
     account.riskLevel !== 'normal' ||
@@ -4155,6 +4190,10 @@ function AuditRecordDetailDialog({
                 mono
               />
               <AuditDetailField
+                label='思考等级'
+                value={reasoningEffortLabel(record.reasoningEffort) || '未记录'}
+              />
+              <AuditDetailField
                 label='总 Token'
                 value={formatNumber(record.totalTokens, 0)}
                 mono
@@ -5383,9 +5422,21 @@ function AuditRow({
       </TableCell>
       <TableCell className='align-middle font-mono text-xs tabular-nums'>
         {formatNumber(row.outputTokens, 0)}
-        {row.reasoningTokens > 0 && (
+        {(row.reasoningTokens > 0 || reasoningEffortLabel(row.reasoningEffort)) && (
           <div className='text-[10px] text-muted-foreground'>
-            推理 {formatNumber(row.reasoningTokens, 0)}
+            {row.reasoningTokens > 0
+              ? `推理 ${formatNumber(row.reasoningTokens, 0)}`
+              : '推理 0'}
+            {reasoningEffortLabel(row.reasoningEffort) ? (
+              <span
+                className={cn(
+                  'ms-1 font-medium',
+                  reasoningEffortClass(row.reasoningEffort)
+                )}
+              >
+                · 思考 {reasoningEffortLabel(row.reasoningEffort)}
+              </span>
+            ) : null}
           </div>
         )}
       </TableCell>

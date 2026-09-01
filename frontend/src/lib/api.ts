@@ -756,6 +756,7 @@ export type RequestAuditRecord = {
   outputTokens: number
   reasoningTokens: number
   reasoningTokensReported: boolean
+  reasoningEffort?: string
   totalTokens: number
   firstTokenMs: number | null
   durationMs: number

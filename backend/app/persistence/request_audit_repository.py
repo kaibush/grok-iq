@@ -110,6 +110,7 @@ class RequestAuditRepository:
             "output_tokens",
             "reasoning_tokens",
             "reasoning_tokens_reported",
+            "reasoning_effort",
             "total_tokens",
             "first_token_ms",
             "duration_ms",
@@ -234,6 +235,33 @@ class RequestAuditRepository:
             if isinstance(sample, dict) and sample:
                 result[str(upstream_id)] = sample
         return result
+
+    def refresh_reasoning_efforts(self, items: Iterable[dict[str, Any]]) -> int:
+        values: dict[str, str] = {}
+        for item in items:
+            upstream_id = str(
+                item.get("id") or item.get("upstream_id") or item.get("requestId") or ""
+            ).strip()
+            effort = str(
+                item.get("reasoningEffort") or item.get("reasoning_effort") or ""
+            ).strip().lower()
+            if upstream_id and effort:
+                values[upstream_id] = effort[:16]
+        if not values:
+            return 0
+        updated = 0
+        with self.database.transaction() as session:
+            for upstream_id, effort in values.items():
+                result = session.execute(
+                    update(RequestAuditRecord)
+                    .where(
+                        RequestAuditRecord.upstream_id == upstream_id,
+                        RequestAuditRecord.reasoning_effort == "",
+                    )
+                    .values(reasoning_effort=effort)
+                )
+                updated += int(result.rowcount or 0)
+        return updated
 
     def metadata_value(self, key: str) -> str:
         with self.database.session() as session:
