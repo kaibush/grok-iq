@@ -6,8 +6,9 @@ from typing import Any
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import defer
 
-from app.core.clock import utc_now
+from app.core.clock import to_app_timezone, utc_now
 
 from .database import Database
 from .models import (
@@ -520,30 +521,108 @@ class RequestAuditRepository:
     def records_for_day(self, day_key: str) -> list[dict[str, Any]]:
         with self.database.session() as session:
             values = session.scalars(
-                select(RequestAuditRecord)
-                .where(RequestAuditRecord.day_key == day_key)
+                _audit_record_query().where(RequestAuditRecord.day_key == day_key)
                 .order_by(RequestAuditRecord.created_at.asc(), RequestAuditRecord.upstream_id.asc())
             ).all()
-            return [model_dict(value) for value in values]
+            return [_audit_record_dict(value) for value in values]
 
     def records_for_range(
         self,
         start: datetime,
         end: datetime,
+        *,
+        account_ids: Iterable[int] | None = None,
     ) -> list[dict[str, Any]]:
+        stmt = _audit_record_query().where(
+            RequestAuditRecord.created_at >= start,
+            RequestAuditRecord.created_at < end,
+        )
+        id_values = _positive_account_ids(account_ids)
+        if id_values:
+            stmt = stmt.where(RequestAuditRecord.account_id.in_(id_values))
         with self.database.session() as session:
             values = session.scalars(
-                select(RequestAuditRecord)
-                .where(
-                    RequestAuditRecord.created_at >= start,
-                    RequestAuditRecord.created_at < end,
-                )
-                .order_by(
+                stmt.order_by(
                     RequestAuditRecord.created_at.asc(),
                     RequestAuditRecord.upstream_id.asc(),
                 )
             ).all()
-            return [model_dict(value) for value in values]
+            return [_audit_record_dict(value) for value in values]
+
+    def page_records_for_range(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        limit: int,
+        offset: int,
+        account: str = "",
+        account_id: int | None = None,
+        client_key: str = "",
+        egress_node_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        stmt = _filtered_audit_record_query(
+            start,
+            end,
+            account=account,
+            account_id=account_id,
+            client_key=client_key,
+            egress_node_id=egress_node_id,
+        ).order_by(
+            RequestAuditRecord.created_at.desc(),
+            RequestAuditRecord.upstream_id.desc(),
+        )
+        with self.database.session() as session:
+            values = session.scalars(stmt.offset(max(0, offset)).limit(max(1, limit))).all()
+            return [_audit_record_dict(value) for value in values]
+
+    def count_records_for_range(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        account: str = "",
+        account_id: int | None = None,
+        client_key: str = "",
+        egress_node_id: int | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(RequestAuditRecord).where(
+            *_ledger_filter_clauses(
+                start,
+                end,
+                account=account,
+                account_id=account_id,
+                client_key=client_key,
+                egress_node_id=egress_node_id,
+            )
+        )
+        with self.database.session() as session:
+            return int(session.scalar(stmt) or 0)
+
+    def client_key_pairs_for_range(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                RequestAuditRecord.client_key_id,
+                RequestAuditRecord.client_key_name,
+            )
+            .where(
+                RequestAuditRecord.created_at >= start,
+                RequestAuditRecord.created_at < end,
+            )
+            .distinct()
+        )
+        with self.database.session() as session:
+            return [
+                {
+                    "client_key_id": str(row[0] or ""),
+                    "client_key_name": str(row[1] or ""),
+                }
+                for row in session.execute(stmt).all()
+            ]
 
     def count_for_day(self, day_key: str) -> int:
         with self.database.session() as session:
@@ -624,3 +703,105 @@ class RequestAuditRepository:
     @staticmethod
     def retention_cutoff(days: int = 3) -> datetime:
         return utc_now() - timedelta(days=max(1, days))
+
+def _audit_record_query():
+    return select(RequestAuditRecord).options(defer(RequestAuditRecord.raw))
+
+
+def _audit_record_dict(value: RequestAuditRecord) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for column in value.__table__.columns:
+        if column.name == "raw":
+            continue
+        item = getattr(value, column.name)
+        result[column.name] = (
+            to_app_timezone(item) if isinstance(item, datetime) else item
+        )
+    return result
+
+
+def _positive_account_ids(account_ids: Iterable[int] | None) -> list[int]:
+    values: list[int] = []
+    seen: set[int] = set()
+    for item in account_ids or ():
+        try:
+            account_id = int(item)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if account_id > 0 and account_id not in seen:
+            seen.add(account_id)
+            values.append(account_id)
+    return values
+
+
+def _contains_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _ledger_filter_clauses(
+    start: datetime,
+    end: datetime,
+    *,
+    account: str = "",
+    account_id: int | None = None,
+    client_key: str = "",
+    egress_node_id: int | None = None,
+):
+    clauses = [
+        RequestAuditRecord.created_at >= start,
+        RequestAuditRecord.created_at < end,
+    ]
+    if account_id is not None:
+        clauses.append(RequestAuditRecord.account_id == account_id)
+    account_needle = account.strip().casefold()
+    if account_needle:
+        pattern = _contains_pattern(account_needle)
+        account_match = [
+            func.lower(RequestAuditRecord.account_name).like(pattern, escape="\\"),
+            func.lower(RequestAuditRecord.request_id).like(pattern, escape="\\"),
+            func.lower(RequestAuditRecord.client_key_name).like(pattern, escape="\\"),
+            func.lower(RequestAuditRecord.client_key_id).like(pattern, escape="\\"),
+        ]
+        try:
+            account_id_filter = int(account_needle)
+        except ValueError:
+            account_id_filter = 0
+        if account_id_filter > 0:
+            account_match.append(RequestAuditRecord.account_id == account_id_filter)
+        clauses.append(or_(*account_match))
+    client_key_needle = client_key.strip()
+    if client_key_needle == "unlabeled":
+        clauses.append(RequestAuditRecord.client_key_id == "")
+        clauses.append(RequestAuditRecord.client_key_name == "")
+    elif client_key_needle:
+        clauses.append(
+            or_(
+                RequestAuditRecord.client_key_id == client_key_needle,
+                RequestAuditRecord.client_key_name == client_key_needle,
+            )
+        )
+    if egress_node_id is not None:
+        clauses.append(RequestAuditRecord.egress_node_id == egress_node_id)
+    return tuple(clauses)
+
+
+def _filtered_audit_record_query(
+    start: datetime,
+    end: datetime,
+    *,
+    account: str = "",
+    account_id: int | None = None,
+    client_key: str = "",
+    egress_node_id: int | None = None,
+):
+    return _audit_record_query().where(
+        *_ledger_filter_clauses(
+            start,
+            end,
+            account=account,
+            account_id=account_id,
+            client_key=client_key,
+            egress_node_id=egress_node_id,
+        )
+    )

@@ -70,6 +70,11 @@ def _finite_float(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _needs_full_ledger_scan(risk: str) -> bool:
+    value = str(risk or "").strip()
+    return bool(value) and value != "all"
+
+
 def _positive_int(value: Any) -> int | None:
     try:
         number = int(value)
@@ -1685,76 +1690,80 @@ class RequestAuditService:
             start_at=start_at,
             end_at=end_at,
         )
-        window_items = self.repository.records_for_range(
-            window["start"],
-            window["end"],
-        )
-        # Consecutive reasoning state belongs to the complete time window. A
-        # text/egress filter must not rewrite a row's risk level by hiding the
-        # preceding samples that established its streak.
-        evaluations = self._audit_risk_evaluations(window_items)
-        all_items = window_items
-        pinned_account_id = _positive_int(account_id)
-        if pinned_account_id is not None:
-            all_items = [
-                item
-                for item in all_items
-                if item.get("account_id") == pinned_account_id
-            ]
-        account_needle = account.strip().casefold()
-        if account_needle:
-            try:
-                account_id_filter = int(account_needle)
-            except ValueError:
-                account_id_filter = 0
-            all_items = [
-                item
-                for item in all_items
-                if account_needle in str(item.get("account_name") or "").casefold()
-                or account_needle in str(item.get("request_id") or "").casefold()
-                or account_needle in str(item.get("client_key_name") or "").casefold()
-                or account_needle in str(item.get("client_key_id") or "").casefold()
-                or (account_id_filter > 0 and item.get("account_id") == account_id_filter)
-            ]
-        client_keys = self._client_key_options(window_items)
-        client_key_needle = client_key.strip()
-        if client_key_needle:
-            all_items = [
-                item
-                for item in all_items
-                if self._client_key_filter_matches(item, client_key_needle)
-            ]
-        if egress_node_id is not None:
-            all_items = [
-                item
-                for item in all_items
-                if item.get("egress_node_id") == egress_node_id
-            ]
-        filtered_items = [
-            item
-            for item in all_items
-            if self._risk_filter_matches(
-                self._evaluation_for(item, evaluations).classification,
-                risk,
-            )
-        ]
-        # Risk streaks are evaluated chronologically above, but the workbench
-        # is an operator-facing ledger and must show the newest request first.
-        # Keep the two concerns separate so pagination never hides the latest
-        # evidence behind older rows.
-        filtered_items.sort(
-            key=lambda item: (
-                ensure_utc(item.get("created_at"))
-                or datetime.min.replace(tzinfo=UTC),
-                str(item.get("upstream_id") or ""),
-            ),
-            reverse=True,
-        )
-        total = len(filtered_items)
         page = max(1, page)
         page_size = max(1, min(page_size, 200))
         offset = (page - 1) * page_size
-        page_items = filtered_items[offset : offset + page_size]
+        pinned_account_id = _positive_int(account_id)
+        # Text/egress filters can be applied in SQL. Risk filters still need the
+        # complete window because consecutive reasoning state is computed in
+        # Python and is not stored as a queryable column.
+        if isinstance(self.repository, RequestAuditRepository) and not _needs_full_ledger_scan(
+            risk
+        ):
+            client_keys = self._client_key_options(
+                self.repository.client_key_pairs_for_range(
+                    window["start"],
+                    window["end"],
+                )
+            )
+            total = self.repository.count_records_for_range(
+                window["start"],
+                window["end"],
+                account=account,
+                account_id=pinned_account_id,
+                client_key=client_key,
+                egress_node_id=egress_node_id,
+            )
+            page_items = self.repository.page_records_for_range(
+                window["start"],
+                window["end"],
+                limit=page_size,
+                offset=offset,
+                account=account,
+                account_id=pinned_account_id,
+                client_key=client_key,
+                egress_node_id=egress_node_id,
+            )
+            evaluations = self._ledger_page_evaluations(window, page_items)
+        else:
+            window_items = self.repository.records_for_range(
+                window["start"],
+                window["end"],
+            )
+            # Consecutive reasoning state belongs to the complete time window. A
+            # text/egress filter must not rewrite a row's risk level by hiding the
+            # preceding samples that established its streak.
+            evaluations = self._audit_risk_evaluations(window_items)
+            all_items = self._apply_ledger_row_filters(
+                window_items,
+                account=account,
+                account_id=pinned_account_id,
+                client_key=client_key,
+                egress_node_id=egress_node_id,
+            )
+            client_keys = self._client_key_options(window_items)
+            filtered_items = [
+                item
+                for item in all_items
+                if self._risk_filter_matches(
+                    self._evaluation_for(item, evaluations).classification,
+                    risk,
+                )
+            ]
+            # Risk streaks are evaluated chronologically above, but the workbench
+            # is an operator-facing ledger and must show the newest request first.
+            # Keep the two concerns separate so pagination never hides the latest
+            # evidence behind older rows.
+            filtered_items.sort(
+                key=lambda item: (
+                    ensure_utc(item.get("created_at"))
+                    or datetime.min.replace(tzinfo=UTC),
+                    str(item.get("upstream_id") or ""),
+                ),
+                reverse=True,
+            )
+            total = len(filtered_items)
+            page_items = filtered_items[offset : offset + page_size]
         probe_map = self._probe_sample_map(page_items)
         account_ids = self._record_account_ids(page_items)
         verification_map = self.repository.verifications_for_audits(
@@ -1791,6 +1800,77 @@ class RequestAuditService:
             "clientKeys": client_keys,
             "thresholds": self.thresholds,
         }
+
+    def _ledger_page_evaluations(
+        self,
+        window: dict[str, Any],
+        page_items: list[dict[str, Any]],
+    ) -> dict[str, AuditRiskEvaluation]:
+        if not page_items:
+            return {}
+        account_ids = self._record_account_ids(page_items)
+        if account_ids:
+            context_items = self.repository.records_for_range(
+                window["start"],
+                window["end"],
+                account_ids=account_ids,
+            )
+        else:
+            context_items = []
+        seen = {str(item.get("upstream_id") or "") for item in context_items}
+        for item in page_items:
+            key = str(item.get("upstream_id") or "")
+            if key and key not in seen:
+                context_items.append(item)
+                seen.add(key)
+        return self._audit_risk_evaluations(context_items)
+
+    @staticmethod
+    def _apply_ledger_row_filters(
+        records: list[dict[str, Any]],
+        *,
+        account: str = "",
+        account_id: int | None = None,
+        client_key: str = "",
+        egress_node_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        items = records
+        if account_id is not None:
+            items = [item for item in items if item.get("account_id") == account_id]
+        account_needle = account.strip().casefold()
+        if account_needle:
+            try:
+                account_id_filter = int(account_needle)
+            except ValueError:
+                account_id_filter = 0
+            items = [
+                item
+                for item in items
+                if account_needle in str(item.get("account_name") or "").casefold()
+                or account_needle in str(item.get("request_id") or "").casefold()
+                or account_needle in str(item.get("client_key_name") or "").casefold()
+                or account_needle in str(item.get("client_key_id") or "").casefold()
+                or (
+                    account_id_filter > 0
+                    and item.get("account_id") == account_id_filter
+                )
+            ]
+        client_key_needle = client_key.strip()
+        if client_key_needle:
+            items = [
+                item
+                for item in items
+                if RequestAuditService._client_key_filter_matches(
+                    item, client_key_needle
+                )
+            ]
+        if egress_node_id is not None:
+            items = [
+                item
+                for item in items
+                if item.get("egress_node_id") == egress_node_id
+            ]
+        return items
 
     @staticmethod
     def _client_key_options(records: list[dict[str, Any]]) -> list[dict[str, str]]:
