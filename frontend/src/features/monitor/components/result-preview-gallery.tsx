@@ -1274,35 +1274,16 @@ export function ResultPreviewGallery({
                                   </div>
                                 </button>
                                 {selected && accountPerspective ? (
-                                  runSamples.length > 1 ? (
-                                    <div className='flex flex-wrap gap-1 border-t px-3 py-2'>
-                                      {runSamples.map((entrySample, offset) => {
-                                        const selectedSample =
-                                          entrySample.id === sample?.id
-                                        return (
-                                          <Button
-                                            key={entrySample.id}
-                                            type='button'
-                                            size='sm'
-                                            variant={
-                                              selectedSample
-                                                ? 'secondary'
-                                                : 'outline'
-                                            }
-                                            className='h-7 px-2 text-xs'
-                                            onClick={() => {
-                                              setSampleOverrideId(
-                                                entrySample.id
-                                              )
-                                              setSampleOverrideRound(offset + 1)
-                                            }}
-                                          >
-                                            样本 {offset + 1}
-                                          </Button>
-                                        )
-                                      })}
-                                    </div>
-                                  ) : null
+                                  <PreviewRoundChips
+                                    samples={runSamples}
+                                    selectedId={sample?.id}
+                                    labelMode='sample'
+                                    className='border-t px-3 py-2'
+                                    onSelect={(entrySample, offset) => {
+                                      setSampleOverrideId(entrySample.id)
+                                      setSampleOverrideRound(offset + 1)
+                                    }}
+                                  />
                                 ) : selected ? (
                                   <div className='space-y-1 border-t px-2 py-2'>
                                     {group.items.map((entry) => {
@@ -1348,36 +1329,17 @@ export function ResultPreviewGallery({
                                               </div>
                                             </div>
                                           </button>
-                                          {active && runSamples.length > 1 ? (
-                                            <div className='mt-1 flex flex-wrap gap-1 px-1 pb-1'>
-                                              {runSamples.map((entrySample) => {
-                                                const selectedSample =
-                                                  entrySample.id === sample?.id
-                                                return (
-                                                  <Button
-                                                    key={entrySample.id}
-                                                    type='button'
-                                                    size='sm'
-                                                    variant={
-                                                      selectedSample
-                                                        ? 'secondary'
-                                                        : 'outline'
-                                                    }
-                                                    className='h-7 px-2 text-xs'
-                                                    onClick={() =>
-                                                      setSampleOverrideId(
-                                                        entrySample.id
-                                                      )
-                                                    }
-                                                  >
-                                                    第{' '}
-                                                    {entrySample.round_number ||
-                                                      1}{' '}
-                                                    轮
-                                                  </Button>
+                                          {active ? (
+                                            <PreviewRoundChips
+                                              samples={runSamples}
+                                              selectedId={sample?.id}
+                                              className='mt-1 px-1 pb-1'
+                                              onSelect={(entrySample) =>
+                                                setSampleOverrideId(
+                                                  entrySample.id
                                                 )
-                                              })}
-                                            </div>
+                                              }
+                                            />
                                           ) : null}
                                         </div>
                                       )
@@ -1432,34 +1394,19 @@ export function ResultPreviewGallery({
                                     ) : null}
                                   </div>
                                 </button>
-                                {active && runSamples.length > 1 ? (
-                                  <div className='mt-1 flex flex-wrap gap-1 px-1'>
-                                    {runSamples.map((entrySample, offset) => {
-                                      const selectedSample =
-                                        entrySample.id === sample?.id
-                                      return (
-                                        <Button
-                                          key={entrySample.id}
-                                          type='button'
-                                          size='sm'
-                                          variant={
-                                            selectedSample
-                                              ? 'secondary'
-                                              : 'outline'
-                                          }
-                                          className='h-7 px-2 text-xs'
-                                          onClick={() => {
-                                            setSampleOverrideId(entrySample.id)
-                                            setSampleOverrideRound(offset + 1)
-                                          }}
-                                        >
-                                          {accountPerspective
-                                            ? `样本 ${offset + 1}`
-                                            : `第 ${entrySample.round_number || 1} 轮`}
-                                        </Button>
-                                      )
-                                    })}
-                                  </div>
+                                {active ? (
+                                  <PreviewRoundChips
+                                    samples={runSamples}
+                                    selectedId={sample?.id}
+                                    labelMode={
+                                      accountPerspective ? 'sample' : 'round'
+                                    }
+                                    className='mt-1 px-1'
+                                    onSelect={(entrySample, offset) => {
+                                      setSampleOverrideId(entrySample.id)
+                                      setSampleOverrideRound(offset + 1)
+                                    }}
+                                  />
                                 ) : null}
                               </div>
                             )
@@ -1698,6 +1645,44 @@ function groupAccountSubtitle(
     parts.push(`${roundCount} 轮`)
   }
   return parts.filter(Boolean).join(' · ')
+}
+
+function PreviewRoundChips({
+  samples,
+  selectedId,
+  labelMode = 'round',
+  className,
+  onSelect,
+}: {
+  samples: ProbeSample[]
+  selectedId?: string
+  labelMode?: 'round' | 'sample'
+  className?: string
+  onSelect: (sample: ProbeSample, offset: number) => void
+}) {
+  if (samples.length < 2) return null
+  return (
+    <div className={cn('flex flex-wrap gap-1', className)}>
+      {samples.map((entrySample, offset) => {
+        const selected = entrySample.id === selectedId
+        return (
+          <Button
+            key={entrySample.id || `round-${offset}`}
+            type='button'
+            size='sm'
+            variant={selected ? 'default' : 'outline'}
+            aria-pressed={selected}
+            className='h-7 px-2 text-xs'
+            onClick={() => onSelect(entrySample, offset)}
+          >
+            {labelMode === 'sample'
+              ? `样本 ${offset + 1}`
+              : `第 ${entrySample.round_number || offset + 1} 轮`}
+          </Button>
+        )
+      })}
+    </div>
+  )
 }
 
 function VirtualizedThumbGrid({
