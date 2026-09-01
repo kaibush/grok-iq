@@ -88,6 +88,7 @@ def test_records_for_range_skip_raw_blob(tmp_path: Path):
     rows = repository.records_for_range(now - timedelta(hours=1), now + timedelta(hours=1))
     assert len(rows) == 1
     assert "raw" not in rows[0]
+    assert "stream_sample" not in rows[0]
     assert rows[0]["upstream_id"] == "1"
     assert rows[0]["account_name"] == "alice"
 

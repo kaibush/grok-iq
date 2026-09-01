@@ -731,8 +731,14 @@ function AuditIsolationPanel({
             divided
           />
           <RiskStatusRule
+            status='冷却'
+            description={`高速 TPS 连续 ${form.requestAuditTpsOnlyMinCount} 次后，先停用账号 ${form.requestAuditTpsCooldownMinutes} 分钟，不进入隔离区；到期自动恢复调度。`}
+            tone='warning'
+            divided
+          />
+          <RiskStatusRule
             status='隔离'
-            description={`同一规则达到次数后才永久停用：高速 TPS ${form.requestAuditTpsOnlyMinCount} 次，无媒体输入时思考为 0 按模型策略连续次数。Media Input 不会因此隔离或停用。`}
+            description={`冷却后再连续 ${form.requestAuditTpsOnlyMinCount} 次高速 TPS，且中间没有正常 TPS，才永久停用并移入隔离区。思考为 0 仍按模型策略连续次数直接停用。Media Input 不会因此隔离或停用。`}
             tone='danger'
             divided
           />
@@ -740,21 +746,32 @@ function AuditIsolationPanel({
         <SettingList>
           <SettingListItem
             label='请求审计账号处置'
-            description='关闭后仍保存风险证据，但工作台和自动流程都不能停用账号。'
+            description='关闭后仍保存风险证据，但工作台和自动流程都不能冷却或停用账号。'
             checked={form.requestAuditIsolationEnabled}
             onCheckedChange={(value) =>
               set('requestAuditIsolationEnabled', value)
             }
           >
-            <div className='max-w-xs'>
+            <div className='grid max-w-xl gap-3 sm:grid-cols-2'>
               <NumberField
-                label='高速 TPS 累计次数'
-                hint='达到该次数后，与思考为 0 一样永久停用并移入隔离区。SSO 已无法确认账号是否正常，因此不再只降优先级。'
+                label='高速 TPS 连续次数'
+                hint='必须是连续的高速 TPS。中间出现一次可测的正常或观察 TPS 就从 0 重新计。'
                 value={form.requestAuditTpsOnlyMinCount}
                 min={2}
                 max={100}
                 suffix='次'
                 onChange={(value) => set('requestAuditTpsOnlyMinCount', value)}
+              />
+              <NumberField
+                label='账号冷却时间'
+                hint='连续达到次数后先冷却。冷却后再连续同样次数，且没有恢复正常 TPS，才停用并隔离。'
+                value={form.requestAuditTpsCooldownMinutes}
+                min={1}
+                max={1440}
+                suffix='分钟'
+                onChange={(value) =>
+                  set('requestAuditTpsCooldownMinutes', value)
+                }
               />
             </div>
           </SettingListItem>

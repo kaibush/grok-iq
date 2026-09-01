@@ -6,6 +6,7 @@ import json
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
@@ -49,6 +50,8 @@ REQUEST_AUDIT_MEDIA_BACKFILL_KEY = "request_audit_media_input_projection_v1"
 REQUEST_AUDIT_MEDIA_BACKFILL_MAX_PAGES = 10
 REQUEST_AUDIT_CLIENT_KEY_BACKFILL_KEY = "request_audit_client_key_projection_v1"
 REQUEST_AUDIT_CLIENT_KEY_BACKFILL_MAX_PAGES = 10
+REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY = "request_audit_stream_sample_projection_v1"
+REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES = 10
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,93 @@ def _needs_full_ledger_scan(risk: str) -> bool:
 
 def _audit_error_code(value: Any) -> str:
     return str(value or "").strip()
+
+
+_STREAM_SAMPLE_INT_KEYS = (
+    "thinkingChars",
+    "outputChars",
+    "thinkingChunks",
+    "outputChunks",
+    "firstThinkingMs",
+    "lastThinkingMs",
+    "firstOutputMs",
+    "lastOutputMs",
+)
+_STREAM_SAMPLE_BOOL_KEYS = (
+    "hasThinking",
+    "hasEncryptedThinking",
+    "hasVisibleOutput",
+    "hasToolOutput",
+    "thinkingThenOutput",
+    "truncated",
+)
+_STREAM_SAMPLE_TEXT_KEYS = (
+    "thinkingHead",
+    "thinkingTail",
+    "outputHead",
+    "outputTail",
+)
+
+
+def _normalize_stream_sample(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        return {}
+    result: dict[str, Any] = {}
+    protocol = str(value.get("protocol") or "").strip()
+    if protocol:
+        result["protocol"] = protocol[:32]
+    for key in _STREAM_SAMPLE_INT_KEYS:
+        if key not in value:
+            continue
+        number = _nonnegative_int(value.get(key))
+        if number is not None:
+            result[key] = number
+    for key in _STREAM_SAMPLE_BOOL_KEYS:
+        if key in value:
+            result[key] = bool(value.get(key))
+    for key in _STREAM_SAMPLE_TEXT_KEYS:
+        text_value = str(value.get(key) or "")
+        if text_value:
+            result[key] = text_value[:2000]
+    return result if _stream_sample_has_content(result) else {}
+
+
+def _stream_sample_has_content(value: dict[str, Any]) -> bool:
+    return bool(
+        value.get("thinkingChars")
+        or value.get("outputChars")
+        or value.get("thinkingChunks")
+        or value.get("outputChunks")
+        or value.get("hasThinking")
+        or value.get("hasEncryptedThinking")
+        or value.get("hasVisibleOutput")
+        or value.get("hasToolOutput")
+        or value.get("thinkingThenOutput")
+        or value.get("thinkingHead")
+        or value.get("thinkingTail")
+        or value.get("outputHead")
+        or value.get("outputTail")
+        or value.get("firstThinkingMs") is not None
+        or value.get("lastThinkingMs") is not None
+        or value.get("firstOutputMs") is not None
+        or value.get("lastOutputMs") is not None
+    )
+
+
+def _stream_sample_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider") or "") != "grok_build":
+            continue
+        sample = _normalize_stream_sample(item.get("streamSample"))
+        if not sample:
+            continue
+        upstream_id = str(item.get("id") or item.get("requestId") or "").strip()
+        if upstream_id:
+            values.append({"id": upstream_id, "streamSample": sample})
+    return values
 
 
 def _positive_int(value: Any) -> int | None:
@@ -427,6 +517,75 @@ class RequestAuditService:
             }
         return {"complete": False, "pages": pages, "updated": updated, "error": ""}
 
+    async def _backfill_stream_sample_projection(self) -> dict[str, Any]:
+        raw_state = self.repository.metadata_value(
+            REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY
+        )
+        if raw_state == "completed":
+            return {"complete": True, "pages": 0, "updated": 0, "error": ""}
+        try:
+            state = json.loads(raw_state) if raw_state else {}
+        except (TypeError, ValueError):
+            state = {}
+        cursor = str(state.get("cursor") or "") if isinstance(state, dict) else ""
+        pages = 0
+        updated = 0
+        try:
+            while pages < REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES:
+                payload = await self.client.list_request_audits(
+                    cursor=cursor,
+                    page_size=REQUEST_AUDIT_PAGE_SIZE,
+                    period="90d",
+                )
+                items = payload.get("items", [])
+                if not isinstance(items, list) or not items:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                pages += 1
+                updated += self.repository.refresh_stream_samples(
+                    _stream_sample_refresh_items(items)
+                )
+                next_cursor = str(payload.get("nextCursor") or "")
+                has_more = bool(payload.get("hasMore")) and bool(next_cursor)
+                if not has_more:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                if next_cursor == cursor:
+                    raise RuntimeError("内容样本回填游标未推进")
+                cursor = next_cursor
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY,
+                    json.dumps({"cursor": cursor}),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if getattr(exc, "error_code", "") == "invalidCursor":
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, ""
+                )
+            return {
+                "complete": False,
+                "pages": pages,
+                "updated": updated,
+                "error": str(exc),
+            }
+        return {"complete": False, "pages": pages, "updated": updated, "error": ""}
+
     def resolve_window(
         self,
         *,
@@ -635,8 +794,10 @@ class RequestAuditService:
         egress_error = ""
         egress_updated = 0
         try:
+            await self._expire_tps_cooldowns()
             media_backfill = await self._backfill_media_input_projection()
             client_key_backfill = await self._backfill_client_key_projection()
+            stream_sample_backfill = await self._backfill_stream_sample_projection()
             try:
                 egress_map = await self._egress_map()
             except Exception as exc:  # node labels are supplemental
@@ -691,6 +852,9 @@ class RequestAuditService:
                     for item in items
                     if isinstance(item, dict)
                     and str(item.get("provider") or "") == "grok_build"
+                )
+                self.repository.refresh_stream_samples(
+                    _stream_sample_refresh_items(items)
                 )
                 page_has_overlap = False
                 page_records: list[dict[str, Any]] = []
@@ -842,6 +1006,7 @@ class RequestAuditService:
                 "egressWarning": egress_error,
                 "mediaInputBackfill": media_backfill,
                 "clientKeyBackfill": client_key_backfill,
+                "streamSampleBackfill": stream_sample_backfill,
                 "preDisableChecks": pre_disable_checks,
                 "state": self._state_payload(saved_state, window=window),
                 "activity": activity,
@@ -896,6 +1061,7 @@ class RequestAuditService:
             "skipped": 0,
             "disabled": 0,
             "deprioritized": 0,
+            "cooled": 0,
             "failed": 0,
         }
         if not records:
@@ -948,6 +1114,8 @@ class RequestAuditService:
                     stats["disabled"] += 1
                 if action_status in {"deprioritized", "already_deprioritized"}:
                     stats["deprioritized"] += 1
+                if action_status in {"cooled", "already_cooling"}:
+                    stats["cooled"] += 1
             if status == "check_failed" or action_status in failed_action_statuses:
                 stats["failed"] += 1
         return stats
@@ -969,6 +1137,8 @@ class RequestAuditService:
 
         candidates: list[dict[str, Any]] = []
         thresholds = self._rule_thresholds()
+        cooldowns = self._tps_cooldowns_by_account(grouped.keys())
+        now = utc_now()
         for account_id, rows in grouped.items():
             if (
                 trigger_account_ids is not None
@@ -1009,10 +1179,19 @@ class RequestAuditService:
                     continue
                 min_count = rule_candidate_min_count(rule, thresholds)
                 if rule.audit_action_mode == "tps_only":
-                    min_count = max(
-                        min_count,
-                        int(self.settings.request_audit_tps_only_min_count),
+                    candidate = self._tps_only_candidate(
+                        rows,
+                        evaluations=evaluations,
+                        min_count=max(
+                            min_count,
+                            int(self.settings.request_audit_tps_only_min_count),
+                        ),
+                        prior=cooldowns.get(account_id),
+                        now=now,
                     )
+                    if candidate is not None:
+                        matched.append(candidate)
+                    continue
                 evidence_count = max(
                     len(rule_pairs),
                     max(
@@ -1037,35 +1216,20 @@ class RequestAuditService:
                     for row, evaluation in rule_pairs
                     if row is latest
                 )
-                candidate = {
-                    **latest,
-                    "_action_mode": rule.audit_action_mode,
-                    "_risk_rule_id": rule.id,
-                    "_risk_rule_count": evidence_count,
-                    "_risk_rule_min_count": min_count,
-                    "_risk_reasons": list(latest_evaluation.classification.reasons),
-                    "_reasoning_streak": latest_evaluation.reasoning_streak,
-                    "_reasoning_min_count": latest_evaluation.reasoning_min_count,
-                }
-                if rule.audit_action_mode == "tps_only":
-                    candidate.update(
-                        {
-                            "_tps_anomaly_count": evidence_count,
-                            "_tps_min_count": min_count,
-                            "_tps_max": max(
-                                float(row.get("tps") or 0) for row in rule_rows
-                            ),
-                            "_tps_egress_node_ids": sorted(
-                                {
-                                    int(row["egress_node_id"])
-                                    for row in rule_rows
-                                    if _positive_int(row.get("egress_node_id"))
-                                    is not None
-                                }
-                            ),
-                        }
-                    )
-                matched.append(candidate)
+                matched.append(
+                    {
+                        **latest,
+                        "_action_mode": rule.audit_action_mode,
+                        "_risk_rule_id": rule.id,
+                        "_risk_rule_count": evidence_count,
+                        "_risk_rule_min_count": min_count,
+                        "_risk_reasons": list(
+                            latest_evaluation.classification.reasons
+                        ),
+                        "_reasoning_streak": latest_evaluation.reasoning_streak,
+                        "_reasoning_min_count": latest_evaluation.reasoning_min_count,
+                    }
+                )
             if matched:
                 matched.sort(
                     key=lambda row: (
@@ -1077,6 +1241,175 @@ class RequestAuditService:
                 )
                 candidates.append(matched[0])
         return candidates
+
+    def _tps_cooldowns_by_account(
+        self,
+        account_ids: Any,
+    ) -> dict[int, dict[str, Any]]:
+        loader = getattr(self.repository, "latest_tps_cooldowns_for_accounts", None)
+        if not callable(loader):
+            return {}
+        values = loader(account_ids)
+        if not isinstance(values, dict):
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        for key, item in values.items():
+            account_id = _positive_int(key)
+            if account_id is None or not isinstance(item, dict):
+                continue
+            result[account_id] = item
+        return result
+
+    @staticmethod
+    def _tps_cooldown_bounds(
+        prior: dict[str, Any] | None,
+        now: datetime,
+    ) -> tuple[datetime | None, datetime | None, bool]:
+        if not isinstance(prior, dict):
+            return None, None, False
+        recommendation = prior.get("egress_recommendation")
+        if not isinstance(recommendation, dict):
+            recommendation = {}
+        until = _parse_datetime(recommendation.get("cooldownUntil"))
+        cooled_at = (
+            ensure_utc(prior.get("checked_at"))
+            or _parse_datetime(recommendation.get("cooledAt"))
+        )
+        active = (
+            str(prior.get("action_status") or "") == "cooled"
+            and until is not None
+            and until > now
+        )
+        return until, cooled_at, active
+
+    def _is_high_tps_row(
+        self,
+        row: dict[str, Any],
+        evaluations: dict[str, AuditRiskEvaluation] | None = None,
+    ) -> bool:
+        classified = self._evaluation_for(row, evaluations).classification
+        return classified.name == "high" and classified.rule_id == "fast_risk"
+
+    def _measurable_tps_row(self, row: dict[str, Any]) -> bool:
+        status = _int_or_zero(row.get("status_code"))
+        if status < 200 or status >= 300:
+            return False
+        if _audit_error_code(row.get("error_code") or row.get("errorCode")):
+            return False
+        return _finite_float(row.get("tps")) is not None
+
+    def _consecutive_high_tps(
+        self,
+        rows: list[dict[str, Any]],
+        evaluations: dict[str, AuditRiskEvaluation] | None = None,
+        *,
+        after: datetime | None = None,
+    ) -> tuple[int, dict[str, Any] | None, float]:
+        """Count consecutive hard-high TPS rows ending at the latest measurable one."""
+
+        ordered = sorted(
+            rows,
+            key=lambda row: (
+                ensure_utc(row.get("created_at"))
+                or datetime.min.replace(tzinfo=UTC),
+                self._audit_row_key(row),
+            ),
+        )
+        streak = 0
+        latest: dict[str, Any] | None = None
+        max_tps = 0.0
+        for row in ordered:
+            created = ensure_utc(row.get("created_at"))
+            if after is not None and (created is None or created <= after):
+                continue
+            if not self._measurable_tps_row(row):
+                continue
+            tps = _finite_float(row.get("tps")) or 0.0
+            if self._is_high_tps_row(row, evaluations):
+                streak += 1
+                latest = row
+                max_tps = max(max_tps, tps)
+                continue
+            streak = 0
+            latest = None
+            max_tps = 0.0
+        if latest is None:
+            return 0, None, 0.0
+        return streak, latest, max_tps
+
+    def _has_healthy_tps_after(
+        self,
+        rows: list[dict[str, Any]],
+        evaluations: dict[str, AuditRiskEvaluation] | None,
+        after: datetime,
+    ) -> bool:
+        for row in rows:
+            created = ensure_utc(row.get("created_at"))
+            if created is None or created <= after:
+                continue
+            if not self._measurable_tps_row(row):
+                continue
+            if not self._is_high_tps_row(row, evaluations):
+                return True
+        return False
+
+    def _tps_only_candidate(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        evaluations: dict[str, AuditRiskEvaluation] | None,
+        min_count: int,
+        prior: dict[str, Any] | None,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        until, cooled_at, active = self._tps_cooldown_bounds(prior, now)
+        if active:
+            return None
+        streak, latest, max_tps = self._consecutive_high_tps(
+            rows,
+            evaluations,
+            after=until,
+        )
+        if streak < min_count or latest is None:
+            return None
+        latest_evaluation = self._evaluation_for(latest, evaluations)
+        healthy_after = (
+            self._has_healthy_tps_after(rows, evaluations, cooled_at)
+            if cooled_at is not None
+            else False
+        )
+        disposition = (
+            "disable"
+            if (
+                isinstance(prior, dict)
+                and until is not None
+                and until <= now
+                and not healthy_after
+            )
+            else "cool"
+        )
+        return {
+            **latest,
+            "_action_mode": "tps_only",
+            "_risk_rule_id": "fast_risk",
+            "_risk_rule_count": streak,
+            "_risk_rule_min_count": min_count,
+            "_risk_reasons": list(latest_evaluation.classification.reasons),
+            "_reasoning_streak": latest_evaluation.reasoning_streak,
+            "_reasoning_min_count": latest_evaluation.reasoning_min_count,
+            "_tps_disposition": disposition,
+            "_tps_anomaly_count": streak,
+            "_tps_min_count": min_count,
+            "_tps_max": max_tps,
+            "_tps_egress_node_ids": sorted(
+                {
+                    int(row["egress_node_id"])
+                    for row in rows
+                    if _positive_int(row.get("egress_node_id")) is not None
+                    and self._is_high_tps_row(row, evaluations)
+                }
+            ),
+        }
 
     def _new_risk_account_ids(
         self,
@@ -1129,6 +1462,9 @@ class RequestAuditService:
         finished_actions = {
             "disabled",
             "already_disabled",
+            "cooled",
+            "already_cooling",
+            "cooldown_expired",
         }
         if existing_action in finished_actions:
             return verification
@@ -1181,12 +1517,236 @@ class RequestAuditService:
             "check_error": "",
             "checked_at": utc_now(),
         }
+        if str(record.get("_action_mode") or "quarantine") == "tps_only":
+            return await self._apply_tps_only_action(
+                record,
+                verification,
+                common=common,
+                status="sso_skipped",
+            )
         return await self._apply_flagged_quarantine(
             record,
             verification,
             common=common,
             status="sso_skipped",
         )
+
+    def _legacy_tps_deprioritized(self, account_id: int, verification: dict[str, Any]) -> bool:
+        existing_action = str(verification.get("action_status") or "")
+        if existing_action in {"deprioritized", "already_deprioritized"}:
+            return True
+        loader = getattr(self.repository, "latest_verifications_for_accounts", None)
+        if not callable(loader):
+            return False
+        values = loader([account_id])
+        if not isinstance(values, dict):
+            return False
+        latest = values.get(account_id)
+        return isinstance(latest, dict) and str(latest.get("action_status") or "") in {
+            "deprioritized",
+            "already_deprioritized",
+        }
+
+    async def _apply_tps_only_action(
+        self,
+        record: dict[str, Any],
+        verification: dict[str, Any],
+        *,
+        common: dict[str, Any],
+        status: str = "sso_skipped",
+    ) -> dict[str, Any]:
+        account_id = int(record.get("account_id") or 0)
+        if self._legacy_tps_deprioritized(account_id, verification):
+            return await self._apply_flagged_quarantine(
+                record,
+                verification,
+                common=common,
+                status=status,
+            )
+        if str(record.get("_tps_disposition") or "cool") == "disable":
+            return await self._apply_flagged_quarantine(
+                record,
+                verification,
+                common=common,
+                status=status,
+            )
+        return await self._apply_tps_cooldown(
+            record,
+            verification,
+            common=common,
+            status=status,
+        )
+
+    async def _apply_tps_cooldown(
+        self,
+        record: dict[str, Any],
+        verification: dict[str, Any],
+        *,
+        common: dict[str, Any],
+        status: str = "sso_skipped",
+    ) -> dict[str, Any]:
+        account_id = int(record.get("account_id") or 0)
+        audit_id = str(record.get("upstream_id") or "")
+        created_at = ensure_utc(record.get("created_at")) or utc_now()
+        minutes = max(
+            1,
+            min(int(self.settings.request_audit_tps_cooldown_minutes), 1440),
+        )
+        if not self.settings.request_audit_isolation_enabled:
+            return self.repository.update_verification(
+                audit_id,
+                {
+                    **common,
+                    "status": status,
+                    "action_status": "auto_quarantine_disabled",
+                    "action_error": "",
+                },
+            ) or verification
+        if self.account_service is None:
+            return self.repository.update_verification(
+                audit_id,
+                {
+                    **common,
+                    "status": status,
+                    "action_status": "action_failed",
+                    "action_error": "自动冷却服务尚未接入",
+                },
+            ) or verification
+        raw_risk_reasons = record.get("_risk_reasons")
+        if isinstance(raw_risk_reasons, (list, tuple)):
+            risk_reasons = [str(value) for value in raw_risk_reasons if str(value)]
+        else:
+            risk_reasons = list(self._evaluation_for(record).classification.reasons)
+        streak = int(
+            record.get("_tps_anomaly_count") or record.get("_risk_rule_count") or 0
+        )
+        detail = {
+            "auditId": audit_id,
+            "riskRuleId": str(record.get("_risk_rule_id") or "fast_risk"),
+            "riskRuleCount": streak,
+            "auditCreatedAt": _iso(created_at),
+            "auditTps": round(float(record.get("tps") or 0), 2),
+            "tpsStreak": streak,
+            "tpsMinCount": int(
+                record.get("_tps_min_count") or record.get("_risk_rule_min_count") or 0
+            ),
+            "maxTps": round(
+                float(record.get("_tps_max") or record.get("tps") or 0),
+                2,
+            ),
+            "riskReasons": risk_reasons,
+            "cooldownMinutes": minutes,
+            "recommendation": "tps_cooldown",
+        }
+        try:
+            action = await self.account_service.apply_tps_cooldown(
+                account_id,
+                source="request_audit",
+                note="请求审计连续高速 TPS 达到阈值后先冷却账号",
+                minutes=minutes,
+                detail=detail,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "request audit tps cooldown failed account=%s audit=%s",
+                account_id,
+                audit_id,
+            )
+            return self.repository.update_verification(
+                audit_id,
+                {
+                    **common,
+                    "status": status,
+                    "action_status": "action_failed",
+                    "action_error": str(exc)[:1000],
+                },
+            ) or verification
+        action_status = str(action.get("actionStatus") or "action_failed")
+        payload: dict[str, Any] = {
+            **common,
+            "status": status,
+            "action_status": action_status,
+            "action_error": str(action.get("actionError") or "")[:1000],
+        }
+        if action_status == "cooled":
+            cooldown_until = action.get("cooldownUntil")
+            if isinstance(cooldown_until, datetime):
+                until_text = cooldown_until.isoformat()
+            else:
+                until_text = str(cooldown_until or "")
+            payload["egress_recommendation"] = {
+                "kind": "tps_cooldown",
+                "type": "tps_cooldown",
+                "label": "高速 TPS 冷却",
+                "reason": f"连续 {streak} 次高速 TPS，冷却 {minutes} 分钟",
+                "cooldownUntil": until_text,
+                "cooledAt": utc_now().isoformat(),
+                "disabledByCooldown": bool(action.get("disabledByCooldown")),
+                "minutes": minutes,
+                "tpsStreak": streak,
+            }
+        return self.repository.update_verification(audit_id, payload) or verification
+
+    async def _expire_tps_cooldowns(self) -> dict[str, int]:
+        stats = {"expired": 0, "reenabled": 0, "skipped": 0, "failed": 0}
+        loader = getattr(self.repository, "cooling_verifications", None)
+        if self.account_service is None or not callable(loader):
+            return stats
+        rows = loader()
+        if not isinstance(rows, list):
+            return stats
+        now = utc_now()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            recommendation = row.get("egress_recommendation")
+            if not isinstance(recommendation, dict):
+                continue
+            until = _parse_datetime(recommendation.get("cooldownUntil"))
+            if until is not None and until > now:
+                continue
+            audit_id = str(row.get("audit_upstream_id") or "")
+            account_id = int(row.get("account_id") or 0)
+            if not audit_id or account_id <= 0:
+                continue
+            try:
+                result = await self.account_service.release_tps_cooldown(
+                    account_id,
+                    disabled_by_cooldown=bool(
+                        recommendation.get("disabledByCooldown")
+                    ),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "request audit tps cooldown expiry failed account=%s audit=%s",
+                    account_id,
+                    audit_id,
+                )
+                stats["failed"] += 1
+                continue
+            action_status = str(result.get("actionStatus") or "cooldown_expired")
+            if action_status == "task_protected":
+                stats["skipped"] += 1
+                continue
+            self.repository.update_verification(
+                audit_id,
+                {
+                    "action_status": "cooldown_expired",
+                    "action_error": "",
+                    "egress_recommendation": {
+                        **recommendation,
+                        "expiredAt": now.isoformat(),
+                    },
+                },
+            )
+            stats["expired"] += 1
+            if result.get("reenabled"):
+                stats["reenabled"] += 1
+        return stats
 
     async def _apply_flagged_quarantine(
         self,
@@ -1239,7 +1799,7 @@ class RequestAuditService:
             ) or verification
         action_mode = str(record.get("_action_mode") or "quarantine")
         note = (
-            "请求审计 TPS 多次异常已达处置阈值后自动停用"
+            "冷却后再次连续高速 TPS，自动停用并移入隔离区"
             if action_mode == "tps_only"
             else "请求审计高风险已达处置阈值后自动停用"
         )
@@ -1594,6 +2154,7 @@ class RequestAuditService:
             "tps": tps,
             "risk_level": risk_level,
             "risk_reasons": reasons,
+            "stream_sample": _normalize_stream_sample(item.get("streamSample")),
             "raw": raw,
             "created_at": created_at,
             "fetched_at": utc_now(),
@@ -1626,6 +2187,7 @@ class RequestAuditService:
             ),
             "tpsOnlyPriority": self.settings.request_audit_tps_only_priority,
             "tpsOnlyMinCount": self.settings.request_audit_tps_only_min_count,
+            "tpsOnlyCooldownMinutes": self.settings.request_audit_tps_cooldown_minutes,
             "isolationEnabled": self.settings.request_audit_isolation_enabled,
             "ssoRecheckEnabled": False,
             "retentionDays": self.settings.request_audit_retention_days,
@@ -1772,6 +2334,7 @@ class RequestAuditService:
             page_items = filtered_items[offset : offset + page_size]
         probe_map = self._probe_sample_map(page_items)
         account_ids = self._record_account_ids(page_items)
+        stream_sample_map = self._stream_samples_for_page(page_items)
         verification_map = self.repository.verifications_for_audits(
             str(item.get("upstream_id") or "") for item in page_items
         )
@@ -1797,6 +2360,9 @@ class RequestAuditService:
                         str(item.get("upstream_id") or "")
                     ),
                     evaluation=self._evaluation_for(item, evaluations),
+                    stream_sample=stream_sample_map.get(
+                        str(item.get("upstream_id") or "")
+                    ),
                 )
                 for item in page_items
             ],
@@ -2055,7 +2621,7 @@ class RequestAuditService:
         evaluations = self._audit_risk_evaluations(records)
         assessments = self._assessment_payloads(records)
         account_ids = self._record_account_ids(records)
-        verifications = self._latest_account_verifications(account_ids)
+        verifications = self._window_account_verifications(records)
         upstream_result, nodes_result = await asyncio.gather(
             self._upstream_account_map(account_ids),
             self._egress_map(),
@@ -2193,9 +2759,7 @@ class RequestAuditService:
             assessments = self._assessment_payloads(records)
         upstream_accounts = upstream_accounts or {}
         if verifications is None:
-            verifications = self._latest_account_verifications(
-                self._record_account_ids(records)
-            )
+            verifications = self._window_account_verifications(records)
         result = [
             self._account_payload(
                 rows,
@@ -2234,6 +2798,62 @@ class RequestAuditService:
         if self.account_service is not None:
             return self.account_service.latest_sso_verifications(account_ids)
         return self.repository.latest_verifications_for_accounts(account_ids)
+
+    def _window_account_verifications(
+        self,
+        records: list[dict[str, Any]],
+    ) -> dict[int, dict[str, Any]]:
+        """Attach only verdicts whose triggering audit is in the current window."""
+
+        loader = getattr(self.repository, "verifications_for_audits", None)
+        if not callable(loader):
+            return {}
+        by_audit = loader(
+            str(row.get("upstream_id") or "")
+            for row in records
+            if str(row.get("upstream_id") or "")
+        )
+        if not isinstance(by_audit, dict):
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        for row in records:
+            account_id = _positive_int(row.get("account_id"))
+            verification = by_audit.get(str(row.get("upstream_id") or ""))
+            if account_id is None or not isinstance(verification, dict):
+                continue
+            current = result.get(account_id)
+            if (
+                current is None
+                or self._verification_sort_key(verification)
+                > self._verification_sort_key(current)
+            ):
+                result[account_id] = verification
+        return result
+
+    @staticmethod
+    def _verification_sort_key(value: dict[str, Any]) -> tuple[datetime, datetime, datetime, int]:
+        empty = datetime.min.replace(tzinfo=UTC)
+        return (
+            ensure_utc(value.get("checked_at")) or empty,
+            ensure_utc(value.get("updated_at")) or empty,
+            ensure_utc(value.get("audit_created_at")) or empty,
+            int(value.get("id") or 0),
+        )
+
+    @staticmethod
+    def _effective_account_verification(
+        verification: dict[str, Any] | None,
+        *,
+        assessment: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not verification:
+            return {}
+        action = str(verification.get("action_status") or "")
+        if action not in {"disabled", "already_disabled"}:
+            return verification
+        if str(assessment.get("monitor_status") or "") == "quarantined":
+            return verification
+        return {**verification, "action_status": "restored"}
 
     def _account_payload(
         self,
@@ -2315,7 +2935,12 @@ class RequestAuditService:
         )
         watch_count = sum(1 for value in row_risks if value in {"watch", "high"})
         high_count = sum(1 for value in row_risks if value == "high")
-        verification_payload = self._verification_payload(verification)
+        verification_payload = self._verification_payload(
+            self._effective_account_verification(
+                verification,
+                assessment=assessment,
+            )
+        )
         egress_recommendation = (
             verification_payload.get("egressRecommendation")
             if verification_payload
@@ -3006,6 +3631,21 @@ class RequestAuditService:
             "updatedAt": _iso(value.get("updated_at")),
         }
 
+    def _stream_samples_for_page(
+        self, page_items: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        loader = getattr(self.repository, "stream_samples_for_audits", None)
+        if not callable(loader):
+            return {}
+        value = loader(str(item.get("upstream_id") or "") for item in page_items)
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(key): sample
+            for key, sample in value.items()
+            if str(key) and isinstance(sample, dict) and sample
+        }
+
     def _record_payload(
         self,
         row: dict[str, Any],
@@ -3014,6 +3654,7 @@ class RequestAuditService:
         upstream_account: dict[str, Any] | None = None,
         verification: dict[str, Any] | None = None,
         evaluation: AuditRiskEvaluation | None = None,
+        stream_sample: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         evaluation = evaluation or self._evaluation_for(row)
         classification = evaluation.classification
@@ -3026,7 +3667,7 @@ class RequestAuditService:
             classification.reasons if risk_level != "normal" else ()
         )
         upstream_account = upstream_account or {}
-        return {
+        payload = {
             "id": str(row.get("upstream_id") or ""),
             "requestId": str(row.get("request_id") or ""),
             "provider": str(row.get("provider") or "grok_build"),
@@ -3083,6 +3724,13 @@ class RequestAuditService:
             "probeSamples": probe_samples or [],
             "createdAt": _iso(row.get("created_at")),
         }
+        sample = stream_sample if isinstance(stream_sample, dict) else None
+        if sample is None:
+            raw_sample = row.get("stream_sample")
+            sample = raw_sample if isinstance(raw_sample, dict) else None
+        if sample:
+            payload["streamSample"] = sample
+        return payload
 
     @classmethod
     def _state_payload(

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import String, cast, delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import defer
 
@@ -116,6 +116,7 @@ class RequestAuditRepository:
             "tps",
             "risk_level",
             "risk_reasons",
+            "stream_sample",
             "raw",
             "created_at",
             "fetched_at",
@@ -186,6 +187,53 @@ class RequestAuditRepository:
                 )
                 updated += int(result.rowcount or 0)
         return updated
+
+    def refresh_stream_samples(self, items: Iterable[dict[str, Any]]) -> int:
+        values: dict[str, dict[str, Any]] = {}
+        for item in items:
+            upstream_id = str(
+                item.get("id") or item.get("upstream_id") or item.get("requestId") or ""
+            ).strip()
+            sample = item.get("streamSample")
+            if sample is None:
+                sample = item.get("stream_sample")
+            if upstream_id and isinstance(sample, dict) and sample:
+                values[upstream_id] = sample
+        if not values:
+            return 0
+        updated = 0
+        empty = _empty_stream_sample_clause()
+        with self.database.transaction() as session:
+            for upstream_id, sample in values.items():
+                result = session.execute(
+                    update(RequestAuditRecord)
+                    .where(
+                        RequestAuditRecord.upstream_id == upstream_id,
+                        empty,
+                    )
+                    .values(stream_sample=sample)
+                )
+                updated += int(result.rowcount or 0)
+        return updated
+
+    def stream_samples_for_audits(
+        self, upstream_ids: Iterable[str]
+    ) -> dict[str, dict[str, Any]]:
+        values = [str(item).strip() for item in upstream_ids if str(item).strip()]
+        if not values:
+            return {}
+        with self.database.session() as session:
+            rows = session.execute(
+                select(
+                    RequestAuditRecord.upstream_id,
+                    RequestAuditRecord.stream_sample,
+                ).where(RequestAuditRecord.upstream_id.in_(values))
+            ).all()
+        result: dict[str, dict[str, Any]] = {}
+        for upstream_id, sample in rows:
+            if isinstance(sample, dict) and sample:
+                result[str(upstream_id)] = sample
+        return result
 
     def metadata_value(self, key: str) -> str:
         with self.database.session() as session:
@@ -330,6 +378,26 @@ class RequestAuditRepository:
             )
             return int(result.rowcount or 0)
 
+    def mark_actions_restored(self, account_id: int) -> int:
+        """Clear stale auto-disable flags after an operator restores the account."""
+
+        with self.database.transaction() as session:
+            result = session.execute(
+                update(RequestAuditAccountVerification)
+                .where(
+                    RequestAuditAccountVerification.account_id == int(account_id),
+                    RequestAuditAccountVerification.action_status.in_(
+                        ("disabled", "already_disabled", "already_quarantined")
+                    ),
+                )
+                .values(
+                    action_status="restored",
+                    action_error="",
+                    updated_at=utc_now(),
+                )
+            )
+            return int(result.rowcount or 0)
+
     def verifications_for_audits(
         self,
         audit_upstream_ids: Iterable[str],
@@ -375,6 +443,73 @@ class RequestAuditRepository:
         for row in rows:
             result.setdefault(int(row.account_id), model_dict(row))
         return result
+
+    def latest_tps_cooldowns_for_accounts(
+        self,
+        account_ids: Iterable[int],
+    ) -> dict[int, dict[str, Any]]:
+        """Return the newest TPS cooldown record per account.
+
+        Active rows stay ``cooled`` until expiry rewrites them to
+        ``cooldown_expired``. Either status is enough for the next consecutive
+        burst to decide between another cooldown and isolation.
+        """
+
+        normalized = {int(item) for item in account_ids if int(item) > 0}
+        if not normalized:
+            return {}
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RequestAuditAccountVerification)
+                .where(
+                    RequestAuditAccountVerification.account_id.in_(normalized),
+                    RequestAuditAccountVerification.action_status.in_(
+                        ("cooled", "cooldown_expired")
+                    ),
+                )
+                .order_by(
+                    RequestAuditAccountVerification.account_id.asc(),
+                    func.coalesce(
+                        RequestAuditAccountVerification.checked_at,
+                        RequestAuditAccountVerification.updated_at,
+                    ).desc(),
+                    RequestAuditAccountVerification.id.desc(),
+                )
+            ).all()
+        result: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            account_id = int(row.account_id)
+            if account_id in result:
+                continue
+            payload = model_dict(row)
+            recommendation = payload.get("egress_recommendation")
+            if (
+                not isinstance(recommendation, dict)
+                or recommendation.get("kind") != "tps_cooldown"
+            ):
+                continue
+            result[account_id] = payload
+        return result
+
+    def cooling_verifications(self) -> list[dict[str, Any]]:
+        """Return TPS cooldown rows that still need expiry / re-enable."""
+
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RequestAuditAccountVerification).where(
+                    RequestAuditAccountVerification.action_status == "cooled"
+                )
+            ).all()
+        values: list[dict[str, Any]] = []
+        for row in rows:
+            payload = model_dict(row)
+            recommendation = payload.get("egress_recommendation")
+            if (
+                isinstance(recommendation, dict)
+                and recommendation.get("kind") == "tps_cooldown"
+            ):
+                values.append(payload)
+        return values
 
     def retryable_verification_account_ids(self) -> set[int]:
         """Return accounts whose confirmed verdict still needs an action retry.
@@ -705,14 +840,24 @@ class RequestAuditRepository:
     def retention_cutoff(days: int = 3) -> datetime:
         return utc_now() - timedelta(days=max(1, days))
 
+def _empty_stream_sample_clause():
+    stored = func.trim(
+        func.coalesce(cast(RequestAuditRecord.stream_sample, String), "")
+    )
+    return or_(stored == "", stored == "{}", stored == "null")
+
+
 def _audit_record_query():
-    return select(RequestAuditRecord).options(defer(RequestAuditRecord.raw))
+    return select(RequestAuditRecord).options(
+        defer(RequestAuditRecord.raw),
+        defer(RequestAuditRecord.stream_sample),
+    )
 
 
 def _audit_record_dict(value: RequestAuditRecord) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:
-        if column.name == "raw":
+        if column.name in {"raw", "stream_sample"}:
             continue
         item = getattr(value, column.name)
         result[column.name] = (
