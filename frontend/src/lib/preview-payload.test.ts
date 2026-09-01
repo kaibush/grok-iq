@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeProfile, ProbeRun, ProbeSample } from '@/lib/api'
 import {
+  slimAccountPreview,
   slimPreviewResponseText,
   slimRequestAuditRecord,
   slimRunPreview,
@@ -90,6 +91,44 @@ describe('slimRunPreview', () => {
       expected_image_url: '',
     })
     expect(result.samples[0]?.response_text).toBe('<div>hi</div>')
+    expect(result.samples[0]?.reasoning_text).toBe('')
+  })
+})
+
+describe('slimAccountPreview', () => {
+  it('keeps account metadata and slims sample payloads', () => {
+    const result = slimAccountPreview({
+      account: {
+        id: '12',
+        name: 'iso-account',
+        email: 'iso@example.com',
+        provider: 'grok',
+        enabled: false,
+        ssoAvailable: false,
+        assessment: {
+          account_id: 12,
+          monitor_status: 'quarantined',
+          risk_score: 90,
+          sample_count: 1,
+          anomaly_count: 1,
+          risk_reasons: [],
+        },
+      },
+      history: {
+        samples: [
+          sample({
+            account_id: 12,
+            response_text: '```html\n<section>card</section>\n```\nnotes',
+            reasoning_text: 'drop me',
+          }),
+        ],
+        runs: [],
+        byTarget: [],
+      },
+    })
+    expect(result.accountId).toBe(12)
+    expect(result.account.name).toBe('iso-account')
+    expect(result.samples[0]?.response_text).toBe('<section>card</section>')
     expect(result.samples[0]?.reasoning_text).toBe('')
   })
 })

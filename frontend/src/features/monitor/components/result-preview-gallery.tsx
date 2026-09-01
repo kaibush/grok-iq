@@ -40,7 +40,12 @@ import {
   HTML_THUMB_FRAME_WIDTH,
   useHtmlThumbSlot,
 } from '@/lib/html-preview-frame'
-import { RUN_PREVIEW_GC_TIME, slimRunPreview } from '@/lib/preview-payload'
+import {
+  ACCOUNT_PREVIEW_SAMPLE_LIMIT,
+  RUN_PREVIEW_GC_TIME,
+  slimAccountPreview,
+  slimRunPreview,
+} from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
@@ -99,6 +104,8 @@ export type ResultPreviewItem = {
   rounds?: number
   completedSteps?: number
   heading?: string
+  source?: 'run' | 'account'
+  roundNumber?: number
 }
 
 export function previewItemsFromRuns(
@@ -150,6 +157,31 @@ export function previewItemsFromSamples(
     }))
 }
 
+export function previewItemsFromAccounts(
+  accounts: UpstreamAccount[]
+): ResultPreviewItem[] {
+  return accounts
+    .filter((account) => (account.assessment.sample_count ?? 0) > 0)
+    .map((account) => {
+      const accountId = Number(account.id)
+      return {
+        id: String(accountId),
+        runId: '',
+        accountId,
+        accountName: account.name || account.email || `账号 ${accountId}`,
+        accountEmail: account.email,
+        accountCreatedAt: account.createdAt,
+        createdAt: account.assessment.latest_sample_at,
+        rounds: account.assessment.sample_count,
+        completedSteps: Math.min(
+          account.assessment.sample_count ?? 0,
+          ACCOUNT_PREVIEW_SAMPLE_LIMIT
+        ),
+        source: 'account' as const,
+      }
+    })
+}
+
 function samplesForPreview(samples: ProbeSample[]) {
   return samples.filter((sample) => (sample.response_text || '').trim())
 }
@@ -185,19 +217,24 @@ function expandPreviewItems(
           ? `第 ${sample.round_number || 1} 轮 · ${sample.egress_name}`
           : `第 ${sample.round_number || 1} 轮`
       const heading =
-        variant === 'task'
+        item.source === 'account'
           ? rounds.length > 1
-            ? `${item.accountName} · ${roundLabel}`
+            ? `${item.accountName} · 样本 ${sample.round_number || 1}`
             : item.accountName
-          : item.profileName
+          : variant === 'task'
             ? rounds.length > 1
-              ? `${item.profileName} · ${roundLabel}`
-              : item.profileName
-            : roundLabel
+              ? `${item.accountName} · ${roundLabel}`
+              : item.accountName
+            : item.profileName
+              ? rounds.length > 1
+                ? `${item.profileName} · ${roundLabel}`
+                : item.profileName
+              : roundLabel
       leaves.push({
         ...item,
         id: `${item.id}:${sample.id}`,
         sampleId: sample.id.startsWith('pending:') ? undefined : sample.id,
+        roundNumber: sample.round_number || undefined,
         createdAt: sample.created_at || item.createdAt,
         heading,
         completedSteps: 1,
@@ -241,6 +278,48 @@ export function pickPreviewSample(
   return withHtml || newestFirst[0] || samples[0] || null
 }
 
+function isAccountPreviewItem(item?: ResultPreviewItem | null) {
+  return item?.source === 'account'
+}
+
+function parentPreviewIndex(
+  items: ResultPreviewItem[],
+  leaf: ResultPreviewItem
+) {
+  if (isAccountPreviewItem(leaf)) {
+    return items.findIndex((entry) => entry.accountId === leaf.accountId)
+  }
+  return items.findIndex((entry) => entry.runId === leaf.runId)
+}
+
+function orderedPreviewSamples(samples: ProbeSample[]) {
+  return [...samplesForPreview(samples)].sort((left, right) => {
+    const delta = Date.parse(right.created_at) - Date.parse(left.created_at)
+    if (Number.isFinite(delta) && delta !== 0) return delta
+    return right.id.localeCompare(left.id)
+  })
+}
+
+function resolvePreviewSample(
+  samples: ProbeSample[],
+  item?: ResultPreviewItem | null,
+  overrideId?: string
+) {
+  if (item?.sample) return item.sample
+  const preferredId = overrideId || item?.sampleId
+  if (preferredId) {
+    const matched = samples.find((sample) => sample.id === preferredId)
+    if (matched) return matched
+  }
+  if (isAccountPreviewItem(item) && item?.roundNumber && item.roundNumber > 0) {
+    return (
+      orderedPreviewSamples(samples)[item.roundNumber - 1] ||
+      pickPreviewSample(samples)
+    )
+  }
+  return pickPreviewSample(samples, preferredId)
+}
+
 export function ResultPreviewGallery({
   open,
   onOpenChange,
@@ -253,6 +332,7 @@ export function ResultPreviewGallery({
   total,
   pageLoading = false,
   onPageChange,
+  perspective = 'task',
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -265,6 +345,7 @@ export function ResultPreviewGallery({
   total?: number
   pageLoading?: boolean
   onPageChange?: (page: number, land: 'start' | 'end') => void
+  perspective?: 'task' | 'account'
 }) {
   const client = useQueryClient()
   const listRef = useRef<HTMLDivElement>(null)
@@ -301,6 +382,8 @@ export function ResultPreviewGallery({
   const [pageDraft, setPageDraft] = useState(String(Math.max(1, page)))
   const [pageDraftSource, setPageDraftSource] = useState(Math.max(1, page))
   const pendingSampleId = useRef<string | undefined>(undefined)
+  const pendingRoundNumber = useRef<number | undefined>(undefined)
+  const [sampleOverrideRound, setSampleOverrideRound] = useState<number>()
   const currentPage = Math.max(1, page)
   const currentPageCount = Math.max(1, pageCount)
   const safeIndex = items.length
@@ -322,8 +405,12 @@ export function ResultPreviewGallery({
     items.length > 0 || !pageLoading ? items : cachedLayoutItems
   const sampleLeaves = layoutItems.some((entry) => Boolean(entry.sample))
   const groups = useMemo(() => groupPreviewItems(layoutItems), [layoutItems])
-  const showGroupToggle = !sampleLeaves && groups.length > 1
-  const effectiveGroup = sampleLeaves || !showGroupToggle ? 'task' : groupMode
+  const accountPerspective = perspective === 'account'
+  const itemNoun = accountPerspective ? '账号' : '任务'
+  const showGroupToggle =
+    !accountPerspective && !sampleLeaves && groups.length > 1
+  const effectiveGroup =
+    accountPerspective || sampleLeaves || !showGroupToggle ? 'task' : groupMode
   const expandRounds = !sampleLeaves && roundLayout === 'expand'
   const previewRunIds = useMemo(
     () =>
@@ -336,7 +423,11 @@ export function ResultPreviewGallery({
     queryKey: ['run-preview-samples', previewRunIds],
     queryFn: () => api.runPreviewSamples(previewRunIds),
     enabled:
-      open && view === 'grid' && expandRounds && previewRunIds.length > 0,
+      open &&
+      !accountPerspective &&
+      view === 'grid' &&
+      expandRounds &&
+      previewRunIds.length > 0,
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
@@ -371,21 +462,31 @@ export function ResultPreviewGallery({
       ? expandLeafIndex < Math.max(expandItems.length - 1, 0)
       : safeIndex < Math.max(items.length - 1, 0)) ||
     currentPage < currentPageCount
-  const selectPreviewItem = (nextIndex: number, sampleId?: string) => {
+  const selectPreviewItem = (
+    nextIndex: number,
+    sampleId?: string,
+    roundNumber?: number
+  ) => {
     if (sampleId) pendingSampleId.current = sampleId
+    if (roundNumber) pendingRoundNumber.current = roundNumber
     onIndexChange(nextIndex)
     if (sampleId) setSampleOverrideId(sampleId)
+    if (roundNumber) setSampleOverrideRound(roundNumber)
   }
-  const openPreviewItem = (nextIndex: number, sampleId?: string) => {
-    selectPreviewItem(nextIndex, sampleId)
+  const openPreviewItem = (
+    nextIndex: number,
+    sampleId?: string,
+    roundNumber?: number
+  ) => {
+    selectPreviewItem(nextIndex, sampleId, roundNumber)
     setSessionView('split')
   }
   const selectExpandLeaf = (leafIndex: number) => {
     const leaf = expandItems[leafIndex]
     if (!leaf) return
-    const taskIndex = items.findIndex((entry) => entry.runId === leaf.runId)
+    const taskIndex = parentPreviewIndex(items, leaf)
     if (taskIndex < 0) return
-    selectPreviewItem(taskIndex, leaf.sampleId)
+    selectPreviewItem(taskIndex, leaf.sampleId, leaf.roundNumber)
   }
   const moveExpandLeaf = (delta: number) => {
     const next = expandLeafIndex + delta
@@ -447,7 +548,7 @@ export function ResultPreviewGallery({
     )
   }
   const neighborRunIds = useMemo(() => {
-    if (!item || view !== 'split') return []
+    if (!item || view !== 'split' || isAccountPreviewItem(item)) return []
     const ids: string[] = []
     const previous = items[safeIndex - 1]
     const next = items[safeIndex + 1]
@@ -458,6 +559,19 @@ export function ResultPreviewGallery({
       ids.push(next.runId)
     }
     return Array.from(new Set(ids.filter(Boolean)))
+  }, [item, items, safeIndex, view])
+  const neighborAccountIds = useMemo(() => {
+    if (!item || view !== 'split' || !isAccountPreviewItem(item)) return []
+    const ids: number[] = []
+    const previous = items[safeIndex - 1]
+    const next = items[safeIndex + 1]
+    if (previous?.accountId && previous.accountId !== item.accountId) {
+      ids.push(previous.accountId)
+    }
+    if (next?.accountId && next.accountId !== item.accountId) {
+      ids.push(next.accountId)
+    }
+    return Array.from(new Set(ids))
   }, [item, items, safeIndex, view])
 
   useQueries({
@@ -476,14 +590,43 @@ export function ResultPreviewGallery({
       refetchOnWindowFocus: false,
     })),
   })
+  useQueries({
+    queries: neighborAccountIds.map((accountId) => ({
+      queryKey: ['account-preview', accountId],
+      queryFn: async () =>
+        slimAccountPreview(
+          await api.account(accountId, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
+        ),
+      enabled: open && Boolean(accountId),
+      staleTime: 30_000,
+      gcTime: RUN_PREVIEW_GC_TIME,
+      refetchOnWindowFocus: false,
+    })),
+  })
 
-  const needsRunFetch = Boolean(
-    item && !item.content && !item.sample && item.runId
+  const isAccountItem = isAccountPreviewItem(item)
+  const needsPreviewFetch = Boolean(
+    item &&
+      !item.content &&
+      !item.sample &&
+      (isAccountItem ? item.accountId : item.runId)
   )
   const runQuery = useQuery({
     queryKey: ['run-preview', item?.runId],
     queryFn: async () => slimRunPreview(await api.run(item!.runId)),
-    enabled: open && view === 'split' && Boolean(item?.runId),
+    enabled: open && view === 'split' && Boolean(item?.runId) && !isAccountItem,
+    staleTime: 30_000,
+    gcTime: RUN_PREVIEW_GC_TIME,
+    refetchOnWindowFocus: false,
+  })
+  const accountPreviewQuery = useQuery({
+    queryKey: ['account-preview', item?.accountId],
+    queryFn: async () =>
+      slimAccountPreview(
+        await api.account(item!.accountId, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
+      ),
+    enabled:
+      open && view === 'split' && isAccountItem && Boolean(item?.accountId),
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
@@ -491,7 +634,7 @@ export function ResultPreviewGallery({
   const accountQuery = useQuery({
     queryKey: ['account', item?.accountId],
     queryFn: () => api.account(item!.accountId, 1),
-    enabled: open && Boolean(item?.accountId),
+    enabled: open && Boolean(item?.accountId) && !isAccountItem,
   })
   const egressQuery = useQuery({
     queryKey: ['egress'],
@@ -499,16 +642,28 @@ export function ResultPreviewGallery({
     enabled: open,
     staleTime: 60_000,
   })
-  const account = accountQuery.data?.account
+  const account =
+    accountPreviewQuery.data?.account ?? accountQuery.data?.account
   const egressNodeNames = useMemo(
     () => buildEgressNodeNameMap(egressQuery.data?.items),
     [egressQuery.data?.items]
   )
   const nestedDetailOpen = accountDetailId != null || Boolean(runDetailId)
-  const runSamples = item?.sample ? [] : (runQuery.data?.samples ?? [])
-  const sample = item?.sample
-    ? item.sample
-    : pickPreviewSample(runSamples, sampleOverrideId || item?.sampleId)
+  const runSamples = item?.sample
+    ? []
+    : isAccountItem
+      ? orderedPreviewSamples(accountPreviewQuery.data?.samples ?? [])
+      : (runQuery.data?.samples ?? [])
+  const sample = resolvePreviewSample(
+    runSamples,
+    item
+      ? {
+          ...item,
+          roundNumber: sampleOverrideRound || item.roundNumber,
+        }
+      : item,
+    sampleOverrideId
+  )
   const content = item?.content || sample?.response_text || ''
   const expectedOutput =
     item?.expectedOutput || runQuery.data?.profile?.expected_output || ''
@@ -541,6 +696,7 @@ export function ResultPreviewGallery({
     if (open) return
     client.removeQueries({ queryKey: ['run-preview'] })
     client.removeQueries({ queryKey: ['run-preview-samples'] })
+    client.removeQueries({ queryKey: ['account-preview'] })
   }, [client, open])
 
   useEffect(() => {
@@ -549,9 +705,12 @@ export function ResultPreviewGallery({
     setCompareExpected(false)
     setIsolateOpen(false)
     const nextId = pendingSampleId.current ?? item?.sampleId
+    const nextRound = pendingRoundNumber.current ?? item?.roundNumber
     pendingSampleId.current = undefined
+    pendingRoundNumber.current = undefined
     setSampleOverrideId(nextId)
-  }, [item?.id, item?.sampleId])
+    setSampleOverrideRound(nextRound)
+  }, [item?.id, item?.sampleId, item?.roundNumber])
 
   if (!open) {
     if (sessionView !== undefined) setSessionView(undefined)
@@ -693,7 +852,7 @@ export function ResultPreviewGallery({
             .join(' · ')
         : effectiveGroup === 'account'
           ? `${accountCounter} · 任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`
-          : `任务 ${items.length ? safeIndex + 1 : 0} / ${items.length}`,
+          : `${itemNoun} ${items.length ? safeIndex + 1 : 0} / ${items.length}`,
     pageLabel,
     totalLabel,
   ]
@@ -809,8 +968,8 @@ export function ResultPreviewGallery({
                     : pageLoading
                       ? '正在加载这一页…'
                       : currentPageCount > 1
-                        ? `这一页没有可预览样本 · ${pageLabel}`
-                        : '当前筛选没有可预览样本'}
+                        ? `这一页没有可预览${itemNoun} · ${pageLabel}`
+                        : `当前筛选没有可预览${itemNoun}`}
                 </div>
               </div>
               {onPageChange && currentPageCount > 1 ? (
@@ -901,7 +1060,7 @@ export function ResultPreviewGallery({
                   对照预期
                 </Button>
               ) : null}
-              {alreadyIsolated ? (
+              {accountPerspective ? null : alreadyIsolated ? (
                 <Button
                   type='button'
                   size='sm'
@@ -1034,11 +1193,13 @@ export function ResultPreviewGallery({
                           }
                           const leaf = expandItems[index]
                           if (!leaf) return
-                          const taskIndex = items.findIndex(
-                            (entry) => entry.runId === leaf.runId
-                          )
+                          const taskIndex = parentPreviewIndex(items, leaf)
                           if (taskIndex >= 0) {
-                            openPreviewItem(taskIndex, leaf.sampleId)
+                            openPreviewItem(
+                              taskIndex,
+                              leaf.sampleId,
+                              leaf.roundNumber
+                            )
                           }
                         }}
                       />
@@ -1054,7 +1215,7 @@ export function ResultPreviewGallery({
                           ? '样本'
                           : effectiveGroup === 'account'
                             ? '账号'
-                            : '任务'}
+                            : itemNoun}
                       </span>
                       <Badge variant='secondary'>
                         {sampleLeaves || effectiveGroup === 'task'
@@ -1237,7 +1398,7 @@ export function ResultPreviewGallery({
                                 </button>
                                 {active && runSamples.length > 1 ? (
                                   <div className='mt-1 flex flex-wrap gap-1 px-1'>
-                                    {runSamples.map((entrySample) => {
+                                    {runSamples.map((entrySample, offset) => {
                                       const selectedSample =
                                         entrySample.id === sample?.id
                                       return (
@@ -1251,11 +1412,14 @@ export function ResultPreviewGallery({
                                               : 'outline'
                                           }
                                           className='h-7 px-2 text-xs'
-                                          onClick={() =>
+                                          onClick={() => {
                                             setSampleOverrideId(entrySample.id)
-                                          }
+                                            setSampleOverrideRound(offset + 1)
+                                          }}
                                         >
-                                          第 {entrySample.round_number || 1} 轮
+                                          {accountPerspective
+                                            ? `样本 ${offset + 1}`
+                                            : `第 ${entrySample.round_number || 1} 轮`}
                                         </Button>
                                       )
                                     })}
@@ -1273,20 +1437,38 @@ export function ResultPreviewGallery({
                       item={item}
                       account={account}
                       sample={sample}
-                      loading={accountQuery.isLoading}
+                      loading={
+                        isAccountItem
+                          ? accountPreviewQuery.isLoading
+                          : accountQuery.isLoading
+                      }
                       profileName={profileName}
                       onOpenAccount={() => setAccountDetailId(item.accountId)}
-                      onOpenRun={() => setRunDetailId(item.runId)}
+                      onOpenRun={
+                        accountPerspective || !item.runId
+                          ? undefined
+                          : () => setRunDetailId(item.runId)
+                      }
                     />
                     <div className='min-h-0 min-w-0 flex-1 overflow-hidden'>
-                      {needsRunFetch && runQuery.isLoading ? (
+                      {needsPreviewFetch &&
+                      (isAccountItem
+                        ? accountPreviewQuery.isLoading
+                        : runQuery.isLoading) ? (
                         <div className='flex h-full items-center justify-center gap-2 text-sm text-muted-foreground'>
                           <Loader2 className='size-4 animate-spin' />
                           正在读取样本
                         </div>
-                      ) : needsRunFetch && runQuery.isError ? (
+                      ) : needsPreviewFetch &&
+                        (isAccountItem
+                          ? accountPreviewQuery.isError
+                          : runQuery.isError) ? (
                         <div className='flex h-full items-center justify-center p-6 text-sm text-destructive'>
-                          {getErrorMessage(runQuery.error)}
+                          {getErrorMessage(
+                            isAccountItem
+                              ? accountPreviewQuery.error
+                              : runQuery.error
+                          )}
                         </div>
                       ) : (
                         <ContentPreviewCanvas
@@ -1305,8 +1487,8 @@ export function ResultPreviewGallery({
             ) : (
               <div className='flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground'>
                 {currentPageCount > 1
-                  ? '这一页没有可预览样本，可以翻到上一页或下一页'
-                  : '当前筛选没有可预览的任务样本'}
+                  ? `这一页没有可预览${itemNoun}，可以翻到上一页或下一页`
+                  : `当前筛选没有可预览的${itemNoun}`}
               </div>
             )}
           </div>
@@ -1600,20 +1782,39 @@ function PreviewThumbCard({
 }) {
   const { ref, inView } = useInView<HTMLButtonElement>()
   const hasLocal = Boolean(item.content || item.sample)
+  const isAccountItem = isAccountPreviewItem(item)
   const runQuery = useQuery({
     queryKey: ['run-preview', item.runId],
     queryFn: async () => slimRunPreview(await api.run(item.runId)),
-    enabled: inView && !hasLocal && Boolean(item.runId),
+    enabled: inView && !hasLocal && Boolean(item.runId) && !isAccountItem,
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
   })
-  const sample = item.sample
-    ? item.sample
-    : pickPreviewSample(runQuery.data?.samples ?? [], item.sampleId)
+  const accountPreviewQuery = useQuery({
+    queryKey: ['account-preview', item.accountId],
+    queryFn: async () =>
+      slimAccountPreview(
+        await api.account(item.accountId, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
+      ),
+    enabled: inView && !hasLocal && isAccountItem && Boolean(item.accountId),
+    staleTime: 30_000,
+    gcTime: RUN_PREVIEW_GC_TIME,
+    refetchOnWindowFocus: false,
+  })
+  const sample = resolvePreviewSample(
+    isAccountItem
+      ? (accountPreviewQuery.data?.samples ?? [])
+      : (runQuery.data?.samples ?? []),
+    item
+  )
   const content = item.content || sample?.response_text || ''
   const html = extractHtmlPreviews(content)[0]
-  const loading = inView && !hasLocal && runQuery.isLoading && !content
+  const loading =
+    inView &&
+    !hasLocal &&
+    (isAccountItem ? accountPreviewQuery.isLoading : runQuery.isLoading) &&
+    !content
   return (
     <button
       ref={ref}
@@ -1755,7 +1956,9 @@ function accountMeta(
     parts.push(email)
   }
   if (includeTaskTime && item.createdAt) {
-    parts.push(`任务 ${formatDate(item.createdAt)}`)
+    parts.push(
+      `${item.source === 'account' ? '样本' : '任务'} ${formatDate(item.createdAt)}`
+    )
   }
   if (item.accountCreatedAt) {
     parts.push(`账号 ${formatAccountCreatedAt(item.accountCreatedAt)}`)

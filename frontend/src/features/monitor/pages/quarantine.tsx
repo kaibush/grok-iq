@@ -63,6 +63,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Popover,
   PopoverContent,
@@ -103,8 +104,7 @@ import {
 } from '@/components/server-pagination'
 import { AccountSampleExplorer } from '@/features/monitor/components/account-sample-explorer'
 import {
-  pickPreviewSample,
-  previewItemsFromSamples,
+  previewItemsFromAccounts,
   ResultPreviewGallery,
 } from '@/features/monitor/components/result-preview-gallery'
 import {
@@ -824,13 +824,12 @@ export function QuarantinePage() {
   const [noteEditorId, setNoteEditorId] = useState<number | null>(null)
   const [upstreamOpen, setUpstreamOpen] = useState(false)
   const [upstreamId, setUpstreamId] = useState<number | null>(null)
-  const [previewAccount, setPreviewAccount] = useState<UpstreamAccount | null>(
-    null
-  )
-  const [previewIndex, setPreviewIndex] = useState(0)
-  const [previewPage, setPreviewPage] = useState(1)
-  const [previewLand, setPreviewLand] = useState<'start' | 'end'>()
-  const previewSeeded = useRef(false)
+  const [resultPreview, setResultPreview] = useState<{
+    page: number
+    index: number
+    land?: 'start' | 'end'
+    accountId?: number
+  } | null>(null)
   const tableQueryPending =
     tableQuery.page !== committedQuery.page ||
     tableQuery.pageSize !== committedQuery.pageSize ||
@@ -906,27 +905,60 @@ export function QuarantinePage() {
     queryFn: () => api.accountSamples(detailId!, { page: 1, pageSize: 50 }),
     enabled: detailOpen && detailId != null,
   })
-  const previewQuery = useQuery({
+  const previewPage = resultPreview?.page ?? tableQuery.page
+  const previewAccountsQuery = useQuery({
     queryKey: [
-      'account-samples',
-      previewAccount ? Number(previewAccount.id) : 0,
-      'gallery',
+      'accounts',
+      'quarantine',
+      'preview',
       previewPage,
+      tableQuery.pageSize,
+      tableQuery.search,
+      tableQuery.upstreamStatus,
+      tableQuery.ssoRisk,
+      tableQuery.egressNodeId,
+      tableQuery.source,
     ],
-    queryFn: () =>
-      api.accountSamples(Number(previewAccount!.id), {
-        page: previewPage,
-        pageSize: 50,
-      }),
-    enabled: previewAccount != null,
+    queryFn: ({ signal }) =>
+      api.quarantineAccounts(
+        {
+          page: previewPage,
+          pageSize: tableQuery.pageSize,
+          search: tableQuery.search,
+          status:
+            tableQuery.upstreamStatus === 'all'
+              ? ''
+              : tableQuery.upstreamStatus,
+          ssoRisk: tableQuery.ssoRisk === 'all' ? '' : tableQuery.ssoRisk,
+          egressNodeId:
+            tableQuery.egressNodeId === 'all' ? '' : tableQuery.egressNodeId,
+          source: tableQuery.source === 'all' ? '' : tableQuery.source,
+        },
+        signal
+      ),
+    enabled: resultPreview != null,
   })
+  const previewSource =
+    resultPreview &&
+    resultPreview.page === tableQuery.page &&
+    query.data
+      ? query.data
+      : previewAccountsQuery.data?.page === previewPage
+        ? previewAccountsQuery.data
+        : undefined
   const previewItems = useMemo(
-    () =>
-      previewAccount
-        ? previewItemsFromSamples(previewQuery.data?.items ?? [], previewAccount)
-        : [],
-    [previewAccount, previewQuery.data?.items]
+    () => previewItemsFromAccounts(previewSource?.items ?? []),
+    [previewSource?.items]
   )
+  const previewTotal = previewSource?.total ?? query.data?.total ?? 0
+  const previewPageCount = Math.max(
+    1,
+    Math.ceil(previewTotal / Math.max(tableQuery.pageSize, 1))
+  )
+  const previewPageLoading =
+    resultPreview != null &&
+    previewSource?.page !== resultPreview.page &&
+    previewAccountsQuery.isFetching
   const profiles = useQuery({
     queryKey: ['profiles'],
     queryFn: api.profiles,
@@ -948,57 +980,6 @@ export function QuarantinePage() {
     () => buildEgressNodeNameMap(egressData?.items),
     [egressData?.items]
   )
-  useEffect(() => {
-    if (!previewAccount) {
-      previewSeeded.current = false
-      return
-    }
-    if (previewQuery.isFetching) return
-    if (previewQuery.isError) {
-      toast.error(getErrorMessage(previewQuery.error))
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPreviewAccount(null)
-      return
-    }
-    if (previewQuery.isSuccess && previewItems.length === 0) {
-      if ((previewQuery.data?.total ?? 0) === 0) {
-        toast.error('该账号没有可预览的样本正文')
-        setPreviewAccount(null)
-      }
-      return
-    }
-    if (previewQuery.isSuccess && previewItems.length > 0) {
-      if (previewLand === 'end') {
-        previewSeeded.current = true
-        setPreviewIndex(previewItems.length - 1)
-        setPreviewLand(undefined)
-        return
-      }
-      if (previewLand === 'start') {
-        previewSeeded.current = true
-        setPreviewIndex(0)
-        setPreviewLand(undefined)
-        return
-      }
-      if (!previewSeeded.current) {
-        previewSeeded.current = true
-        const picked = pickPreviewSample(previewQuery.data?.items ?? [])
-        const index = previewItems.findIndex(
-          (item) => item.sampleId === picked?.id
-        )
-        setPreviewIndex(index >= 0 ? index : 0)
-      }
-    }
-  }, [
-    previewAccount,
-    previewItems,
-    previewQuery.data?.items,
-    previewQuery.error,
-    previewQuery.isError,
-    previewLand,
-    previewQuery.isFetching,
-    previewQuery.isSuccess,
-  ])
   const detailAccount =
     detail.data?.account ??
     accounts.find((item) => Number(item.id) === detailId) ??
@@ -1013,6 +994,40 @@ export function QuarantinePage() {
   const upstreamListAccount =
     accounts.find((item) => Number(item.id) === upstreamId) ?? null
 
+  if (
+    resultPreview?.land &&
+    previewItems.length > 0 &&
+    previewSource?.page === resultPreview.page
+  ) {
+    const nextIndex = resultPreview.land === 'end' ? previewItems.length - 1 : 0
+    setResultPreview((current) => {
+      if (!current?.land || current.page !== resultPreview.page) return current
+      return { ...current, index: nextIndex, land: undefined }
+    })
+  }
+  const openAccountPreview = useCallback(
+    (accountId?: number, required = false) => {
+      const items = previewItemsFromAccounts(accounts)
+      if (!items.length && !(query.data?.total ?? 0)) {
+        toast.error('当前筛选没有可预览的账号样本')
+        return
+      }
+      const matchedIndex =
+        accountId == null
+          ? 0
+          : items.findIndex((item) => item.accountId === accountId)
+      if (accountId != null && matchedIndex < 0 && required) {
+        toast.error('该账号没有可预览的样本')
+        return
+      }
+      setResultPreview({
+        page,
+        index: Math.max(0, matchedIndex),
+        accountId,
+      })
+    },
+    [accounts, page, query.data?.total]
+  )
   const openAccountSamples = useCallback((id: number) => {
     setDetailId(id)
     setDetailOpen(true)
@@ -1525,6 +1540,25 @@ export function QuarantinePage() {
         toolbar={
           <div className='space-y-2' aria-busy={showTableLoading}>
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+              <Tabs
+                value={resultPreview ? 'preview' : 'list'}
+                className='shrink-0 gap-0'
+                onValueChange={(value) => {
+                  if (value === 'list') {
+                    setResultPreview(null)
+                    return
+                  }
+                  openAccountPreview(detailId ?? undefined)
+                }}
+              >
+                <TabsList className='h-8'>
+                  <TabsTrigger value='list'>列表</TabsTrigger>
+                  <TabsTrigger value='preview'>
+                    <Images className='size-3.5' />
+                    预览
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
               <div className='relative min-w-0 flex-1'>
                 <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
                 <Input
@@ -1797,13 +1831,9 @@ export function QuarantinePage() {
                   onNoteEditorOpenChange={setNoteEditorOpen}
                   onOpenUpstream={openAccountUpstream}
                   onOpenSamples={openAccountSamples}
-                  onPreview={(account) => {
-                    previewSeeded.current = false
-                    setPreviewIndex(0)
-                    setPreviewPage(1)
-                    setPreviewLand(undefined)
-                    setPreviewAccount(account)
-                  }}
+                  onPreview={(account) =>
+                    openAccountPreview(Number(account.id), true)
+                  }
                   onProbe={(account) => {
                     const id = Number(account.id)
                     if (account.missingUpstream) {
@@ -2129,29 +2159,35 @@ export function QuarantinePage() {
         </DialogContent>
       </Dialog>
       <ResultPreviewGallery
-        open={previewAccount != null}
+        open={resultPreview != null}
         onOpenChange={(open) => {
-          if (!open) setPreviewAccount(null)
+          if (!open) setResultPreview(null)
         }}
         items={previewItems}
-        index={previewIndex}
-        onIndexChange={setPreviewIndex}
-        page={previewPage}
-        pageCount={Math.max(
-          1,
-          Math.ceil((previewQuery.data?.total ?? 0) / 50)
-        )}
-        total={previewQuery.data?.total}
-        pageLoading={
-          previewQuery.isFetching && previewQuery.data?.page !== previewPage
+        index={resultPreview?.index ?? 0}
+        onIndexChange={(index) =>
+          setResultPreview((current) =>
+            current ? { ...current, index } : current
+          )
         }
-        onPageChange={(nextPage, land) => {
-          previewSeeded.current = false
-          setPreviewLand(land)
-          setPreviewPage(nextPage)
-          setPreviewIndex(0)
-        }}
-        onOpenQuarantine={() => setPreviewAccount(null)}
+        page={resultPreview?.page ?? page}
+        pageCount={previewPageCount}
+        total={previewTotal}
+        pageLoading={previewPageLoading}
+        onPageChange={(nextPage, land) =>
+          setResultPreview((current) =>
+            current
+              ? {
+                  ...current,
+                  page: nextPage,
+                  land,
+                  index: 0,
+                  accountId: undefined,
+                }
+              : current
+          )
+        }
+        perspective='account'
       />
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent size='wide' className='overflow-hidden'>
