@@ -122,7 +122,19 @@ describe('slimAccountPreview', () => {
             reasoning_text: 'drop me',
           }),
         ],
-        runs: [],
+        runs: [
+          {
+            id: 'run-1',
+            account_id: 12,
+            account_name: 'iso-account',
+            account_email: 'iso@example.com',
+            profile_id: 'quality-marker',
+            rounds: 3,
+            completed_steps: 3,
+            created_at: '2026-08-31T00:00:00Z',
+            summary: { bulky: 'x'.repeat(5000) },
+          } as ProbeRun,
+        ],
         byTarget: [],
       },
     })
@@ -130,6 +142,20 @@ describe('slimAccountPreview', () => {
     expect(result.account.name).toBe('iso-account')
     expect(result.samples[0]?.response_text).toBe('<section>card</section>')
     expect(result.samples[0]?.reasoning_text).toBe('')
+    expect(result.runs).toEqual([
+      {
+        id: 'run-1',
+        account_id: 12,
+        account_name: 'iso-account',
+        account_email: 'iso@example.com',
+        account_created_at: undefined,
+        profile_id: 'quality-marker',
+        rounds: 3,
+        completed_steps: 3,
+        created_at: '2026-08-31T00:00:00Z',
+      },
+    ])
+    expect(result.runs[0]).not.toHaveProperty('summary')
   })
 })
 

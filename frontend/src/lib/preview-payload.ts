@@ -18,10 +18,24 @@ export type RunPreviewPayload = {
   profile: Pick<ProbeProfile, 'name' | 'expected_output' | 'expected_image_url'>
 }
 
+export type AccountPreviewRun = Pick<
+  ProbeRun,
+  | 'id'
+  | 'account_id'
+  | 'account_name'
+  | 'account_email'
+  | 'account_created_at'
+  | 'profile_id'
+  | 'rounds'
+  | 'completed_steps'
+  | 'created_at'
+>
+
 export type AccountPreviewPayload = {
   accountId: number
   account: UpstreamAccount
   samples: ProbeSample[]
+  runs: AccountPreviewRun[]
 }
 
 export function slimPreviewResponseText(content: string): string {
@@ -55,6 +69,20 @@ export function slimRunPreview(data: {
   }
 }
 
+export function slimAccountRun(run: ProbeRun): AccountPreviewRun {
+  return {
+    id: run.id,
+    account_id: run.account_id,
+    account_name: run.account_name,
+    account_email: run.account_email,
+    account_created_at: run.account_created_at,
+    profile_id: run.profile_id,
+    rounds: run.rounds,
+    completed_steps: run.completed_steps,
+    created_at: run.created_at,
+  }
+}
+
 export function slimAccountPreview(
   data: AccountDetailResponse
 ): AccountPreviewPayload {
@@ -62,6 +90,7 @@ export function slimAccountPreview(
     accountId: Number(data.account.id),
     account: data.account,
     samples: data.history.samples.map(slimPreviewSample),
+    runs: (data.history.runs ?? []).map(slimAccountRun),
   }
 }
 
