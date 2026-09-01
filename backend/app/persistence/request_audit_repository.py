@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import String, cast, delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import defer
 
@@ -116,6 +116,7 @@ class RequestAuditRepository:
             "tps",
             "risk_level",
             "risk_reasons",
+            "stream_sample",
             "raw",
             "created_at",
             "fetched_at",
@@ -186,6 +187,53 @@ class RequestAuditRepository:
                 )
                 updated += int(result.rowcount or 0)
         return updated
+
+    def refresh_stream_samples(self, items: Iterable[dict[str, Any]]) -> int:
+        values: dict[str, dict[str, Any]] = {}
+        for item in items:
+            upstream_id = str(
+                item.get("id") or item.get("upstream_id") or item.get("requestId") or ""
+            ).strip()
+            sample = item.get("streamSample")
+            if sample is None:
+                sample = item.get("stream_sample")
+            if upstream_id and isinstance(sample, dict) and sample:
+                values[upstream_id] = sample
+        if not values:
+            return 0
+        updated = 0
+        empty = _empty_stream_sample_clause()
+        with self.database.transaction() as session:
+            for upstream_id, sample in values.items():
+                result = session.execute(
+                    update(RequestAuditRecord)
+                    .where(
+                        RequestAuditRecord.upstream_id == upstream_id,
+                        empty,
+                    )
+                    .values(stream_sample=sample)
+                )
+                updated += int(result.rowcount or 0)
+        return updated
+
+    def stream_samples_for_audits(
+        self, upstream_ids: Iterable[str]
+    ) -> dict[str, dict[str, Any]]:
+        values = [str(item).strip() for item in upstream_ids if str(item).strip()]
+        if not values:
+            return {}
+        with self.database.session() as session:
+            rows = session.execute(
+                select(
+                    RequestAuditRecord.upstream_id,
+                    RequestAuditRecord.stream_sample,
+                ).where(RequestAuditRecord.upstream_id.in_(values))
+            ).all()
+        result: dict[str, dict[str, Any]] = {}
+        for upstream_id, sample in rows:
+            if isinstance(sample, dict) and sample:
+                result[str(upstream_id)] = sample
+        return result
 
     def metadata_value(self, key: str) -> str:
         with self.database.session() as session:
@@ -792,14 +840,24 @@ class RequestAuditRepository:
     def retention_cutoff(days: int = 3) -> datetime:
         return utc_now() - timedelta(days=max(1, days))
 
+def _empty_stream_sample_clause():
+    stored = func.trim(
+        func.coalesce(cast(RequestAuditRecord.stream_sample, String), "")
+    )
+    return or_(stored == "", stored == "{}", stored == "null")
+
+
 def _audit_record_query():
-    return select(RequestAuditRecord).options(defer(RequestAuditRecord.raw))
+    return select(RequestAuditRecord).options(
+        defer(RequestAuditRecord.raw),
+        defer(RequestAuditRecord.stream_sample),
+    )
 
 
 def _audit_record_dict(value: RequestAuditRecord) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:
-        if column.name == "raw":
+        if column.name in {"raw", "stream_sample"}:
             continue
         item = getattr(value, column.name)
         result[column.name] = (

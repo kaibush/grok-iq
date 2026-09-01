@@ -269,6 +269,11 @@ COMPATIBILITY_COLUMNS = {
             "ALTER TABLE request_audit_records ADD COLUMN error_code "
             "VARCHAR(120) NOT NULL DEFAULT ''",
         ),
+        (
+            "stream_sample",
+            "ALTER TABLE request_audit_records ADD COLUMN stream_sample "
+            "JSON NOT NULL DEFAULT '{}'",
+        ),
     ],
     "request_audit_account_verifications": [
         (

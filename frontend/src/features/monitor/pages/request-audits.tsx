@@ -124,7 +124,7 @@ import {
 } from '@/components/ui/tooltip'
 import { ActionToolbar, ToolbarAction } from '@/components/action-toolbar'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { CopyableText } from '@/components/copy-button'
+import { CopyButton, CopyableText } from '@/components/copy-button'
 import { EnabledBadge } from '@/components/enabled-badge'
 import { ExportMenu } from '@/components/export-menu'
 import { InfoTooltip } from '@/components/info-tooltip'
@@ -136,6 +136,11 @@ import { AuthStatusIndicator } from '@/features/monitor/components/account-state
 import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-node-names'
 import { FilterChip } from '@/features/monitor/components/filter-chip'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
+import {
+  formatSampleWindow,
+  streamSampleDiagnostics,
+  streamSampleWarnings,
+} from '@/features/monitor/pages/request-audit-stream-sample'
 import {
   isRequestAuditsPath,
   pinnedAccountIdFromSearch,
@@ -703,9 +708,15 @@ function RiskBadge({
   )
 }
 
-function Tps({ value }: { value: number | null | undefined }) {
+function Tps({
+  value,
+  className,
+}: {
+  value: number | null | undefined
+  className?: string
+}) {
   return (
-    <span className='font-mono tabular-nums'>
+    <span className={cn('font-mono tabular-nums', className)}>
       {value == null ? '—' : `${formatNumber(value)} Token/s`}
     </span>
   )
@@ -4209,6 +4220,8 @@ function AuditRecordDetailDialog({
               </p>
             </div>
 
+            <StreamSamplePanel record={record} />
+
             <div className='space-y-3'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div>
@@ -4421,6 +4434,167 @@ function AuditSampleEvidence({
         {value}
       </div>
     </div>
+  )
+}
+
+function AuditThroughputCell({ row }: { row: RequestAuditRecord }) {
+  const diagnostics = streamSampleDiagnostics(row)
+  const warn = diagnostics.reasoningMismatch || diagnostics.thinkingBurst
+  return (
+    <>
+      <Tps
+        value={row.tps}
+        className={warn ? 'text-amber-700 dark:text-amber-300' : undefined}
+      />
+      <div className='text-[10px] text-muted-foreground'>
+        {row.durationMs ? `${formatNumber(row.durationMs, 0)} ms` : '未测量'}
+      </div>
+      {diagnostics.hasSample ? (
+        <div className='mt-0.5 text-[10px] font-medium'>
+          <span
+            className={
+              diagnostics.reasoningMismatch
+                ? 'text-amber-700 dark:text-amber-300'
+                : diagnostics.hasThinking || diagnostics.hasEncryptedThinking
+                  ? 'text-emerald-700 dark:text-emerald-300'
+                  : 'text-muted-foreground'
+            }
+          >
+            思{diagnostics.hasThinking || diagnostics.hasEncryptedThinking ? '✓' : '✗'}
+          </span>
+          {' · '}
+          <span
+            className={
+              diagnostics.outputMismatch
+                ? 'text-amber-700 dark:text-amber-300'
+                : diagnostics.hasOutput
+                  ? 'text-emerald-700 dark:text-emerald-300'
+                  : 'text-muted-foreground'
+            }
+          >
+            出{diagnostics.hasOutput ? '✓' : '✗'}
+          </span>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+function StreamSamplePanel({ record }: { record: RequestAuditRecord }) {
+  const sample = record.streamSample
+  const diagnostics = streamSampleDiagnostics(record)
+  const warnings = streamSampleWarnings(diagnostics)
+  return (
+    <div className='space-y-3'>
+      <div>
+        <h3 className='text-sm font-semibold'>内容样本</h3>
+        <p className='mt-1 text-xs text-muted-foreground'>
+          截取思考和输出的开头/结尾，用来核对高 Token/s 是否真有推理正文。
+        </p>
+      </div>
+      {!diagnostics.hasSample || !sample ? (
+        <div className='rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground'>
+          该请求没有保存思考/输出样本。升级前的历史记录不会有样本。
+        </div>
+      ) : (
+        <>
+          <div className='flex flex-wrap gap-1.5'>
+            <SampleChip ok={diagnostics.hasThinking} label='明文思考' />
+            <SampleChip
+              ok={diagnostics.hasEncryptedThinking}
+              label='加密思考'
+              hideWhenFalse
+            />
+            <SampleChip ok={diagnostics.hasOutput} label='实体输出' />
+            <SampleChip
+              ok={diagnostics.thinkingThenOutput}
+              label='思考后有输出'
+              hideWhenFalse
+            />
+            {sample.truncated ? (
+              <Badge variant='outline' className='text-[10px]'>
+                样本已裁剪
+              </Badge>
+            ) : null}
+          </div>
+          {warnings.length > 0 ? (
+            <div className='space-y-1.5 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200'>
+              {warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          ) : null}
+          <dl className='grid gap-3 sm:grid-cols-2'>
+            <AuditDetailField
+              label='思考字符 · 分片'
+              value={`${formatNumber(sample.thinkingChars ?? 0, 0)} · ${formatNumber(sample.thinkingChunks ?? 0, 0)} 片`}
+            />
+            <AuditDetailField
+              label='输出字符 · 分片'
+              value={`${formatNumber(sample.outputChars ?? 0, 0)} · ${formatNumber(sample.outputChunks ?? 0, 0)} 片`}
+            />
+            <AuditDetailField
+              label='思考时间窗'
+              value={formatSampleWindow(
+                sample.firstThinkingMs,
+                sample.lastThinkingMs,
+                formatNumber
+              )}
+            />
+            <AuditDetailField
+              label='输出时间窗'
+              value={formatSampleWindow(
+                sample.firstOutputMs,
+                sample.lastOutputMs,
+                formatNumber
+              )}
+            />
+          </dl>
+          <SampleSnippet title='思考开头' value={sample.thinkingHead} />
+          <SampleSnippet title='思考结尾' value={sample.thinkingTail} />
+          <SampleSnippet title='输出开头' value={sample.outputHead} />
+          <SampleSnippet title='输出结尾' value={sample.outputTail} />
+        </>
+      )}
+    </div>
+  )
+}
+
+function SampleChip({
+  ok,
+  label,
+  hideWhenFalse = false,
+}: {
+  ok: boolean
+  label: string
+  hideWhenFalse?: boolean
+}) {
+  if (!ok && hideWhenFalse) return null
+  return (
+    <Badge
+      variant={ok ? 'secondary' : 'outline'}
+      className={cn(
+        'text-[10px]',
+        ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'
+      )}
+    >
+      {ok ? '✓' : '✗'} {label}
+    </Badge>
+  )
+}
+
+function SampleSnippet({ title, value }: { title: string; value?: string }) {
+  if (!value) return null
+  return (
+    <section className='overflow-hidden rounded-lg border bg-muted/20'>
+      <div className='flex h-9 items-center justify-between gap-2 px-3'>
+        <span className='text-[11px] font-medium'>{title}</span>
+        <CopyButton value={value} className='size-6' />
+      </div>
+      <pre className='max-h-40 overflow-auto px-3 pb-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap'>
+        {value}
+      </pre>
+    </section>
   )
 }
 
@@ -5179,10 +5353,7 @@ function AuditRow({
         )}
       </TableCell>
       <TableCell className='align-middle'>
-        <Tps value={row.tps} />
-        <div className='text-[10px] text-muted-foreground'>
-          {row.durationMs ? `${formatNumber(row.durationMs, 0)} ms` : '未测量'}
-        </div>
+        <AuditThroughputCell row={row} />
       </TableCell>
       <TableCell className='align-middle'>
         <Badge

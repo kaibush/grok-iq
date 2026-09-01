@@ -6,6 +6,7 @@ import json
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
@@ -49,6 +50,8 @@ REQUEST_AUDIT_MEDIA_BACKFILL_KEY = "request_audit_media_input_projection_v1"
 REQUEST_AUDIT_MEDIA_BACKFILL_MAX_PAGES = 10
 REQUEST_AUDIT_CLIENT_KEY_BACKFILL_KEY = "request_audit_client_key_projection_v1"
 REQUEST_AUDIT_CLIENT_KEY_BACKFILL_MAX_PAGES = 10
+REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY = "request_audit_stream_sample_projection_v1"
+REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES = 10
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,93 @@ def _needs_full_ledger_scan(risk: str) -> bool:
 
 def _audit_error_code(value: Any) -> str:
     return str(value or "").strip()
+
+
+_STREAM_SAMPLE_INT_KEYS = (
+    "thinkingChars",
+    "outputChars",
+    "thinkingChunks",
+    "outputChunks",
+    "firstThinkingMs",
+    "lastThinkingMs",
+    "firstOutputMs",
+    "lastOutputMs",
+)
+_STREAM_SAMPLE_BOOL_KEYS = (
+    "hasThinking",
+    "hasEncryptedThinking",
+    "hasVisibleOutput",
+    "hasToolOutput",
+    "thinkingThenOutput",
+    "truncated",
+)
+_STREAM_SAMPLE_TEXT_KEYS = (
+    "thinkingHead",
+    "thinkingTail",
+    "outputHead",
+    "outputTail",
+)
+
+
+def _normalize_stream_sample(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        return {}
+    result: dict[str, Any] = {}
+    protocol = str(value.get("protocol") or "").strip()
+    if protocol:
+        result["protocol"] = protocol[:32]
+    for key in _STREAM_SAMPLE_INT_KEYS:
+        if key not in value:
+            continue
+        number = _nonnegative_int(value.get(key))
+        if number is not None:
+            result[key] = number
+    for key in _STREAM_SAMPLE_BOOL_KEYS:
+        if key in value:
+            result[key] = bool(value.get(key))
+    for key in _STREAM_SAMPLE_TEXT_KEYS:
+        text_value = str(value.get(key) or "")
+        if text_value:
+            result[key] = text_value[:2000]
+    return result if _stream_sample_has_content(result) else {}
+
+
+def _stream_sample_has_content(value: dict[str, Any]) -> bool:
+    return bool(
+        value.get("thinkingChars")
+        or value.get("outputChars")
+        or value.get("thinkingChunks")
+        or value.get("outputChunks")
+        or value.get("hasThinking")
+        or value.get("hasEncryptedThinking")
+        or value.get("hasVisibleOutput")
+        or value.get("hasToolOutput")
+        or value.get("thinkingThenOutput")
+        or value.get("thinkingHead")
+        or value.get("thinkingTail")
+        or value.get("outputHead")
+        or value.get("outputTail")
+        or value.get("firstThinkingMs") is not None
+        or value.get("lastThinkingMs") is not None
+        or value.get("firstOutputMs") is not None
+        or value.get("lastOutputMs") is not None
+    )
+
+
+def _stream_sample_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider") or "") != "grok_build":
+            continue
+        sample = _normalize_stream_sample(item.get("streamSample"))
+        if not sample:
+            continue
+        upstream_id = str(item.get("id") or item.get("requestId") or "").strip()
+        if upstream_id:
+            values.append({"id": upstream_id, "streamSample": sample})
+    return values
 
 
 def _positive_int(value: Any) -> int | None:
@@ -427,6 +517,75 @@ class RequestAuditService:
             }
         return {"complete": False, "pages": pages, "updated": updated, "error": ""}
 
+    async def _backfill_stream_sample_projection(self) -> dict[str, Any]:
+        raw_state = self.repository.metadata_value(
+            REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY
+        )
+        if raw_state == "completed":
+            return {"complete": True, "pages": 0, "updated": 0, "error": ""}
+        try:
+            state = json.loads(raw_state) if raw_state else {}
+        except (TypeError, ValueError):
+            state = {}
+        cursor = str(state.get("cursor") or "") if isinstance(state, dict) else ""
+        pages = 0
+        updated = 0
+        try:
+            while pages < REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES:
+                payload = await self.client.list_request_audits(
+                    cursor=cursor,
+                    page_size=REQUEST_AUDIT_PAGE_SIZE,
+                    period="90d",
+                )
+                items = payload.get("items", [])
+                if not isinstance(items, list) or not items:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                pages += 1
+                updated += self.repository.refresh_stream_samples(
+                    _stream_sample_refresh_items(items)
+                )
+                next_cursor = str(payload.get("nextCursor") or "")
+                has_more = bool(payload.get("hasMore")) and bool(next_cursor)
+                if not has_more:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                if next_cursor == cursor:
+                    raise RuntimeError("内容样本回填游标未推进")
+                cursor = next_cursor
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY,
+                    json.dumps({"cursor": cursor}),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if getattr(exc, "error_code", "") == "invalidCursor":
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY, ""
+                )
+            return {
+                "complete": False,
+                "pages": pages,
+                "updated": updated,
+                "error": str(exc),
+            }
+        return {"complete": False, "pages": pages, "updated": updated, "error": ""}
+
     def resolve_window(
         self,
         *,
@@ -638,6 +797,7 @@ class RequestAuditService:
             await self._expire_tps_cooldowns()
             media_backfill = await self._backfill_media_input_projection()
             client_key_backfill = await self._backfill_client_key_projection()
+            stream_sample_backfill = await self._backfill_stream_sample_projection()
             try:
                 egress_map = await self._egress_map()
             except Exception as exc:  # node labels are supplemental
@@ -692,6 +852,9 @@ class RequestAuditService:
                     for item in items
                     if isinstance(item, dict)
                     and str(item.get("provider") or "") == "grok_build"
+                )
+                self.repository.refresh_stream_samples(
+                    _stream_sample_refresh_items(items)
                 )
                 page_has_overlap = False
                 page_records: list[dict[str, Any]] = []
@@ -843,6 +1006,7 @@ class RequestAuditService:
                 "egressWarning": egress_error,
                 "mediaInputBackfill": media_backfill,
                 "clientKeyBackfill": client_key_backfill,
+                "streamSampleBackfill": stream_sample_backfill,
                 "preDisableChecks": pre_disable_checks,
                 "state": self._state_payload(saved_state, window=window),
                 "activity": activity,
@@ -1990,6 +2154,7 @@ class RequestAuditService:
             "tps": tps,
             "risk_level": risk_level,
             "risk_reasons": reasons,
+            "stream_sample": _normalize_stream_sample(item.get("streamSample")),
             "raw": raw,
             "created_at": created_at,
             "fetched_at": utc_now(),
@@ -2169,6 +2334,7 @@ class RequestAuditService:
             page_items = filtered_items[offset : offset + page_size]
         probe_map = self._probe_sample_map(page_items)
         account_ids = self._record_account_ids(page_items)
+        stream_sample_map = self._stream_samples_for_page(page_items)
         verification_map = self.repository.verifications_for_audits(
             str(item.get("upstream_id") or "") for item in page_items
         )
@@ -2194,6 +2360,9 @@ class RequestAuditService:
                         str(item.get("upstream_id") or "")
                     ),
                     evaluation=self._evaluation_for(item, evaluations),
+                    stream_sample=stream_sample_map.get(
+                        str(item.get("upstream_id") or "")
+                    ),
                 )
                 for item in page_items
             ],
@@ -3462,6 +3631,21 @@ class RequestAuditService:
             "updatedAt": _iso(value.get("updated_at")),
         }
 
+    def _stream_samples_for_page(
+        self, page_items: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        loader = getattr(self.repository, "stream_samples_for_audits", None)
+        if not callable(loader):
+            return {}
+        value = loader(str(item.get("upstream_id") or "") for item in page_items)
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(key): sample
+            for key, sample in value.items()
+            if str(key) and isinstance(sample, dict) and sample
+        }
+
     def _record_payload(
         self,
         row: dict[str, Any],
@@ -3470,6 +3654,7 @@ class RequestAuditService:
         upstream_account: dict[str, Any] | None = None,
         verification: dict[str, Any] | None = None,
         evaluation: AuditRiskEvaluation | None = None,
+        stream_sample: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         evaluation = evaluation or self._evaluation_for(row)
         classification = evaluation.classification
@@ -3482,7 +3667,7 @@ class RequestAuditService:
             classification.reasons if risk_level != "normal" else ()
         )
         upstream_account = upstream_account or {}
-        return {
+        payload = {
             "id": str(row.get("upstream_id") or ""),
             "requestId": str(row.get("request_id") or ""),
             "provider": str(row.get("provider") or "grok_build"),
@@ -3539,6 +3724,13 @@ class RequestAuditService:
             "probeSamples": probe_samples or [],
             "createdAt": _iso(row.get("created_at")),
         }
+        sample = stream_sample if isinstance(stream_sample, dict) else None
+        if sample is None:
+            raw_sample = row.get("stream_sample")
+            sample = raw_sample if isinstance(raw_sample, dict) else None
+        if sample:
+            payload["streamSample"] = sample
+        return payload
 
     @classmethod
     def _state_payload(

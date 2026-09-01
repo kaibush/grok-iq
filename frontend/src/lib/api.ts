@@ -707,6 +707,28 @@ export type RequestAuditWindow = {
   isToday: boolean
 }
 
+export type RequestAuditStreamSample = {
+  protocol?: string
+  thinkingChars?: number
+  outputChars?: number
+  thinkingChunks?: number
+  outputChunks?: number
+  hasThinking?: boolean
+  hasEncryptedThinking?: boolean
+  hasVisibleOutput?: boolean
+  hasToolOutput?: boolean
+  thinkingThenOutput?: boolean
+  firstThinkingMs?: number
+  lastThinkingMs?: number
+  firstOutputMs?: number
+  lastOutputMs?: number
+  thinkingHead?: string
+  thinkingTail?: string
+  outputHead?: string
+  outputTail?: string
+  truncated?: boolean
+}
+
 export type RequestAuditRecord = {
   id: string
   requestId: string
@@ -748,6 +770,7 @@ export type RequestAuditRecord = {
   preDisableCheck: RequestAuditPreDisableCheck | null
   probeSampleCount: number
   probeSamples: RequestAuditProbeContext[]
+  streamSample?: RequestAuditStreamSample
   createdAt: string | null
 }
 
