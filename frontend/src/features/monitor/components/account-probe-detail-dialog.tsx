@@ -490,7 +490,6 @@ function AccountProbeDetail({
           egressNodeNames={egressNodeNames}
           deletingSampleId={deletingSampleId}
           onDeleteSample={onDeleteSample}
-          account={account}
         />
       </div>
     </div>

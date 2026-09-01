@@ -2542,7 +2542,6 @@ function QuarantineSampleDetail({
         key={account?.id ?? 'quarantine-samples'}
         samples={samples}
         egressNodeNames={egressNodeNames}
-        account={account ?? undefined}
       />
     </div>
   )

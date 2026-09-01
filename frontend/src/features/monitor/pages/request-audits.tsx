@@ -3809,28 +3809,6 @@ export function RequestAuditsPage() {
                   samples={accountSamplesQuery.data.items}
                   egressNodeNames={egressNodeNames}
                   countLabel={`本页 ${accountSamplesQuery.data.items.length} / 共 ${accountSamplesQuery.data.total}`}
-                  account={
-                    sampleAccount?.accountId
-                      ? {
-                          id: sampleAccount.accountId,
-                          name: sampleAccount.accountName,
-                        }
-                      : undefined
-                  }
-                  page={samplePage}
-                  pageCount={Math.max(
-                    1,
-                    Math.ceil(
-                      accountSamplesQuery.data.total /
-                        Math.max(accountSamplesQuery.data.pageSize, 1)
-                    )
-                  )}
-                  total={accountSamplesQuery.data.total}
-                  pageLoading={
-                    accountSamplesQuery.isFetching &&
-                    accountSamplesQuery.data.page !== samplePage
-                  }
-                  onPageChange={(nextPage) => setSamplePage(nextPage)}
                 />
                 <ServerPagination
                   page={accountSamplesQuery.data.page}

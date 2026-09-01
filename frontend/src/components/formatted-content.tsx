@@ -294,7 +294,6 @@ type FormattedContentPreviewButtonProps = {
   showWhenEmpty?: boolean
   className?: string
   variant?: ComponentProps<typeof Button>['variant']
-  onClick?: () => void
 }
 
 export function FormattedContentPreviewButton({
@@ -306,7 +305,6 @@ export function FormattedContentPreviewButton({
   showWhenEmpty = false,
   className,
   variant = 'outline',
-  onClick,
 }: FormattedContentPreviewButtonProps) {
   const [open, setOpen] = useState(false)
   const hasContent = Boolean(content.trim())
@@ -318,13 +316,7 @@ export function FormattedContentPreviewButton({
       size={iconOnly ? 'icon' : 'sm'}
       variant={variant}
       className={className}
-      onClick={() => {
-        if (onClick) {
-          onClick()
-          return
-        }
-        setOpen(true)
-      }}
+      onClick={() => setOpen(true)}
       disabled={!hasContent}
       aria-label={label}
     >
@@ -343,7 +335,7 @@ export function FormattedContentPreviewButton({
       ) : (
         trigger
       )}
-      {!onClick && open && (
+      {open && (
         <FormattedContentPreviewDialog
           open
           onOpenChange={setOpen}

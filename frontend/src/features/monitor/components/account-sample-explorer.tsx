@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useState, type ReactNode } from 'react'
 import { Loader2, Trash2 } from 'lucide-react'
 import { type ProbeSample } from '@/lib/api'
 import { StatusBadge } from '@/lib/status'
@@ -12,10 +11,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { FormattedContentPreviewButton } from '@/components/formatted-content'
-import {
-  previewItemsFromSamples,
-  ResultPreviewGallery,
-} from '@/features/monitor/components/result-preview-gallery'
 import {
   getEgressNodeName,
   type EgressNodeNameMap,
@@ -34,17 +29,6 @@ type AccountSampleExplorerProps = {
   onDeleteSample?: (sample: ProbeSample) => void
   countLabel?: ReactNode
   className?: string
-  account?: {
-    id: number | string
-    name?: string
-    email?: string
-    createdAt?: string | null
-  }
-  page?: number
-  pageCount?: number
-  total?: number
-  pageLoading?: boolean
-  onPageChange?: (page: number, land: 'start' | 'end') => void
 }
 
 export function AccountSampleExplorer({
@@ -54,30 +38,10 @@ export function AccountSampleExplorer({
   onDeleteSample,
   countLabel,
   className,
-  account,
-  page,
-  pageCount,
-  total,
-  pageLoading,
-  onPageChange,
 }: AccountSampleExplorerProps) {
-  const navigate = useNavigate()
   const [selectedId, setSelectedId] = useState(samples[0]?.id ?? '')
-  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
-  const pendingPreviewLand = useRef<'start' | 'end' | undefined>(undefined)
   const selected =
     samples.find((sample) => sample.id === selectedId) ?? samples[0]
-  const previewItems = useMemo(
-    () => (account ? previewItemsFromSamples(samples, account) : []),
-    [account, samples]
-  )
-  useEffect(() => {
-    const land = pendingPreviewLand.current
-    if (!land) return
-    pendingPreviewLand.current = undefined
-    if (!previewItems.length) return
-    setPreviewIndex(land === 'end' ? previewItems.length - 1 : 0)
-  }, [previewItems])
   if (!selected) {
     return (
       <div className='rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground'>
@@ -86,7 +50,6 @@ export function AccountSampleExplorer({
     )
   }
   return (
-    <>
     <div
       className={cn(
         'grid min-h-0 overflow-hidden rounded-xl border bg-muted/10 lg:grid-cols-[21rem_minmax(0,1fr)]',
@@ -164,50 +127,8 @@ export function AccountSampleExplorer({
         egressNodeNames={egressNodeNames}
         deleting={deletingSampleId === selected.id}
         onDelete={onDeleteSample ? () => onDeleteSample(selected) : undefined}
-        onPreview={
-          account && previewItems.length
-            ? () => {
-                const index = previewItems.findIndex(
-                  (item) => item.sampleId === selected.id
-                )
-                setPreviewIndex(index >= 0 ? index : 0)
-              }
-            : undefined
-        }
       />
     </div>
-    {account ? (
-      <ResultPreviewGallery
-        open={
-          previewIndex != null &&
-          (previewItems.length > 0 ||
-            Boolean(pageLoading) ||
-            (pageCount ?? 1) > 1)
-        }
-        onOpenChange={(open) => {
-          if (!open) setPreviewIndex(null)
-        }}
-        items={previewItems}
-        index={previewIndex ?? 0}
-        onIndexChange={(index) => setPreviewIndex(index)}
-        page={page}
-        pageCount={pageCount}
-        total={total}
-        pageLoading={pageLoading}
-        onPageChange={
-          onPageChange
-            ? (nextPage, land) => {
-                pendingPreviewLand.current = land
-                onPageChange(nextPage, land)
-              }
-            : undefined
-        }
-        onOpenQuarantine={() => {
-          void navigate({ to: '/quarantine' } as never)
-        }}
-      />
-    ) : null}
-    </>
   )
 }
 
@@ -216,13 +137,11 @@ function SampleDetail({
   egressNodeNames,
   deleting,
   onDelete,
-  onPreview,
 }: {
   sample: ProbeSample
   egressNodeNames: EgressNodeNameMap
   deleting: boolean
   onDelete?: () => void
-  onPreview?: () => void
 }) {
   const responseText = sample.response_text || ''
   return (
@@ -350,7 +269,6 @@ function SampleDetail({
               label='预览响应'
               title={`样本响应 · 第 ${sample.round_number} 轮`}
               className='shrink-0'
-              onClick={onPreview}
             />
           </div>
         ) : (
