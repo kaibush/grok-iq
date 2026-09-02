@@ -1144,7 +1144,9 @@ export function ResultPreviewGallery({
           }}
         >
           <div className='flex h-full min-h-0 min-w-0 flex-col overflow-hidden'>
-            <header className='flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2'>
+            <header className='flex shrink-0 flex-col gap-2 border-b px-3 py-2'>
+              <div className='flex items-center gap-2'>
+                <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
               <div className='flex shrink-0 items-center gap-1'>
                 <Tabs
                   value={view}
@@ -1197,25 +1199,29 @@ export function ResultPreviewGallery({
                   </TabsList>
                 </Tabs>
               ) : null}
+                </div>
               <Button
                 type='button'
                 size='icon'
                 variant='ghost'
+                className='size-8 shrink-0'
+                onClick={() => onOpenChange(false)}
+                aria-label='关闭预览'
+              >
+                <X />
+              </Button>
+              </div>
+              <div className='flex min-w-0 items-center gap-1'>
+              <Button
+                type='button'
+                size='icon'
+                variant='ghost'
+                className='size-8 shrink-0'
                 disabled={!canPrevItem || pageLoading}
                 onClick={goPrevItem}
                 aria-label='上一项'
               >
                 <ChevronLeft />
-              </Button>
-              <Button
-                type='button'
-                size='icon'
-                variant='ghost'
-                disabled={!canNextItem || pageLoading}
-                onClick={goNextItem}
-                aria-label='下一项'
-              >
-                <ChevronRight />
               </Button>
               <div className='min-w-0 flex-1'>
                 <div className='truncate font-medium'>
@@ -1231,6 +1237,19 @@ export function ResultPreviewGallery({
                         : `当前筛选没有可预览${itemNoun}`}
                 </div>
               </div>
+              <Button
+                type='button'
+                size='icon'
+                variant='ghost'
+                className='size-8 shrink-0'
+                disabled={!canNextItem || pageLoading}
+                onClick={goNextItem}
+                aria-label='下一项'
+              >
+                <ChevronRight />
+              </Button>
+              </div>
+              <div className='flex flex-wrap items-center gap-2 empty:hidden'>
               {onPageChange && currentPageCount > 1 ? (
                 <div
                   ref={pagerRef}
@@ -1313,6 +1332,7 @@ export function ResultPreviewGallery({
                   type='button'
                   size='sm'
                   variant={compareExpected ? 'secondary' : 'outline'}
+                  className='shrink-0 whitespace-nowrap'
                   onClick={() => setCompareExpected((current) => !current)}
                 >
                   <Columns2 />
@@ -1324,6 +1344,7 @@ export function ResultPreviewGallery({
                   type='button'
                   size='sm'
                   variant='outline'
+                  className='shrink-0 whitespace-nowrap'
                   onClick={() => {
                     onOpenChange(false)
                     onOpenQuarantine?.()
@@ -1337,6 +1358,7 @@ export function ResultPreviewGallery({
                   type='button'
                   size='sm'
                   variant='outline'
+                  className='shrink-0 whitespace-nowrap'
                   disabled={!item}
                   onClick={() => setIsolateOpen(true)}
                 >
@@ -1344,15 +1366,7 @@ export function ResultPreviewGallery({
                   移入隔离区
                 </Button>
               )}
-              <Button
-                type='button'
-                size='icon'
-                variant='ghost'
-                onClick={() => onOpenChange(false)}
-                aria-label='关闭预览'
-              >
-                <X />
-              </Button>
+              </div>
             </header>
             {pageLoading && !item ? (
               <div className='flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground'>
