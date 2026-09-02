@@ -22,24 +22,29 @@ import {
 } from 'recharts'
 import { api, type CooldownStatsResponse } from '@/lib/api'
 import { formatNumber, getErrorMessage } from '@/lib/utils'
-import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
 import { Input } from '@/components/ui/input'
 import { SegmentedControl } from '@/components/segmented-control'
 import { MetricStrip } from '@/components/stat-card'
 import { TitledCard } from '@/components/titled-card'
 import { formatRemainingDuration } from '@/features/monitor/components/cooldown-remaining'
 
-type StatsPreset = 'today' | '24h' | '7d' | '30d' | 'custom'
+export type CooldownStatsPreset = 'today' | '24h' | '7d' | '30d' | 'custom'
 
-const STATS_VIEW_KEY = 'grokiq.monitor.cooldown-stats.v1'
-const defaultStatsView = {
-  preset: 'today' as StatsPreset,
+export type CooldownStatsView = {
+  preset: CooldownStatsPreset
+  from: string
+  to: string
+}
+
+export const COOLDOWN_STATS_VIEW_KEY = 'grokiq.monitor.cooldown-stats.v2'
+export const defaultCooldownStatsView: CooldownStatsView = {
+  preset: '7d',
   from: '',
   to: '',
 }
 
 const PRESETS: Array<{
-  value: Exclude<StatsPreset, 'custom'>
+  value: Exclude<CooldownStatsPreset, 'custom'>
   label: string
   icon?: typeof CalendarDays
 }> = [
@@ -49,9 +54,37 @@ const PRESETS: Array<{
   { value: '30d', label: '近 30 天' },
 ]
 
-export function CooldownStatsBoard() {
-  const view = usePersistedViewState(STATS_VIEW_KEY, defaultStatsView)
-  const { preset, from, to } = view.value
+export function cooldownStatsRange(view: CooldownStatsView) {
+  return rangeForPreset(view.preset, view.from, view.to)
+}
+
+export function cooldownStatsRangeIso(view: CooldownStatsView) {
+  const range = cooldownStatsRange(view)
+  return {
+    from: toIsoDateTime(range.from),
+    to: toIsoDateTime(range.to),
+    range,
+  }
+}
+
+export function cooldownStatsRangeLabel(view: CooldownStatsView) {
+  const preset = PRESETS.find((item) => item.value === view.preset)
+  if (preset) return preset.label
+  const range = cooldownStatsRange(view)
+  if (range.from && range.to) {
+    return `${range.from.replace('T', ' ')} — ${range.to.replace('T', ' ')}`
+  }
+  return '自定义时间'
+}
+
+export function CooldownStatsBoard({
+  view,
+  onViewChange,
+}: {
+  view: CooldownStatsView
+  onViewChange: (next: CooldownStatsView) => void
+}) {
+  const { preset, from, to } = view
   const range = useMemo(
     () => rangeForPreset(preset, from, to),
     [from, preset, to]
@@ -82,7 +115,7 @@ export function CooldownStatsBoard() {
             value={preset}
             onChange={(next) => {
               const rangeNext = rangeForPreset(next, '', '')
-              view.setValue({
+              onViewChange({
                 preset: next,
                 from: rangeNext.from,
                 to: rangeNext.to,
@@ -98,7 +131,7 @@ export function CooldownStatsBoard() {
                 value={range.from}
                 max={range.to || undefined}
                 onChange={(event) =>
-                  view.setValue({
+                  onViewChange({
                     preset: 'custom',
                     from: event.target.value,
                     to: range.to,
@@ -115,7 +148,7 @@ export function CooldownStatsBoard() {
                 value={range.to}
                 min={range.from || undefined}
                 onChange={(event) =>
-                  view.setValue({
+                  onViewChange({
                     preset: 'custom',
                     from: range.from,
                     to: event.target.value,
@@ -275,7 +308,7 @@ function TrendChart({ data }: { data: CooldownStatsResponse['trend'] }) {
   )
 }
 
-function rangeForPreset(preset: StatsPreset, from: string, to: string) {
+function rangeForPreset(preset: CooldownStatsPreset, from: string, to: string) {
   if (preset === 'today') return localDayRange(new Date())
   if (preset === '24h') return recentHoursRange(24)
   if (preset === '7d') return recentHoursRange(24 * 7)

@@ -70,7 +70,13 @@ import {
   isCooldownExpiringSoon,
   remainingForAccount,
 } from '@/features/monitor/components/cooldown-remaining'
-import { CooldownStatsBoard } from '@/features/monitor/components/cooldown-stats-board'
+import {
+  CooldownStatsBoard,
+  COOLDOWN_STATS_VIEW_KEY,
+  cooldownStatsRangeIso,
+  cooldownStatsRangeLabel,
+  defaultCooldownStatsView,
+} from '@/features/monitor/components/cooldown-stats-board'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import {
   previewItemFromAccount,
@@ -163,9 +169,25 @@ export function CooldownPage() {
     COOLDOWN_VIEW_STORAGE_KEY,
     defaultCooldownView
   )
+  const statsView = usePersistedViewState(
+    COOLDOWN_STATS_VIEW_KEY,
+    defaultCooldownStatsView
+  )
   const { page, pageSize, search, status = 'cooling' } = view.value
   const updateView = (patch: Partial<typeof defaultCooldownView>) =>
     view.setValue((current) => ({ ...current, ...patch }))
+  const statsRange = useMemo(
+    () => cooldownStatsRangeIso(statsView.value),
+    [statsView.value]
+  )
+  const statsRangeLabel = cooldownStatsRangeLabel(statsView.value)
+  const historyRange =
+    status === 'cooling'
+      ? {}
+      : {
+          from: statsRange.from || undefined,
+          to: statsRange.to || undefined,
+        }
   const [deferredSearch] = useDebouncedValue(search.trim())
   const committedQuery = useMemo(
     () => ({
@@ -173,8 +195,10 @@ export function CooldownPage() {
       pageSize,
       search: deferredSearch,
       status,
+      from: historyRange.from ?? '',
+      to: historyRange.to ?? '',
     }),
-    [deferredSearch, page, pageSize, status]
+    [deferredSearch, historyRange.from, historyRange.to, page, pageSize, status]
   )
   const tableQuery = usePaintDeferredValue(committedQuery)
   const [selected, setSelected] = useState<number[]>([])
@@ -201,7 +225,9 @@ export function CooldownPage() {
     tableQuery.page !== committedQuery.page ||
     tableQuery.pageSize !== committedQuery.pageSize ||
     tableQuery.search !== committedQuery.search ||
-    tableQuery.status !== committedQuery.status
+    tableQuery.status !== committedQuery.status ||
+    tableQuery.from !== committedQuery.from ||
+    tableQuery.to !== committedQuery.to
   const query = useQuery({
     queryKey: [
       'accounts',
@@ -210,6 +236,8 @@ export function CooldownPage() {
       tableQuery.pageSize,
       tableQuery.search,
       tableQuery.status,
+      tableQuery.from,
+      tableQuery.to,
     ],
     queryFn: ({ signal }) =>
       api.cooldownAccounts(
@@ -218,6 +246,12 @@ export function CooldownPage() {
           pageSize: tableQuery.pageSize,
           search: tableQuery.search,
           status: tableQuery.status,
+          ...(tableQuery.status === 'cooling'
+            ? {}
+            : {
+                from: tableQuery.from || undefined,
+                to: tableQuery.to || undefined,
+              }),
         },
         signal
       ),
@@ -233,7 +267,12 @@ export function CooldownPage() {
       isFetching: query.isFetching,
       inputPending: tableQueryPending,
     })
-  const tableFilterKey = [tableQuery.search, tableQuery.status].join('|')
+  const tableFilterKey = [
+    tableQuery.search,
+    tableQuery.status,
+    tableQuery.from,
+    tableQuery.to,
+  ].join('|')
   const appliedFilterKeyRef = useRef(tableFilterKey)
   useEffect(() => {
     if (tableQueryPending) {
@@ -366,6 +405,7 @@ export function CooldownPage() {
   const viewSummary = [
     search.trim() ? `搜索“${search.trim()}”` : '',
     statusLabels[status],
+    status === 'cooling' ? '' : statsRangeLabel,
     `第 ${page} 页 · 每页 ${pageSize} 条`,
   ]
     .filter(Boolean)
@@ -472,7 +512,13 @@ export function CooldownPage() {
           </ActionToolbar>
         }
       />
-      <CooldownStatsBoard />
+      <CooldownStatsBoard
+        view={statsView.value}
+        onViewChange={(next) => {
+          statsView.setValue(next)
+          updateView({ page: 1 })
+        }}
+      />
       <TablePanel
         toolbar={
           <div className='space-y-2' aria-busy={showTableLoading}>
@@ -498,6 +544,11 @@ export function CooldownPage() {
                 )}
               </div>
             </div>
+            {status !== 'cooling' ? (
+              <p className='text-[11px] text-muted-foreground'>
+                已结束记录按看板时间范围筛选：{statsRangeLabel}
+              </p>
+            ) : null}
             {view.active && (
               <PersistedViewNotice
                 restored={view.restored}
@@ -573,9 +624,13 @@ export function CooldownPage() {
                 hasActiveFilters ? '没有匹配的冷却记录' : '当前没有冷却中的账号'
               }
               description={
-                hasActiveFilters
-                  ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
-                  : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。可切换到「已结束」查看近期记录。'
+                status === 'expired'
+                  ? `看板时间范围「${statsRangeLabel}」内没有已结束的冷却记录，请扩大时间范围后重试。`
+                  : status === 'all'
+                    ? `看板时间范围「${statsRangeLabel}」内没有冷却记录，请扩大时间范围或改回「冷却中」。`
+                    : hasActiveFilters
+                      ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
+                      : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。已结束的记录请切换到「已结束」，并确认上方看板时间范围覆盖冷却发生的时间。'
               }
               action={
                 hasActiveFilters ? undefined : (
