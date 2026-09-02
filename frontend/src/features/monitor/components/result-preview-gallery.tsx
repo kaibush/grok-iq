@@ -260,14 +260,38 @@ function attachPreviewSample(
   item: ResultPreviewItem,
   samples: ProbeSample[] | undefined
 ): ResultPreviewItem {
-  if (item.sample || !samples?.length) return item
-  const sample = resolvePreviewSample(samples, item)
-  if (!sample) return item
+  const scoped = item.runId
+    ? samplesForRun(samples ?? [], item.runId)
+    : samplesForPreview(samples ?? [])
+  const sample = resolvePreviewSample(scoped, item)
+  if (!sample) {
+    if (
+      item.sample &&
+      item.runId &&
+      item.sample.run_id &&
+      item.sample.run_id !== item.runId
+    ) {
+      return {
+        ...item,
+        sample: undefined,
+        sampleId: undefined,
+        content: undefined,
+      }
+    }
+    return item
+  }
+  if (
+    item.sample?.id === sample.id &&
+    item.sampleId === sample.id &&
+    item.content === sample.response_text
+  ) {
+    return item
+  }
   return {
     ...item,
     sample,
-    sampleId: item.sampleId || sample.id,
-    content: item.content || sample.response_text,
+    sampleId: sample.id,
+    content: sample.response_text,
   }
 }
 
@@ -331,6 +355,8 @@ function expandPreviewItems(
       leaves.push({
         ...item,
         id: `${item.id}:${sample.id}`,
+        sample: undefined,
+        content: undefined,
         sampleId: sample.id.startsWith('pending:') ? undefined : sample.id,
         roundNumber: sample.round_number || undefined,
         createdAt: sample.created_at || item.createdAt,
@@ -403,25 +429,30 @@ function resolvePreviewSample(
   item?: ResultPreviewItem | null,
   overrideId?: string
 ) {
+  const pool = item?.runId
+    ? samples.filter((sample) => sample.run_id === item.runId)
+    : samples
   const preferredId = overrideId || item?.sampleId
   if (preferredId) {
-    const matched = samples.find((sample) => sample.id === preferredId)
+    const matched = pool.find((sample) => sample.id === preferredId)
     if (matched) return matched
   }
-  if (item?.sample && !overrideId) return item.sample
+  if (item?.sample && !overrideId) {
+    if (!item.runId || item.sample.run_id === item.runId) return item.sample
+  }
   if (item?.roundNumber && item.roundNumber > 0) {
-    const byRound = samples.find(
+    const byRound = pool.find(
       (sample) => sample.round_number === item.roundNumber
     )
     if (byRound) return byRound
-    if (isAccountPreviewItem(item)) {
+    if (!item.runId && isAccountPreviewItem(item)) {
       return (
-        orderedPreviewSamples(samples)[item.roundNumber - 1] ||
-        pickPreviewSample(samples)
+        orderedPreviewSamples(pool)[item.roundNumber - 1] ||
+        pickPreviewSample(pool)
       )
     }
   }
-  return pickPreviewSample(samples, preferredId)
+  return pickPreviewSample(pool, preferredId)
 }
 
 export function ResultPreviewGallery({
@@ -2213,7 +2244,9 @@ function PreviewThumbCard({
   onOpen: (index: number) => void
 }) {
   const { ref, inView } = useInView<HTMLButtonElement>()
-  const hasLocal = Boolean(item.content || item.sample)
+  const sampleMatchesRun =
+    !item.runId || !item.sample?.run_id || item.sample.run_id === item.runId
+  const hasLocal = Boolean((item.content || item.sample) && sampleMatchesRun)
   const isAccountItem = isAccountPreviewItem(item)
   const runQuery = useQuery({
     queryKey: ['run-preview', item.runId],
