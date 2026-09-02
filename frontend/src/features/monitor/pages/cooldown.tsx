@@ -192,7 +192,7 @@ export function CooldownPage() {
           page: tableQuery.page,
           pageSize: tableQuery.pageSize,
           search: tableQuery.search,
-          status: tableQuery.status === 'all' ? '' : tableQuery.status,
+          status: tableQuery.status,
         },
         signal
       ),

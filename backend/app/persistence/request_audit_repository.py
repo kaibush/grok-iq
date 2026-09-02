@@ -539,6 +539,28 @@ class RequestAuditRepository:
                 values.append(payload)
         return values
 
+    def tps_cooldown_verifications(self) -> list[dict[str, Any]]:
+        """Return every TPS cooldown event, including already expired rows."""
+
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RequestAuditAccountVerification).where(
+                    RequestAuditAccountVerification.action_status.in_(
+                        ("cooled", "cooldown_expired")
+                    )
+                )
+            ).all()
+        values: list[dict[str, Any]] = []
+        for row in rows:
+            payload = model_dict(row)
+            recommendation = payload.get("egress_recommendation")
+            if (
+                isinstance(recommendation, dict)
+                and recommendation.get("kind") == "tps_cooldown"
+            ):
+                values.append(payload)
+        return values
+
     def retryable_verification_account_ids(self) -> set[int]:
         """Return accounts whose confirmed verdict still needs an action retry.
 

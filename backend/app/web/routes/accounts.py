@@ -166,6 +166,39 @@ def build_accounts_router(service: AccountService) -> APIRouter:
             account_ids=payload.account_ids,
         )
 
+    @router.get("/accounts/cooldowns/stats")
+    def cooldown_stats(
+        start: str = Query(default="", alias="from"),
+        end: str = Query(default="", alias="to"),
+    ) -> dict[str, Any]:
+        return service.cooldown_stats(start=start, end=end)
+
+    @router.get("/accounts/cooldowns")
+    async def cooldown_zone(
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200, alias="pageSize"),
+        search: str = "",
+        status: str = Query(default="cooling"),
+        start: str = Query(default="", alias="from"),
+        end: str = Query(default="", alias="to"),
+    ) -> dict[str, Any]:
+        return await service.list_cooldown_zone(
+            page=page,
+            page_size=page_size,
+            search=search,
+            status=status,
+            start=start,
+            end=end,
+        )
+
+    @router.post("/accounts/cooldowns/release")
+    async def release_cooldown_zone(
+        payload: AccountBatchDeleteInput,
+    ) -> dict[str, Any]:
+        return await service.release_cooldown_zone(
+            account_ids=payload.account_ids,
+        )
+
     @router.get("/accounts/{account_id}")
     async def account_detail(
         account_id: int,

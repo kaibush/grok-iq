@@ -15,6 +15,14 @@ from app.persistence.register_event_repository import RegisterEventRepository
 from app.persistence.request_audit_repository import RequestAuditRepository
 from app.persistence.sso_report_repository import SsoReportRepository
 from app.services.account_timeline import build_account_timeline
+from app.services.cooldown_stats import (
+    ALLOWED_STATUSES,
+    build_cooldown_zone_item,
+    compute_cooldown_stats,
+    matches_cooldown_search,
+    resolve_cooldown_list_range,
+    select_cooldown_zone_rows,
+)
 from app.services.isolation_stats import compute_isolation_stats, resolve_stats_range
 
 QUARANTINE_RECOVERY_PRIORITY = -2_000_000_000
@@ -1257,6 +1265,200 @@ class AccountService:
             "total": len(values),
             "page": page,
             "pageSize": page_size,
+        }
+
+    def cooldown_stats(self, *, start: str = "", end: str = "") -> dict[str, Any]:
+        range_start, range_end = resolve_stats_range(start, end)
+        rows = (
+            self.request_audits.tps_cooldown_verifications()
+            if self.request_audits is not None
+            else []
+        )
+        account_ids = sorted(
+            {
+                int(row.get("account_id") or 0)
+                for row in rows
+                if int(row.get("account_id") or 0) > 0
+            }
+        )
+        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
+        return compute_cooldown_stats(
+            rows=rows,
+            assessments=assessments,
+            start=range_start,
+            end=range_end,
+            min_count=int(self.settings.request_audit_tps_only_min_count),
+            cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
+            isolation_enabled=bool(self.settings.request_audit_isolation_enabled),
+        )
+
+    async def list_cooldown_zone(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str = "",
+        status: str = "cooling",
+        start: str = "",
+        end: str = "",
+    ) -> dict[str, Any]:
+        normalized_status = str(status or "cooling").strip().lower() or "cooling"
+        if normalized_status not in ALLOWED_STATUSES:
+            raise ValueError("冷却状态仅支持 cooling、expired 或 all")
+        if self.request_audits is None:
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "pageSize": page_size,
+            }
+        range_start = range_end = None
+        if normalized_status in {"expired", "all"}:
+            range_start, range_end = resolve_cooldown_list_range(start, end)
+        selected = select_cooldown_zone_rows(
+            self.request_audits.tps_cooldown_verifications(),
+            status=normalized_status,
+            start=range_start,
+            end=range_end,
+        )
+        account_ids = [int(item["account_id"]) for item in selected]
+        upstream_by_id: dict[int, dict[str, Any]] = {}
+        if account_ids:
+            upstream_items = await self.client.get_accounts_by_ids(set(account_ids))
+            upstream_by_id = {
+                int(item.get("id") or 0): item for item in upstream_items
+            }
+        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
+        values: list[dict[str, Any]] = []
+        for item in selected:
+            account_id = int(item["account_id"])
+            upstream = upstream_by_id.get(account_id)
+            missing_upstream = upstream is None
+            if missing_upstream:
+                upstream = self._missing_upstream_stub(account_id)
+            assessment = assessments.get(account_id)
+            payload = build_cooldown_zone_item(
+                account_id=account_id,
+                status=str(item["status"]),
+                verification=item["verification"],
+                cooldown_count=int(item["cooldown_count"]),
+                upstream=upstream,
+                missing_upstream=missing_upstream,
+                quarantined=self._is_quarantined(assessment),
+                tps_min_count=int(self.settings.request_audit_tps_only_min_count),
+                cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
+            )
+            if matches_cooldown_search(payload, search):
+                values.append(payload)
+        offset = (page - 1) * page_size
+        return {
+            "items": values[offset : offset + page_size],
+            "total": len(values),
+            "page": page,
+            "pageSize": page_size,
+        }
+
+    async def release_cooldown_zone(
+        self,
+        *,
+        account_ids: list[int],
+    ) -> dict[str, Any]:
+        unique_ids = list(
+            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
+        )
+        if not unique_ids:
+            raise ValueError("至少选择一个账号")
+        empty = {
+            "requested": len(unique_ids),
+            "eligible": 0,
+            "released": 0,
+            "reenabled": 0,
+            "skippedAccountIds": [],
+            "skippedNotCoolingAccountIds": sorted(unique_ids),
+            "skippedQuarantinedAccountIds": [],
+            "failedAccountIds": [],
+            "failures": [],
+        }
+        if self.request_audits is None:
+            return empty
+        latest = self.request_audits.latest_tps_cooldowns_for_accounts(unique_ids)
+        not_cooling: list[int] = []
+        eligible_ids: list[int] = []
+        for account_id in unique_ids:
+            row = latest.get(account_id)
+            if (
+                not isinstance(row, dict)
+                or str(row.get("action_status") or "") != "cooled"
+            ):
+                not_cooling.append(account_id)
+                continue
+            eligible_ids.append(account_id)
+        locked_ids = self.probes.account_settings_locked_ids(set(eligible_ids))
+        skipped_protected = set(locked_ids)
+        skipped_quarantined: list[int] = []
+        released = 0
+        reenabled = 0
+        failures: list[dict[str, Any]] = []
+        now = utc_now()
+        for account_id in eligible_ids:
+            if account_id in locked_ids:
+                continue
+            row = latest[account_id]
+            recommendation = row.get("egress_recommendation")
+            if not isinstance(recommendation, dict):
+                recommendation = {}
+            try:
+                result = await self.release_tps_cooldown(
+                    account_id,
+                    disabled_by_cooldown=bool(
+                        recommendation.get("disabledByCooldown")
+                    ),
+                )
+            except Exception as exc:
+                failures.append({"id": account_id, "error": str(exc)})
+                continue
+            action_status = str(result.get("actionStatus") or "")
+            if action_status == "task_protected":
+                skipped_protected.add(account_id)
+                continue
+            if action_status not in {"cooldown_expired", "already_quarantined"}:
+                failures.append(
+                    {
+                        "id": account_id,
+                        "error": action_status or "释放冷却失败",
+                    }
+                )
+                continue
+            audit_id = str(row.get("audit_upstream_id") or "")
+            if audit_id:
+                self.request_audits.update_verification(
+                    audit_id,
+                    {
+                        "action_status": "cooldown_expired",
+                        "action_error": "",
+                        "egress_recommendation": {
+                            **recommendation,
+                            "expiredAt": now.isoformat(),
+                            "releasedManually": True,
+                        },
+                    },
+                )
+            if action_status == "already_quarantined":
+                skipped_quarantined.append(account_id)
+                continue
+            released += 1
+            if result.get("reenabled"):
+                reenabled += 1
+        return {
+            "requested": len(unique_ids),
+            "eligible": len(eligible_ids),
+            "released": released,
+            "reenabled": reenabled,
+            "skippedAccountIds": sorted(skipped_protected),
+            "skippedNotCoolingAccountIds": sorted(not_cooling),
+            "skippedQuarantinedAccountIds": sorted(skipped_quarantined),
+            "failedAccountIds": sorted(int(item["id"]) for item in failures),
+            "failures": failures,
         }
 
     async def delete_local_quarantine_records(
