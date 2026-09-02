@@ -158,29 +158,35 @@ export function previewItemsFromSamples(
     }))
 }
 
+export function previewItemFromAccount(
+  account: UpstreamAccount,
+  extras?: { sampleCount?: number; latestSampleAt?: string | null }
+): ResultPreviewItem {
+  const accountId = Number(account.id)
+  const sampleCount =
+    extras?.sampleCount ?? account.assessment.sample_count ?? 0
+  return {
+    id: String(accountId),
+    runId: '',
+    accountId,
+    accountName: account.name || account.email || `账号 ${accountId}`,
+    accountEmail: account.email,
+    accountCreatedAt: account.createdAt,
+    createdAt: extras?.latestSampleAt ?? account.assessment.latest_sample_at,
+    rounds: sampleCount || undefined,
+    completedSteps: sampleCount
+      ? Math.min(sampleCount, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
+      : undefined,
+    source: 'account' as const,
+  }
+}
+
 export function previewItemsFromAccounts(
   accounts: UpstreamAccount[]
 ): ResultPreviewItem[] {
   return accounts
     .filter((account) => (account.assessment.sample_count ?? 0) > 0)
-    .map((account) => {
-      const accountId = Number(account.id)
-      return {
-        id: String(accountId),
-        runId: '',
-        accountId,
-        accountName: account.name || account.email || `账号 ${accountId}`,
-        accountEmail: account.email,
-        accountCreatedAt: account.createdAt,
-        createdAt: account.assessment.latest_sample_at,
-        rounds: account.assessment.sample_count,
-        completedSteps: Math.min(
-          account.assessment.sample_count ?? 0,
-          ACCOUNT_PREVIEW_SAMPLE_LIMIT
-        ),
-        source: 'account' as const,
-      }
-    })
+    .map((account) => previewItemFromAccount(account))
 }
 
 function previewItemsFromAccountPreview(

@@ -19,6 +19,7 @@ import {
   type CooldownAccount,
   type CooldownReleaseResult,
 } from '@/lib/api'
+import { hasAccountPreviewSamples } from '@/lib/preview-payload'
 import {
   cn,
   formatDate,
@@ -72,7 +73,7 @@ import {
 import { CooldownStatsBoard } from '@/features/monitor/components/cooldown-stats-board'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import {
-  previewItemsFromAccounts,
+  previewItemFromAccount,
   ResultPreviewGallery,
   type ResultPreviewItem,
 } from '@/features/monitor/components/result-preview-gallery'
@@ -306,12 +307,33 @@ export function CooldownPage() {
           queryKey: ['account', account.id],
           queryFn: () => api.account(account.id),
         })
-        const items = previewItemsFromAccounts([data.account])
-        if (!items.length) {
+        let samplePage:
+          | { total?: number; items?: typeof data.history.samples }
+          | undefined
+        if (!hasAccountPreviewSamples(data)) {
+          samplePage = await client.fetchQuery({
+            queryKey: ['account-samples-preview-check', account.id],
+            queryFn: () =>
+              api.accountSamples(account.id, { page: 1, pageSize: 1 }),
+          })
+        }
+        if (!hasAccountPreviewSamples(data, samplePage)) {
           toast.error('该账号没有可预览的样本')
           return
         }
-        setPreviewItems(items)
+        setPreviewItems([
+          previewItemFromAccount(data.account, {
+            sampleCount:
+              data.account.assessment.sample_count ||
+              data.history.samples.length ||
+              samplePage?.total ||
+              0,
+            latestSampleAt:
+              data.account.assessment.latest_sample_at ||
+              data.history.samples[0]?.created_at ||
+              samplePage?.items?.[0]?.created_at,
+          }),
+        ])
         setPreviewIndex(0)
       } catch (error) {
         toast.error(getErrorMessage(error))

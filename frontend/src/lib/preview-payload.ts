@@ -83,6 +83,27 @@ export function slimAccountRun(run: ProbeRun): AccountPreviewRun {
   }
 }
 
+export function hasAccountPreviewSamples(
+  data: {
+    account?: {
+      assessment?: { sample_count?: number | null } | null
+    } | null
+    history?: {
+      samples?: unknown[] | null
+      runs?: Array<{ completed_steps?: number | null }> | null
+    } | null
+  },
+  samplePage?: { total?: number | null; items?: unknown[] | null } | null
+): boolean {
+  if ((data.account?.assessment?.sample_count ?? 0) > 0) return true
+  if ((data.history?.samples?.length ?? 0) > 0) return true
+  if ((data.history?.runs ?? []).some((run) => (run.completed_steps ?? 0) > 0)) {
+    return true
+  }
+  if ((samplePage?.total ?? 0) > 0) return true
+  return (samplePage?.items?.length ?? 0) > 0
+}
+
 export function slimAccountPreview(
   data: AccountDetailResponse
 ): AccountPreviewPayload {

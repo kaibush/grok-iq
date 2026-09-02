@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeProfile, ProbeRun, ProbeSample } from '@/lib/api'
 import {
+  hasAccountPreviewSamples,
   slimAccountPreview,
   slimPreviewResponseText,
   slimRequestAuditRecord,
@@ -168,5 +169,53 @@ describe('slimRequestAuditRecord', () => {
     } as never
     expect(slimRequestAuditRecord(record).probeSamples).toEqual([])
     expect(slimRequestAuditRecord(record).probeSampleCount).toBe(2)
+  })
+})
+
+describe('hasAccountPreviewSamples', () => {
+  const emptyAccount = {
+    account: {
+      id: '9',
+      name: 'cooldown-account',
+      email: 'cool@example.com',
+      provider: 'grok',
+      enabled: true,
+      ssoAvailable: false,
+      assessment: {
+        account_id: 9,
+        monitor_status: 'normal',
+        risk_score: 0,
+        sample_count: 0,
+        anomaly_count: 0,
+        risk_reasons: [],
+      },
+    },
+    history: {
+      samples: [],
+      runs: [],
+      byTarget: [],
+    },
+  }
+
+  it('opens preview when history has samples even if assessment count is 0', () => {
+    expect(
+      hasAccountPreviewSamples({
+        ...emptyAccount,
+        history: {
+          ...emptyAccount.history,
+          samples: [sample({ account_id: 9 })],
+        },
+      })
+    ).toBe(true)
+  })
+
+  it('opens preview from the samples page used by 查看样本', () => {
+    expect(
+      hasAccountPreviewSamples(emptyAccount, { total: 2, items: [sample()] })
+    ).toBe(true)
+  })
+
+  it('rejects accounts with no sample history', () => {
+    expect(hasAccountPreviewSamples(emptyAccount)).toBe(false)
   })
 })
