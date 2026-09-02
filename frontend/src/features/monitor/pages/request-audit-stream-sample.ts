@@ -22,8 +22,7 @@ export function streamSampleDiagnostics(audit: {
   const hasEncryptedThinking = Boolean(sample?.hasEncryptedThinking)
   const hasOutput = Boolean(sample?.hasVisibleOutput || sample?.hasToolOutput)
   const thinkingThenOutput = Boolean(sample?.thinkingThenOutput)
-  const reasoningMismatch =
-    hasSample && audit.reasoningTokens > 0 && !hasThinking && !hasEncryptedThinking
+  const reasoningMismatch = hasSample && audit.reasoningTokens > 0 && !hasThinking
   const visibleTokens = Math.max(0, audit.outputTokens - audit.reasoningTokens)
   const outputMismatch = hasSample && visibleTokens > 0 && !hasOutput
   const thinkingWindow =
@@ -50,7 +49,7 @@ export function streamSampleWarnings(diagnostics: StreamSampleDiagnostics): stri
   const warnings: string[] = []
   if (diagnostics.reasoningMismatch) {
     warnings.push(
-      '用量报告了推理 Token，但流里没有思考正文或加密思考证据。高 Token/s 时优先核对这一项。'
+      '用量报告了推理 Token，但流里没有明文思考正文。只有 Token 数字或加密思考、没有思考文本时，通常是降智。'
     )
   }
   if (diagnostics.outputMismatch) {
@@ -61,10 +60,7 @@ export function streamSampleWarnings(diagnostics: StreamSampleDiagnostics): stri
       '思考文本在极短时间内集中到达，可能是缓冲后一次性刷出，会把 Token/s 抬得很高。'
     )
   }
-  if (
-    (diagnostics.hasThinking || diagnostics.hasEncryptedThinking) &&
-    !diagnostics.hasOutput
-  ) {
+  if (diagnostics.hasThinking && !diagnostics.hasOutput) {
     warnings.push('已看到思考内容，但思考结束后没有实体输出。')
   }
   return warnings

@@ -34,6 +34,22 @@ describe('streamSampleDiagnostics', () => {
     expect(result.reasoningMismatch).toBe(false)
   })
 
+  it('treats encrypted thinking without plaintext as a reasoning mismatch', () => {
+    const result = streamSampleDiagnostics({
+      reasoningTokens: 400,
+      outputTokens: 480,
+      streamSample: {
+        hasEncryptedThinking: true,
+        hasVisibleOutput: true,
+        outputChars: 20,
+      },
+    })
+    expect(result.hasThinking).toBe(false)
+    expect(result.hasEncryptedThinking).toBe(true)
+    expect(result.reasoningMismatch).toBe(true)
+    expect(streamSampleWarnings(result)[0]).toContain('没有明文思考正文')
+  })
+
   it('does not treat historical rows without a sample as mismatches', () => {
     const result = streamSampleDiagnostics({
       reasoningTokens: 900,
