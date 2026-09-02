@@ -2819,8 +2819,9 @@ class RequestAuditService:
             if _finite_float(row.get("tps")) is not None
             and float(row.get("tps") or 0) > 0
         ]
-        if account_values is None:
+        if account_values is None or evaluations is None:
             evaluations = evaluations or self._audit_risk_evaluations(records)
+        if account_values is None:
             account_values = self._account_payloads(
                 records, evaluations=evaluations
             )
@@ -2828,6 +2829,18 @@ class RequestAuditService:
             1 for row in account_values if row["riskLevel"] in {"watch", "high"}
         )
         high = sum(1 for row in account_values if row["riskLevel"] == "high")
+        watch_requests = 0
+        high_requests = 0
+        reasoning_zero_requests = 0
+        for row in records:
+            evaluation = self._evaluation_for(row, evaluations)
+            risk_name = evaluation.classification.name
+            if risk_name == "high":
+                high_requests += 1
+            elif risk_name == "watch":
+                watch_requests += 1
+            if evaluation.reasoning_detected:
+                reasoning_zero_requests += 1
         return {
             "requests": len(records),
             "measuredRequests": len(measured),
@@ -2835,11 +2848,9 @@ class RequestAuditService:
             "averageTps": round(sum(measured) / len(measured), 1) if measured else 0,
             "p95Tps": round(_p95(measured), 1),
             "maxTps": round(max(measured, default=0), 1),
-            "reasoningZeroRequests": sum(
-                1
-                for row in records
-                if self._evaluation_for(row, evaluations).reasoning_detected
-            ),
+            "reasoningZeroRequests": reasoning_zero_requests,
+            "watchRequests": watch_requests,
+            "highRiskRequests": high_requests,
             "watchAccounts": watch,
             "highRiskAccounts": high,
             "accountCount": len(account_values),

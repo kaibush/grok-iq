@@ -29,6 +29,7 @@ import {
   ListFilter,
   LockKeyhole,
   Network,
+  Percent,
   Play,
   RefreshCw,
   ScanSearch,
@@ -932,12 +933,21 @@ function AccountRiskEvidenceCell({
   )
 }
 
+function formatRatePercent(part: number, total: number) {
+  if (total <= 0) return '—'
+  const percent = (part / total) * 100
+  if (percent <= 0) return '0%'
+  if (percent >= 100) return '100%'
+  return `${formatNumber(percent, 1)}%`
+}
+
 function MetricCard({
   icon: Icon,
   label,
   value,
   detail,
   hint,
+  extra,
   tone = 'default',
 }: {
   icon: LucideIcon
@@ -945,6 +955,7 @@ function MetricCard({
   value: string
   detail: string
   hint?: ReactNode
+  extra?: ReactNode
   tone?: 'default' | 'info' | 'warning' | 'danger'
 }) {
   return (
@@ -985,6 +996,7 @@ function MetricCard({
           <div className='mt-1 truncate text-xs text-muted-foreground'>
             {detail}
           </div>
+          {extra}
         </div>
       </CardContent>
     </Card>
@@ -1716,6 +1728,23 @@ export function RequestAuditsPage() {
   })
 
   const summary = summaryQuery.data?.summary
+  const requestQuality = useMemo(() => {
+    const total = summary?.requests ?? 0
+    const watch = summary?.watchRequests ?? 0
+    const high = summary?.highRiskRequests ?? 0
+    const abnormal = watch + high
+    const normal = Math.max(0, total - abnormal)
+    return {
+      total,
+      watch,
+      high,
+      abnormal,
+      normal,
+      normalShare: total > 0 ? (normal / total) * 100 : 0,
+      watchShare: total > 0 ? (watch / total) * 100 : 0,
+      highShare: total > 0 ? (high / total) * 100 : 0,
+    }
+  }, [summary])
   const accounts = useMemo(
     () => summaryQuery.data?.accounts ?? [],
     [summaryQuery.data?.accounts]
@@ -2468,13 +2497,54 @@ export function RequestAuditsPage() {
               }
             />
           ) : null}
-          <div className={hasSummary ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-5' : 'hidden'}>
+          <div className={hasSummary ? 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6' : 'hidden'}>
             <MetricCard
               icon={Activity}
               label='窗口内请求'
               value={formatNumber(summary?.requests ?? 0, 0)}
               detail={`已测 TPS ${formatNumber(summary?.measuredRequests ?? 0, 0)} 条`}
               tone='info'
+            />
+            <MetricCard
+              icon={Percent}
+              label='正常率'
+              value={formatRatePercent(requestQuality.normal, requestQuality.total)}
+              detail={`异常率 ${formatRatePercent(
+                requestQuality.abnormal,
+                requestQuality.total
+              )}`}
+              hint='按当前窗口全部请求计算。异常请求 = 观察 + 高风险，正常率是其余请求占比。'
+              extra={
+                requestQuality.total > 0 ? (
+                  <>
+                    <div className='mt-2 flex h-1.5 overflow-hidden rounded-full bg-muted'>
+                      <span
+                        className='bg-emerald-500'
+                        style={{ width: `${requestQuality.normalShare}%` }}
+                      />
+                      <span
+                        className='bg-amber-500'
+                        style={{ width: `${requestQuality.watchShare}%` }}
+                      />
+                      <span
+                        className='bg-rose-500'
+                        style={{ width: `${requestQuality.highShare}%` }}
+                      />
+                    </div>
+                    <div className='mt-1 text-[11px] text-muted-foreground'>
+                      观察 {formatNumber(requestQuality.watch, 0)} · 高风险{' '}
+                      {formatNumber(requestQuality.high, 0)}
+                    </div>
+                  </>
+                ) : null
+              }
+              tone={
+                requestQuality.high > 0
+                  ? 'danger'
+                  : requestQuality.watch > 0
+                    ? 'warning'
+                    : 'info'
+              }
             />
             <MetricCard
               icon={Gauge}

@@ -1001,6 +1001,8 @@ export type RequestAuditSummary = {
   p95Tps: number
   maxTps: number
   reasoningZeroRequests: number
+  watchRequests: number
+  highRiskRequests: number
   watchAccounts: number
   highRiskAccounts: number
   accountCount: number
