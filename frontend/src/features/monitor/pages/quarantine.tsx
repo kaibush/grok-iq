@@ -13,12 +13,14 @@ import {
   Eye,
   Images,
   Loader2,
+  MoreHorizontal,
   Network,
   Pencil,
   Play,
   Plus,
   PowerOff,
   RefreshCw,
+  ScrollText,
   Search,
   Server,
   ShieldAlert,
@@ -61,6 +63,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -102,6 +110,7 @@ import {
   ServerPagination,
   ServerTableLoadingOverlay,
 } from '@/components/server-pagination'
+import { AccountRequestLedgerDialog } from '@/features/monitor/components/account-request-ledger-dialog'
 import { AccountSampleExplorer } from '@/features/monitor/components/account-sample-explorer'
 import {
   previewItemsFromAccounts,
@@ -824,6 +833,9 @@ export function QuarantinePage() {
   const [noteEditorId, setNoteEditorId] = useState<number | null>(null)
   const [upstreamOpen, setUpstreamOpen] = useState(false)
   const [upstreamId, setUpstreamId] = useState<number | null>(null)
+  const [ledgerAccount, setLedgerAccount] = useState<UpstreamAccount | null>(
+    null
+  )
   const [resultPreview, setResultPreview] = useState<{
     page: number
     index: number
@@ -1040,6 +1052,9 @@ export function QuarantinePage() {
   const openAccountSamples = useCallback((id: number) => {
     setDetailId(id)
     setDetailOpen(true)
+  }, [])
+  const openAccountLedger = useCallback((account: UpstreamAccount) => {
+    setLedgerAccount(account)
   }, [])
   const openAccountUpstream = useCallback((id: number) => {
     setUpstreamId(id)
@@ -1840,6 +1855,7 @@ export function QuarantinePage() {
                   onNoteEditorOpenChange={setNoteEditorOpen}
                   onOpenUpstream={openAccountUpstream}
                   onOpenSamples={openAccountSamples}
+                  onOpenLedger={openAccountLedger}
                   onPreview={(account) =>
                     openAccountPreview(Number(account.id), true)
                   }
@@ -2201,6 +2217,14 @@ export function QuarantinePage() {
         }
         perspective='account'
       />
+      <AccountRequestLedgerDialog
+        key={ledgerAccount ? Number(ledgerAccount.id) : 'closed'}
+        open={ledgerAccount != null}
+        account={ledgerAccount}
+        onOpenChange={(open) => {
+          if (!open) setLedgerAccount(null)
+        }}
+      />
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent size='wide' className='overflow-hidden'>
           <DialogHeader className='shrink-0'>
@@ -2302,6 +2326,7 @@ function QuarantineTable({
   onNoteEditorOpenChange,
   onOpenUpstream,
   onOpenSamples,
+  onOpenLedger,
   onPreview,
   onProbe,
 }: {
@@ -2314,6 +2339,7 @@ function QuarantineTable({
   onNoteEditorOpenChange: (id: number, open: boolean) => void
   onOpenUpstream: (id: number) => void
   onOpenSamples: (id: number) => void
+  onOpenLedger: (account: UpstreamAccount) => void
   onPreview: (account: UpstreamAccount) => void
   onProbe: (account: UpstreamAccount) => void
 }) {
@@ -2356,6 +2382,7 @@ function QuarantineTable({
               onNoteOpenChange={(open) => onNoteEditorOpenChange(id, open)}
               onOpenUpstream={() => onOpenUpstream(id)}
               onOpenSamples={() => onOpenSamples(id)}
+              onOpenLedger={() => onOpenLedger(account)}
               onPreview={() => onPreview(account)}
               onProbe={() => onProbe(account)}
             />
@@ -2374,6 +2401,7 @@ function QuarantineRow({
   onNoteOpenChange,
   onOpenUpstream,
   onOpenSamples,
+  onOpenLedger,
   onPreview,
   onProbe,
 }: {
@@ -2384,6 +2412,7 @@ function QuarantineRow({
   onNoteOpenChange: (open: boolean) => void
   onOpenUpstream: () => void
   onOpenSamples: () => void
+  onOpenLedger: () => void
   onPreview: () => void
   onProbe: () => void
 }) {
@@ -2467,26 +2496,8 @@ function QuarantineRow({
           onOpenChange={onNoteOpenChange}
         />
       </TableCell>
-      <TableCell className='text-right'>
+      <TableCell className='w-32 text-right'>
         <div className='inline-flex items-center justify-end'>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size='icon'
-                variant='ghost'
-                disabled={Boolean(account.missingUpstream)}
-                onClick={onProbe}
-                aria-label={`为 ${accountLabel} 创建探针任务`}
-              >
-                <Play />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {account.missingUpstream
-                ? '缺少上游记录，无法创建探针'
-                : '创建探针任务'}
-            </TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -2513,19 +2524,43 @@ function QuarantineRow({
             </TooltipTrigger>
             <TooltipContent>预览结果</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size='icon'
-                variant='ghost'
-                onClick={onOpenSamples}
-                aria-label={`查看 ${accountLabel} 的样本`}
+          <DropdownMenu modal={false}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className='inline-flex'>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size='icon'
+                      variant='ghost'
+                      aria-label={`${accountLabel} 的更多操作`}
+                    >
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>更多</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align='end'>
+              <DropdownMenuItem
+                disabled={Boolean(account.missingUpstream)}
+                onSelect={onProbe}
               >
+                <Play />
+                {account.missingUpstream
+                  ? '缺少上游，无法创建探针'
+                  : '创建探针任务'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onOpenSamples}>
                 <Eye />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>查看样本</TooltipContent>
-          </Tooltip>
+                查看样本
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onOpenLedger}>
+                <ScrollText />
+                查看请求流水
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </TableCell>
     </TableRow>
