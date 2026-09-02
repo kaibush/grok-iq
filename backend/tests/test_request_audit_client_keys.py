@@ -102,9 +102,11 @@ async def test_list_page_filters_client_key_name():
     assert page["total"] == 1
     assert page["items"][0]["clientKeyName"] == "production"
     assert page["items"][0]["clientKeyId"] == "9"
-    assert page["clientKeys"] == [
-        {"id": "9", "name": "production"},
-        {"id": "11", "name": "staging"},
+    assert [
+        (item["id"], item["name"], item["requestCount"]) for item in page["clientKeys"]
+    ] == [
+        ("9", "production", 1),
+        ("11", "staging", 1),
     ]
 
     by_id = await service.list_page(page=1, page_size=50, client_key="11")
@@ -152,3 +154,38 @@ async def test_list_page_filters_exact_account_id():
 
     by_search = await service.list_page(page=1, page_size=50, account="12")
     assert {item["accountId"] for item in by_search["items"]} == {12, 120}
+
+
+def test_client_key_options_aggregates_window_activity():
+    now = utc_now()
+    earlier = now - timedelta(minutes=8)
+    values = RequestAuditService._client_key_options(
+        [
+            {
+                "client_key_id": "9",
+                "client_key_name": "production",
+                "created_at": earlier,
+            },
+            {
+                "client_key_id": "9",
+                "client_key_name": "production",
+                "created_at": now,
+            },
+            {
+                "client_key_id": "11",
+                "client_key_name": "staging",
+                "created_at": earlier,
+            },
+            {
+                "client_key_id": "",
+                "client_key_name": "",
+                "created_at": now,
+            },
+        ]
+    )
+    by_id = {item["id"]: item for item in values}
+    assert by_id["9"]["requestCount"] == 2
+    assert by_id["11"]["requestCount"] == 1
+    assert by_id["unlabeled"]["name"] == "未记录 Key"
+    assert by_id["unlabeled"]["requestCount"] == 1
+    assert values[0]["id"] == "9"

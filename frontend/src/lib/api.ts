@@ -1126,6 +1126,8 @@ export type RequestAuditScanResult = {
 export type RequestAuditClientKeyOption = {
   id: string
   name: string
+  requestCount?: number
+  lastSeenAt?: string | null
 }
 
 export type RequestAuditPage = {

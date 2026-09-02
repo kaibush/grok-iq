@@ -2552,30 +2552,55 @@ class RequestAuditService:
         return items
 
     @staticmethod
-    def _client_key_options(records: list[dict[str, Any]]) -> list[dict[str, str]]:
-        options: dict[str, dict[str, str]] = {}
-        unlabeled = False
+    def _client_key_options(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        options: dict[str, dict[str, Any]] = {}
+        unlabeled_count = 0
+        unlabeled_last: Any = None
         for item in records:
             key_id = str(item.get("client_key_id") or "").strip()
             key_name = str(item.get("client_key_name") or "").strip()
+            count = max(1, int(item.get("request_count") or 1))
+            last_seen = item.get("last_seen_at") or item.get("created_at")
+            last_iso = _iso(last_seen)
             if not key_id and not key_name:
-                unlabeled = True
+                unlabeled_count += count
+                if last_iso and (not unlabeled_last or last_iso > unlabeled_last):
+                    unlabeled_last = last_iso
                 continue
             identity = key_id or key_name
             current = options.get(identity)
             if current is None:
-                options[identity] = {"id": identity, "name": key_name}
-            elif key_name and not current["name"]:
+                options[identity] = {
+                    "id": identity,
+                    "name": key_name,
+                    "requestCount": count,
+                    "lastSeenAt": last_iso,
+                }
+                continue
+            current["requestCount"] = int(current.get("requestCount") or 0) + count
+            if key_name and not current.get("name"):
                 current["name"] = key_name
-        values = sorted(
-            options.values(),
+            current_last = str(current.get("lastSeenAt") or "")
+            if last_iso and last_iso > current_last:
+                current["lastSeenAt"] = last_iso
+        values = list(options.values())
+        if unlabeled_count:
+            values.append(
+                {
+                    "id": "unlabeled",
+                    "name": "未记录 Key",
+                    "requestCount": unlabeled_count,
+                    "lastSeenAt": unlabeled_last,
+                }
+            )
+        values.sort(
             key=lambda item: (
+                -int(item.get("requestCount") or 0),
+                1 if item.get("id") == "unlabeled" else 0,
                 str(item.get("name") or "").casefold(),
                 str(item.get("id") or ""),
-            ),
+            )
         )
-        if unlabeled:
-            values.append({"id": "unlabeled", "name": "未记录 Key"})
         return values
 
     @staticmethod

@@ -136,6 +136,7 @@ import { AuthStatusIndicator } from '@/features/monitor/components/account-state
 import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-node-names'
 import { FilterChip } from '@/features/monitor/components/filter-chip'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
+import { RequestAuditClientBoard } from '@/features/monitor/components/request-audit-client-board'
 import {
   formatSampleWindow,
   streamSampleDiagnostics,
@@ -3197,7 +3198,16 @@ export function RequestAuditsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value='ledger' className='mt-0'>
+        <TabsContent value='ledger' className='mt-0 space-y-4'>
+          <RequestAuditClientBoard
+            items={clientKeyOptions}
+            selectedId={auditClientKey}
+            loading={recordsQuery.isLoading && !recordsQuery.data}
+            onSelect={(id) => {
+              setAuditClientKey(id)
+              setPage(1)
+            }}
+          />
           <Card>
             <CardHeader className='border-b'>
               <CardTitle>请求审计流水</CardTitle>
@@ -3333,11 +3343,14 @@ export function RequestAuditsPage() {
                                     }}
                                   >
                                     <span className='text-sm'>{label}</span>
-                                    {item.name && item.id !== 'unlabeled' ? (
-                                      <span className='text-[11px] text-muted-foreground'>
-                                        #{item.id}
-                                      </span>
-                                    ) : null}
+                                    <span className='text-[11px] text-muted-foreground'>
+                                      {item.name && item.id !== 'unlabeled'
+                                        ? `#${item.id}`
+                                        : null}
+                                      {item.requestCount != null
+                                        ? `${item.name && item.id !== 'unlabeled' ? ' · ' : ''}${item.requestCount} 次`
+                                        : ''}
+                                    </span>
                                   </button>
                                 )
                               })}

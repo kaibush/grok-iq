@@ -794,18 +794,25 @@ class RequestAuditRepository:
             select(
                 RequestAuditRecord.client_key_id,
                 RequestAuditRecord.client_key_name,
+                func.count().label("request_count"),
+                func.max(RequestAuditRecord.created_at).label("last_seen_at"),
             )
             .where(
                 RequestAuditRecord.created_at >= start,
                 RequestAuditRecord.created_at < end,
             )
-            .distinct()
+            .group_by(
+                RequestAuditRecord.client_key_id,
+                RequestAuditRecord.client_key_name,
+            )
         )
         with self.database.session() as session:
             return [
                 {
-                    "client_key_id": str(row[0] or ""),
-                    "client_key_name": str(row[1] or ""),
+                    "client_key_id": str(row._mapping["client_key_id"] or ""),
+                    "client_key_name": str(row._mapping["client_key_name"] or ""),
+                    "request_count": int(row._mapping["request_count"] or 0),
+                    "last_seen_at": row._mapping["last_seen_at"],
                 }
                 for row in session.execute(stmt).all()
             ]

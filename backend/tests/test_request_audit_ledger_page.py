@@ -231,7 +231,11 @@ async def test_list_page_sql_filters_match_python_filters(tmp_path: Path):
     )
     assert unlabeled["total"] == 1
     assert unlabeled["items"][0]["id"] == "3"
-    assert unlabeled["clientKeys"][-1] == {"id": "unlabeled", "name": "未记录 Key"}
+    unlabeled_key = next(
+        item for item in unlabeled["clientKeys"] if item["id"] == "unlabeled"
+    )
+    assert unlabeled_key["name"] == "未记录 Key"
+    assert unlabeled_key["requestCount"] == 1
 
 
 async def test_list_page_risk_filter_still_scans_window(tmp_path: Path):
