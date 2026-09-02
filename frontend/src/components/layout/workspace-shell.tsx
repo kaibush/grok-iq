@@ -6,6 +6,7 @@ import {
   Loader2,
   ShieldAlert,
   ShieldBan,
+  Timer,
   UsersRound,
   X,
 } from 'lucide-react'
@@ -36,6 +37,11 @@ const workspacePages = {
       default: mod.QuarantinePage,
     }))
   ),
+  cooldown: lazy(() =>
+    import('@/features/monitor/pages/cooldown').then((mod) => ({
+      default: mod.CooldownPage,
+    }))
+  ),
   runs: lazy(() =>
     import('@/features/monitor/pages/runs').then((mod) => ({
       default: mod.RunsPage,
@@ -51,6 +57,7 @@ const workspacePages = {
 const workspaceIcons = {
   accounts: UsersRound,
   quarantine: ShieldBan,
+  cooldown: Timer,
   runs: Activity,
   'request-audits': ShieldAlert,
 } as const
@@ -58,6 +65,7 @@ const workspaceIcons = {
 const workspaceAccents: Record<WorkspaceTabId, string> = {
   accounts: 'text-sky-600 dark:text-sky-400',
   quarantine: 'text-rose-600 dark:text-rose-400',
+  cooldown: 'text-orange-600 dark:text-orange-400',
   runs: 'text-violet-600 dark:text-violet-400',
   'request-audits': 'text-amber-600 dark:text-amber-400',
 }
@@ -67,6 +75,8 @@ const workspaceActive: Record<WorkspaceTabId, string> = {
     'bg-sky-500/15 text-sky-800 ring-1 ring-sky-500/30 dark:bg-sky-500/20 dark:text-sky-50 dark:ring-sky-400/30',
   quarantine:
     'bg-rose-500/15 text-rose-800 ring-1 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-50 dark:ring-rose-400/30',
+  cooldown:
+    'bg-orange-500/15 text-orange-800 ring-1 ring-orange-500/30 dark:bg-orange-500/20 dark:text-orange-50 dark:ring-orange-400/30',
   runs: 'bg-violet-500/15 text-violet-800 ring-1 ring-violet-500/30 dark:bg-violet-500/20 dark:text-violet-50 dark:ring-violet-400/30',
   'request-audits':
     'bg-amber-500/15 text-amber-900 ring-1 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-50 dark:ring-amber-400/30',
@@ -98,11 +108,19 @@ function shouldDropWorkspaceQuery(
       root === 'run-preview-samples'
     )
   }
+  if (id === 'cooldown') {
+    return (
+      root === 'accounts' &&
+      (second === 'cooldowns' || second === 'cooldown-stats')
+    )
+  }
   if (id === 'accounts') {
     return (
       root === 'accounts' &&
       second !== 'quarantine' &&
-      second !== 'quarantine-stats'
+      second !== 'quarantine-stats' &&
+      second !== 'cooldowns' &&
+      second !== 'cooldown-stats'
     )
   }
   return false

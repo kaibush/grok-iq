@@ -732,7 +732,7 @@ function AuditIsolationPanel({
           />
           <RiskStatusRule
             status='冷却'
-            description={`高速 TPS 连续 ${form.requestAuditTpsOnlyMinCount} 次后，先停用账号 ${form.requestAuditTpsCooldownMinutes} 分钟，不进入隔离区；到期自动恢复调度。`}
+            description={`高速 TPS 连续 ${form.requestAuditTpsOnlyMinCount} 次后，先停用账号 ${form.requestAuditTpsCooldownMinutes} 分钟，不进入隔离区；到期自动恢复调度。可在左侧冷却区查看。`}
             tone='warning'
             divided
           />

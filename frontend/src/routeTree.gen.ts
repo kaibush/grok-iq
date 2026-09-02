@@ -35,6 +35,7 @@ import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
 import { Route as AuthenticatedGuideIndexRouteImport } from './routes/_authenticated/guide/index'
 import { Route as AuthenticatedEgressNodesIndexRouteImport } from './routes/_authenticated/egress-nodes/index'
+import { Route as AuthenticatedCooldownIndexRouteImport } from './routes/_authenticated/cooldown/index'
 import { Route as AuthenticatedAccountsIndexRouteImport } from './routes/_authenticated/accounts/index'
 import { Route as AuthenticatedSettingsVersionRouteImport } from './routes/_authenticated/settings/version'
 import { Route as AuthenticatedSettingsRiskRouteImport } from './routes/_authenticated/settings/risk'
@@ -187,6 +188,12 @@ const AuthenticatedEgressNodesIndexRoute =
     path: '/egress-nodes/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCooldownIndexRoute =
+  AuthenticatedCooldownIndexRouteImport.update({
+    id: '/cooldown/',
+    path: '/cooldown/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAccountsIndexRoute =
   AuthenticatedAccountsIndexRouteImport.update({
     id: '/accounts/',
@@ -294,6 +301,7 @@ export interface FileRoutesByFullPath {
   '/settings/risk': typeof AuthenticatedSettingsRiskRoute
   '/settings/version': typeof AuthenticatedSettingsVersionRoute
   '/accounts/': typeof AuthenticatedAccountsIndexRoute
+  '/cooldown/': typeof AuthenticatedCooldownIndexRoute
   '/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/guide/': typeof AuthenticatedGuideIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
@@ -333,6 +341,7 @@ export interface FileRoutesByTo {
   '/settings/risk': typeof AuthenticatedSettingsRiskRoute
   '/settings/version': typeof AuthenticatedSettingsVersionRoute
   '/accounts': typeof AuthenticatedAccountsIndexRoute
+  '/cooldown': typeof AuthenticatedCooldownIndexRoute
   '/egress-nodes': typeof AuthenticatedEgressNodesIndexRoute
   '/guide': typeof AuthenticatedGuideIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
@@ -375,6 +384,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/risk': typeof AuthenticatedSettingsRiskRoute
   '/_authenticated/settings/version': typeof AuthenticatedSettingsVersionRoute
   '/_authenticated/accounts/': typeof AuthenticatedAccountsIndexRoute
+  '/_authenticated/cooldown/': typeof AuthenticatedCooldownIndexRoute
   '/_authenticated/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/_authenticated/guide/': typeof AuthenticatedGuideIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
@@ -417,6 +427,7 @@ export interface FileRouteTypes {
     | '/settings/risk'
     | '/settings/version'
     | '/accounts/'
+    | '/cooldown/'
     | '/egress-nodes/'
     | '/guide/'
     | '/plans/'
@@ -456,6 +467,7 @@ export interface FileRouteTypes {
     | '/settings/risk'
     | '/settings/version'
     | '/accounts'
+    | '/cooldown'
     | '/egress-nodes'
     | '/guide'
     | '/plans'
@@ -497,6 +509,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/risk'
     | '/_authenticated/settings/version'
     | '/_authenticated/accounts/'
+    | '/_authenticated/cooldown/'
     | '/_authenticated/egress-nodes/'
     | '/_authenticated/guide/'
     | '/_authenticated/plans/'
@@ -710,6 +723,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEgressNodesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/cooldown/': {
+      id: '/_authenticated/cooldown/'
+      path: '/cooldown'
+      fullPath: '/cooldown/'
+      preLoaderRoute: typeof AuthenticatedCooldownIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/accounts/': {
       id: '/_authenticated/accounts/'
       path: '/accounts'
@@ -845,6 +865,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedRequestAuditsScheduleRoute: typeof AuthenticatedRequestAuditsScheduleRoute
   AuthenticatedRequestAuditsWorkspaceRoute: typeof AuthenticatedRequestAuditsWorkspaceRoute
   AuthenticatedAccountsIndexRoute: typeof AuthenticatedAccountsIndexRoute
+  AuthenticatedCooldownIndexRoute: typeof AuthenticatedCooldownIndexRoute
   AuthenticatedEgressNodesIndexRoute: typeof AuthenticatedEgressNodesIndexRoute
   AuthenticatedGuideIndexRoute: typeof AuthenticatedGuideIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
@@ -867,6 +888,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedRequestAuditsWorkspaceRoute:
     AuthenticatedRequestAuditsWorkspaceRoute,
   AuthenticatedAccountsIndexRoute: AuthenticatedAccountsIndexRoute,
+  AuthenticatedCooldownIndexRoute: AuthenticatedCooldownIndexRoute,
   AuthenticatedEgressNodesIndexRoute: AuthenticatedEgressNodesIndexRoute,
   AuthenticatedGuideIndexRoute: AuthenticatedGuideIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,

@@ -452,6 +452,73 @@ export type IsolationStatsResponse = {
   generatedAt?: string | null
 }
 
+export type CooldownAccount = {
+  id: number
+  name: string
+  email?: string
+  enabled: boolean
+  missingUpstream?: boolean
+  quarantined?: boolean
+  status: 'cooling' | 'expired'
+  actionStatus?: string
+  actionError?: string
+  label?: string
+  reason?: string
+  source?: string
+  cooledAt?: string | null
+  cooldownUntil?: string | null
+  expiredAt?: string | null
+  remainingSeconds?: number
+  cooldownMinutes?: number
+  tpsStreak?: number
+  tpsMinCount?: number
+  maxTps?: number
+  auditTps?: number
+  auditId?: string
+  auditCreatedAt?: string | null
+  riskReasons?: string[]
+  disabledByCooldown?: boolean
+  releasedManually?: boolean
+  cooldownCount?: number
+  nextAction?: 'isolate' | string
+}
+
+export type CooldownStatsResponse = {
+  range: { from?: string | null; to?: string | null }
+  policy?: {
+    minCount: number
+    cooldownMinutes: number
+    isolationEnabled: boolean
+  }
+  zone: {
+    cooling: number
+    expiringSoon: number
+    disabledByCooldown: number
+    avgRemainingSeconds: number | null
+  }
+  events: {
+    cooled: number
+    uniqueAccounts: number
+    expired: number
+    released: number
+    isolatedAfter: number
+  }
+  trend: Array<{ day: string; cooled: number; expired: number }>
+  generatedAt?: string | null
+}
+
+export type CooldownReleaseResult = {
+  requested: number
+  eligible: number
+  released: number
+  reenabled: number
+  skippedAccountIds: number[]
+  skippedNotCoolingAccountIds: number[]
+  skippedQuarantinedAccountIds: number[]
+  failedAccountIds: number[]
+  failures: { id: number; error: string }[]
+}
+
 type Assessment = {
   account_id: number
   monitor_status: string
@@ -3076,6 +3143,34 @@ export const api = {
       `/accounts/quarantine/stats${query(params)}`,
       { signal }
     ),
+  cooldownAccounts: (
+    params: Record<string, string | number | undefined> = {},
+    signal?: AbortSignal
+  ) =>
+    request<Page<CooldownAccount>>(`/accounts/cooldowns${query(params)}`, {
+      signal,
+    }),
+  cooldownStats: (
+    params: { from?: string; to?: string } = {},
+    signal?: AbortSignal
+  ) =>
+    request<CooldownStatsResponse>(
+      `/accounts/cooldowns/stats${query(params)}`,
+      { signal }
+    ),
+  releaseCooldowns: (accountIds: number[]) =>
+    request<CooldownReleaseResult>('/accounts/cooldowns/release', {
+      method: 'POST',
+      body: JSON.stringify({
+        account_ids: Array.from(
+          new Set(
+            accountIds.filter(
+              (accountId) => Number.isSafeInteger(accountId) && accountId > 0
+            )
+          )
+        ),
+      }),
+    }),
   deleteQuarantineLocal,
   deleteQuarantineUpstream,
   updateAccountsEnabled,

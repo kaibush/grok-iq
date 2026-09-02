@@ -13,6 +13,7 @@ import {
   ShieldBan,
   ShieldCheck,
   TestTube2,
+  Timer,
   UsersRound,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
@@ -28,6 +29,7 @@ export const sidebarData: SidebarData = {
         { title: '上游状态', url: '/status', icon: Gauge },
         { title: '账号探针', url: '/accounts', icon: UsersRound },
         { title: '隔离区', url: '/quarantine', icon: ShieldBan },
+        { title: '冷却区', url: '/cooldown', icon: Timer },
         { title: '任务中心', url: '/runs', icon: Activity },
         { title: '请求审计', url: '/request-audits', icon: ShieldAlert },
         { title: 'Worker', url: '/workers', icon: Cpu },

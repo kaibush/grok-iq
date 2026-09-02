@@ -12,6 +12,7 @@ import {
 export const WORKSPACE_TAB_IDS = [
   'accounts',
   'quarantine',
+  'cooldown',
   'runs',
   'request-audits',
 ] as const
@@ -21,6 +22,7 @@ export type WorkspaceTabId = (typeof WORKSPACE_TAB_IDS)[number]
 export const WORKSPACE_TAB_PATHS = {
   accounts: '/accounts',
   quarantine: '/quarantine',
+  cooldown: '/cooldown',
   runs: '/runs',
   'request-audits': '/request-audits',
 } as const
@@ -28,6 +30,7 @@ export const WORKSPACE_TAB_PATHS = {
 export const WORKSPACE_TAB_TITLES: Record<WorkspaceTabId, string> = {
   accounts: '账号探针',
   quarantine: '隔离区',
+  cooldown: '冷却区',
   runs: '任务中心',
   'request-audits': '请求审计',
 }
