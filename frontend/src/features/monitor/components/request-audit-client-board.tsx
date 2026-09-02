@@ -1,8 +1,9 @@
 import { KeyRound } from 'lucide-react'
 import { type RequestAuditClientKeyOption } from '@/lib/api'
 import { cn, formatNumber, formatRelativeTime } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { TitledCard } from '@/components/titled-card'
+import { InfoTooltip } from '@/components/info-tooltip'
 
 export function RequestAuditClientBoard({
   items,
@@ -21,53 +22,57 @@ export function RequestAuditClientBoard({
   )
   const selected = selectedId !== 'all'
 
+  if (!loading && items.length === 0) return null
+
   return (
-    <TitledCard
-      icon={<KeyRound />}
-      iconTone='sky'
-      title='当前窗口活跃客户端'
-      description='展示这个分析窗口里发过请求的客户端 Key。点击卡片会套用和筛选条件相同的 Key 过滤；再点一次可取消。'
-      hint='数据来自当前分析窗口的请求流水，不限本页。次数是该 Key 在窗口内的请求数。'
-      contentClassName='space-y-3'
-    >
-      <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
-        <span>{formatNumber(items.length, 0)} 个客户端</span>
-        <span>{formatNumber(totalRequests, 0)} 次请求</span>
-        {selected ? <span>已按客户端 Key 过滤流水</span> : null}
+    <section className='border-b px-4 py-3'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <KeyRound className='size-3.5 text-muted-foreground' />
+          <span className='text-sm font-medium'>活跃客户端</span>
+          <InfoTooltip
+            label='活跃客户端'
+            content='当前分析窗口内发过请求的客户端 Key。点击后会按该 Key 过滤流水，再点一次或点清除即可取消。'
+          />
+          {loading ? (
+            <Skeleton className='h-5 w-24 rounded-full' />
+          ) : (
+            <span className='text-[11px] text-muted-foreground'>
+              {formatNumber(items.length, 0)} 个 · {formatNumber(totalRequests, 0)}{' '}
+              次
+            </span>
+          )}
+        </div>
+        {selected ? (
+          <Button
+            type='button'
+            size='sm'
+            variant='ghost'
+            className='h-7 px-2 text-xs'
+            onClick={() => onSelect('all')}
+          >
+            清除 Key 筛选
+          </Button>
+        ) : null}
       </div>
       {loading ? (
-        <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
+        <div className='mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2'>
           {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className='h-16 rounded-xl' />
+            <Skeleton key={index} className='h-14 rounded-lg' />
           ))}
         </div>
-      ) : items.length ? (
+      ) : (
         <div
-          className='grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+          className='mt-3 grid max-h-56 grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2 overflow-y-auto'
           role='list'
           aria-label='当前窗口活跃客户端'
         >
-          <button
-            type='button'
-            role='listitem'
-            aria-pressed={!selected}
-            className={cn(
-              'flex min-h-16 flex-col justify-center rounded-xl border px-3 py-2 text-left transition-colors',
-              !selected
-                ? 'border-primary bg-primary/5 ring-2 ring-inset ring-primary'
-                : 'bg-background hover:bg-muted/45'
-            )}
-            onClick={() => onSelect('all')}
-          >
-            <span className='text-sm font-medium'>全部客户端</span>
-            <span className='mt-0.5 text-[11px] text-muted-foreground'>
-              {formatNumber(items.length, 0)} 个 Key ·{' '}
-              {formatNumber(totalRequests, 0)} 次
-            </span>
-          </button>
           {items.map((item) => {
             const active = item.id === selectedId
-            const label = item.name || (item.id === 'unlabeled' ? '未记录 Key' : `#${item.id}`)
+            const label =
+              item.name ||
+              (item.id === 'unlabeled' ? '未记录 Key' : `#${item.id}`)
+            const count = item.requestCount ?? 0
             return (
               <button
                 key={item.id}
@@ -75,30 +80,37 @@ export function RequestAuditClientBoard({
                 role='listitem'
                 aria-pressed={active}
                 className={cn(
-                  'flex min-h-16 flex-col justify-center rounded-xl border px-3 py-2 text-left transition-colors',
+                  'rounded-lg border px-3 py-2.5 text-left transition-colors',
                   active
-                    ? 'border-primary bg-primary/5 ring-2 ring-inset ring-primary'
-                    : 'bg-background hover:bg-muted/45'
+                    ? 'border-primary/40 bg-primary/8'
+                    : 'bg-muted/20 hover:bg-muted/40'
                 )}
                 onClick={() => onSelect(active ? 'all' : item.id)}
               >
-                <span className='truncate text-sm font-medium'>{label}</span>
-                <span className='mt-0.5 truncate text-[11px] text-muted-foreground'>
-                  {item.id !== 'unlabeled' && item.name ? `#${item.id} · ` : ''}
-                  {formatNumber(item.requestCount ?? 0, 0)} 次
-                  {item.lastSeenAt
-                    ? ` · ${formatRelativeTime(item.lastSeenAt)}`
-                    : ''}
-                </span>
+                <div className='flex items-start justify-between gap-3'>
+                  <div className='min-w-0'>
+                    <div className='truncate text-sm font-medium'>{label}</div>
+                    <div className='mt-0.5 truncate text-[11px] text-muted-foreground'>
+                      {item.id !== 'unlabeled' && item.name
+                        ? `#${item.id}`
+                        : '未记录身份'}
+                      {item.lastSeenAt
+                        ? ` · ${formatRelativeTime(item.lastSeenAt)}`
+                        : ''}
+                    </div>
+                  </div>
+                  <div className='shrink-0 text-right'>
+                    <div className='font-mono text-sm font-semibold tabular-nums'>
+                      {formatNumber(count, 0)}
+                    </div>
+                    <div className='text-[10px] text-muted-foreground'>次</div>
+                  </div>
+                </div>
               </button>
             )
           })}
         </div>
-      ) : (
-        <p className='text-sm text-muted-foreground'>
-          当前分析窗口还没有客户端请求。
-        </p>
       )}
-    </TitledCard>
+    </section>
   )
 }

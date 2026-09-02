@@ -3198,16 +3198,7 @@ export function RequestAuditsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value='ledger' className='mt-0 space-y-4'>
-          <RequestAuditClientBoard
-            items={clientKeyOptions}
-            selectedId={auditClientKey}
-            loading={recordsQuery.isLoading && !recordsQuery.data}
-            onSelect={(id) => {
-              setAuditClientKey(id)
-              setPage(1)
-            }}
-          />
+        <TabsContent value='ledger' className='mt-0'>
           <Card>
             <CardHeader className='border-b'>
               <CardTitle>请求审计流水</CardTitle>
@@ -3217,6 +3208,15 @@ export function RequestAuditsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className='p-0'>
+              <RequestAuditClientBoard
+                items={clientKeyOptions}
+                selectedId={auditClientKey}
+                loading={recordsQuery.isLoading && !recordsQuery.data}
+                onSelect={(id) => {
+                  setAuditClientKey(id)
+                  setPage(1)
+                }}
+              />
               <div className='space-y-2 border-b bg-muted/15 px-3 py-2'>
                 <div className='flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between'>
                   <div className='flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center'>
