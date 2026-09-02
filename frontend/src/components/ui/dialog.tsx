@@ -55,7 +55,7 @@ function DialogContent({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
-  size?: 'default' | 'wide'
+  size?: 'default' | 'wide' | 'full'
   overlayClassName?: string
 }) {
   return (
@@ -64,10 +64,15 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot='dialog-content'
         className={cn(
-          'fixed top-[50%] left-[50%] z-50 flex max-h-[calc(100dvh-1rem)] min-h-0 translate-x-[-50%] translate-y-[-50%] [touch-action:pan-y] flex-col gap-4 overflow-y-auto overscroll-contain rounded-2xl border bg-background p-4 shadow-lg duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-h-[calc(100dvh-2rem)] sm:p-6',
-          size === 'wide'
-            ? 'w-[clamp(20rem,92vw,96rem)] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]'
-            : 'w-[clamp(20rem,88vw,52rem)] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]',
+          'fixed z-50 flex min-h-0 [touch-action:pan-y] flex-col duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+          size === 'full'
+            ? 'inset-0 h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden rounded-none border-0 bg-background p-0 shadow-none'
+            : cn(
+                'top-[50%] left-[50%] max-h-[calc(100dvh-1rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-2xl border bg-background p-4 shadow-lg sm:max-h-[calc(100dvh-2rem)] sm:p-6',
+                size === 'wide'
+                  ? 'w-[clamp(20rem,92vw,96rem)] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]'
+                  : 'w-[clamp(20rem,88vw,52rem)] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]'
+              ),
           className
         )}
         onOpenAutoFocus={(event) => {

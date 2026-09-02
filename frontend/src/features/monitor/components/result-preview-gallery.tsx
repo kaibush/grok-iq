@@ -1104,8 +1104,9 @@ export function ResultPreviewGallery({
         }}
       >
         <DialogContent
+          size='full'
           showCloseButton={false}
-          className='top-0 left-0 h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden overflow-x-hidden rounded-none border-0 bg-background p-0 shadow-none sm:max-w-none sm:p-0'
+          className='overflow-x-hidden'
           onOpenAutoFocus={(event) => {
             event.preventDefault()
             ;(event.currentTarget as HTMLElement).focus({ preventScroll: true })

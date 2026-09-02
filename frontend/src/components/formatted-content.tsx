@@ -530,10 +530,7 @@ function FormattedContentPreviewDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className='top-0 left-0 h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 bg-background p-0 shadow-none sm:max-w-none sm:p-0'
-      >
+      <DialogContent size='full' showCloseButton={false}>
         <div className='flex h-full min-h-0 flex-col'>
           <div className='flex shrink-0 items-center gap-3 border-b px-4 py-3'>
             <div className='min-w-0 flex-1 font-medium'>{title}</div>
