@@ -12,7 +12,6 @@ import {
   type RequestAuditRiskLevel,
   type RequestAuditThresholds,
   type RequestAuditWindowPreset,
-  type UpstreamAccount,
 } from '@/lib/api'
 import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
@@ -53,6 +52,7 @@ import {
   streamSampleDiagnostics,
   streamSampleWarnings,
 } from '@/features/monitor/pages/request-audit-stream-sample'
+import type { AccountIdentity } from '@/features/monitor/components/account-upstream-dialog'
 
 const WINDOW_OPTIONS: Array<{
   value: Exclude<RequestAuditWindowPreset, 'custom'>
@@ -214,12 +214,12 @@ export function AccountRequestLedgerDialog({
   onOpenChange,
 }: {
   open: boolean
-  account: UpstreamAccount | null
+  account: AccountIdentity | null
   onOpenChange: (open: boolean) => void
 }) {
   const accountId = account ? Number(account.id) : 0
   const accountLabel =
-    account?.name || account?.email || (accountId ? `账号 ${accountId}` : '隔离账号')
+    account?.name || account?.email || (accountId ? `账号 ${accountId}` : '账号')
   const [windowPreset, setWindowPreset] = useState<
     Exclude<RequestAuditWindowPreset, 'custom'>
   >('7d')
@@ -295,7 +295,7 @@ export function AccountRequestLedgerDialog({
           <DialogDescription className='break-all'>
             {selected
               ? `${accountLabel} · ${selected.requestId || selected.id}`
-              : `${accountLabel} · 仅显示该隔离账号在${windowLabel}内的请求审计，不跳转到请求审计页`}
+              : `${accountLabel} · 仅显示该账号在${windowLabel}内的请求审计，不跳转到请求审计页`}
           </DialogDescription>
         </DialogHeader>
 

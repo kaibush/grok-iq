@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   useIsFetching,
   useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import {
   Loader2,
   RefreshCw,
-  ScrollText,
   Search,
   Timer,
   TimerOff,
@@ -62,12 +60,22 @@ import {
   ServerTableLoadingOverlay,
 } from '@/components/server-pagination'
 import { TablePanel } from '@/components/table-panel'
+import { AccountInspectActions } from '@/features/monitor/components/account-inspect-actions'
+import { AccountRequestLedgerDialog } from '@/features/monitor/components/account-request-ledger-dialog'
+import { AccountSamplesDialog } from '@/features/monitor/components/account-samples-dialog'
+import { AccountUpstreamDialog } from '@/features/monitor/components/account-upstream-dialog'
 import {
   formatRemainingDuration,
   isCooldownExpiringSoon,
   remainingForAccount,
 } from '@/features/monitor/components/cooldown-remaining'
 import { CooldownStatsBoard } from '@/features/monitor/components/cooldown-stats-board'
+import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
+import {
+  previewItemsFromAccounts,
+  ResultPreviewGallery,
+  type ResultPreviewItem,
+} from '@/features/monitor/components/result-preview-gallery'
 
 type CooldownStatusFilter = 'cooling' | 'expired' | 'all'
 
@@ -172,6 +180,22 @@ export function CooldownPage() {
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [releaseIds, setReleaseIds] = useState<number[]>([])
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [upstreamAccount, setUpstreamAccount] = useState<CooldownAccount | null>(
+    null
+  )
+  const [previewItems, setPreviewItems] = useState<ResultPreviewItem[] | null>(
+    null
+  )
+  const [previewIndex, setPreviewIndex] = useState(0)
+  const [sampleAccount, setSampleAccount] = useState<CooldownAccount | null>(
+    null
+  )
+  const [ledgerAccount, setLedgerAccount] = useState<CooldownAccount | null>(
+    null
+  )
+  const [probeOpen, setProbeOpen] = useState(false)
+  const [probeAccountIds, setProbeAccountIds] = useState<number[]>([])
+  const [probeDisabledCount, setProbeDisabledCount] = useState(0)
   const tableQueryPending =
     tableQuery.page !== committedQuery.page ||
     tableQuery.pageSize !== committedQuery.pageSize ||
@@ -246,6 +270,68 @@ export function CooldownPage() {
     void query.refetch()
     void client.invalidateQueries({ queryKey: ['accounts', 'cooldown-stats'] })
   }, [client, expiredCoolingKey, query.refetch])
+
+  const profiles = useQuery({
+    queryKey: ['profiles'],
+    queryFn: api.profiles,
+    enabled: probeOpen,
+    staleTime: 60_000,
+  })
+  const {
+    data: egressData,
+    error: egressQueryError,
+    isError: egressIsError,
+    isFetching: egressFetching,
+    refetch: refetchEgress,
+  } = useQuery({
+    queryKey: ['egress'],
+    queryFn: () => api.egress({ pageSize: 500 }),
+    enabled: probeOpen,
+    staleTime: 60_000,
+  })
+
+  const openAccountUpstream = useCallback((account: CooldownAccount) => {
+    setUpstreamAccount(account)
+  }, [])
+  const openAccountSamples = useCallback((account: CooldownAccount) => {
+    setSampleAccount(account)
+  }, [])
+  const openAccountLedger = useCallback((account: CooldownAccount) => {
+    setLedgerAccount(account)
+  }, [])
+  const openAccountPreview = useCallback(
+    async (account: CooldownAccount) => {
+      try {
+        const data = await client.fetchQuery({
+          queryKey: ['account', account.id],
+          queryFn: () => api.account(account.id),
+        })
+        const items = previewItemsFromAccounts([data.account])
+        if (!items.length) {
+          toast.error('该账号没有可预览的样本')
+          return
+        }
+        setPreviewItems(items)
+        setPreviewIndex(0)
+      } catch (error) {
+        toast.error(getErrorMessage(error))
+      }
+    },
+    [client]
+  )
+  const openProbeDialog = useCallback(
+    (account: CooldownAccount) => {
+      if (account.missingUpstream) {
+        toast.error('该账号缺少上游记录，无法创建探针任务')
+        return
+      }
+      setProbeAccountIds([account.id])
+      setProbeDisabledCount(account.enabled ? 0 : 1)
+      setProbeOpen(true)
+      void refetchEgress()
+    },
+    [refetchEgress]
+  )
 
   const selectedIdSet = useMemo(() => new Set(selected), [selected])
   const releasableAccounts = accounts.filter(canReleaseCooldown)
@@ -443,6 +529,11 @@ export function CooldownPage() {
               onToggleCurrentPage={toggleCurrentPageSelection}
               onToggleAccount={toggleAccountSelection}
               onRelease={(account) => openRelease([account.id])}
+              onOpenUpstream={openAccountUpstream}
+              onPreview={(account) => void openAccountPreview(account)}
+              onProbe={openProbeDialog}
+              onOpenSamples={openAccountSamples}
+              onOpenLedger={openAccountLedger}
             />
             {showTableLoading && (
               <ServerTableLoadingOverlay
@@ -523,6 +614,65 @@ export function CooldownPage() {
           releaseMutation.mutate(releaseIds)
         }}
       />
+      <AccountUpstreamDialog
+        open={upstreamAccount != null}
+        accountId={upstreamAccount?.id ?? null}
+        account={upstreamAccount}
+        onOpenChange={(open) => {
+          if (!open) setUpstreamAccount(null)
+        }}
+      />
+      <AccountSamplesDialog
+        open={sampleAccount != null}
+        accountId={sampleAccount?.id ?? null}
+        account={sampleAccount}
+        onOpenChange={(open) => {
+          if (!open) setSampleAccount(null)
+        }}
+      />
+      <AccountRequestLedgerDialog
+        key={ledgerAccount ? ledgerAccount.id : 'closed'}
+        open={ledgerAccount != null}
+        account={ledgerAccount}
+        onOpenChange={(open) => {
+          if (!open) setLedgerAccount(null)
+        }}
+      />
+      <ResultPreviewGallery
+        open={previewItems != null}
+        onOpenChange={(open) => {
+          if (!open) setPreviewItems(null)
+        }}
+        items={previewItems ?? []}
+        index={previewIndex}
+        onIndexChange={setPreviewIndex}
+        perspective='account'
+      />
+      <ProbeDialog
+        open={probeOpen}
+        onOpenChange={setProbeOpen}
+        accountIds={probeAccountIds}
+        disabledAccountCount={probeDisabledCount}
+        profiles={profiles.data ?? []}
+        profilesLoading={profiles.isFetching && !profiles.data}
+        profilesError={
+          profiles.isError ? getErrorMessage(profiles.error) : ''
+        }
+        onRefreshProfiles={() => void profiles.refetch()}
+        egress={egressData?.items ?? []}
+        egressLoading={egressFetching}
+        egressError={
+          egressIsError ? getErrorMessage(egressQueryError) : ''
+        }
+        onRefreshEgress={() => void refetchEgress()}
+        onCreated={() => {
+          setProbeAccountIds([])
+          setProbeDisabledCount(0)
+          void client.invalidateQueries({ queryKey: ['runs'] })
+          void client.invalidateQueries({ queryKey: ['dashboard'] })
+          void client.invalidateQueries({ queryKey: ['accounts'] })
+        }}
+      />
     </Page>
   )
 }
@@ -537,6 +687,11 @@ function CooldownTable({
   onToggleCurrentPage,
   onToggleAccount,
   onRelease,
+  onOpenUpstream,
+  onPreview,
+  onProbe,
+  onOpenSamples,
+  onOpenLedger,
 }: {
   accounts: CooldownAccount[]
   selected: number[]
@@ -547,6 +702,11 @@ function CooldownTable({
   onToggleCurrentPage: (checked: boolean) => void
   onToggleAccount: (id: number, checked: boolean) => void
   onRelease: (account: CooldownAccount) => void
+  onOpenUpstream: (account: CooldownAccount) => void
+  onPreview: (account: CooldownAccount) => void
+  onProbe: (account: CooldownAccount) => void
+  onOpenSamples: (account: CooldownAccount) => void
+  onOpenLedger: (account: CooldownAccount) => void
 }) {
   const selectedIdSet = useMemo(() => new Set(selected), [selected])
   return (
@@ -586,6 +746,11 @@ function CooldownTable({
             releasePending={releasePending}
             onSelectedChange={(checked) => onToggleAccount(account.id, checked)}
             onRelease={() => onRelease(account)}
+            onOpenUpstream={() => onOpenUpstream(account)}
+            onPreview={() => onPreview(account)}
+            onProbe={() => onProbe(account)}
+            onOpenSamples={() => onOpenSamples(account)}
+            onOpenLedger={() => onOpenLedger(account)}
           />
         ))}
       </TableBody>
@@ -600,6 +765,11 @@ function CooldownRow({
   releasePending,
   onSelectedChange,
   onRelease,
+  onOpenUpstream,
+  onPreview,
+  onProbe,
+  onOpenSamples,
+  onOpenLedger,
 }: {
   account: CooldownAccount
   selected: boolean
@@ -607,6 +777,11 @@ function CooldownRow({
   releasePending: boolean
   onSelectedChange: (checked: boolean) => void
   onRelease: () => void
+  onOpenUpstream: () => void
+  onPreview: () => void
+  onProbe: () => void
+  onOpenSamples: () => void
+  onOpenLedger: () => void
 }) {
   const accountLabel = accountLabelOf(account)
   const secondaryAccountLabel = formatAccountSecondaryLabel({
@@ -715,43 +890,38 @@ function CooldownRow({
           <EnabledBadge enabled={account.enabled} prefix='上游' />
         )}
       </TableCell>
-      <TableCell className='text-right'>
-        <div className='inline-flex items-center justify-end'>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button asChild size='icon' variant='ghost'>
-                <Link
-                  to='/request-audits/ledger'
-                  search={{ account: String(account.id) } as never}
-                  aria-label={`查看 ${accountLabel} 的请求流水`}
+      <TableCell className='w-40 text-right'>
+        <AccountInspectActions
+          accountLabel={accountLabel}
+          missingUpstream={Boolean(account.missingUpstream)}
+          extra={
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size='icon'
+                  variant='ghost'
+                  disabled={!canRelease || releasePending}
+                  onClick={onRelease}
+                  aria-label={`提前结束 ${accountLabel} 的冷却`}
                 >
-                  <ScrollText />
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>查看请求流水</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size='icon'
-                variant='ghost'
-                disabled={!canRelease || releasePending}
-                onClick={onRelease}
-                aria-label={`提前结束 ${accountLabel} 的冷却`}
-              >
-                <TimerOff />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {account.quarantined
-                ? '已进入隔离区，无法提前结束冷却'
-                : account.status === 'expired'
-                  ? '冷却已结束'
-                  : '提前结束冷却'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+                  <TimerOff />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {account.quarantined
+                  ? '已进入隔离区，无法提前结束冷却'
+                  : account.status === 'expired'
+                    ? '冷却已结束'
+                    : '提前结束冷却'}
+              </TooltipContent>
+            </Tooltip>
+          }
+          onOpenUpstream={onOpenUpstream}
+          onPreview={onPreview}
+          onProbe={onProbe}
+          onOpenSamples={onOpenSamples}
+          onOpenLedger={onOpenLedger}
+        />
       </TableCell>
     </TableRow>
   )
