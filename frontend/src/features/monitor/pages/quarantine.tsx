@@ -936,7 +936,7 @@ export function QuarantinePage() {
         },
         signal
       ),
-    enabled: resultPreview != null,
+    enabled: resultPreview != null && resultPreview.accountId == null,
   })
   const previewSource =
     resultPreview &&
@@ -946,17 +946,26 @@ export function QuarantinePage() {
       : previewAccountsQuery.data?.page === previewPage
         ? previewAccountsQuery.data
         : undefined
-  const previewItems = useMemo(
-    () => previewItemsFromAccounts(previewSource?.items ?? []),
-    [previewSource?.items]
-  )
-  const previewTotal = previewSource?.total ?? query.data?.total ?? 0
-  const previewPageCount = Math.max(
-    1,
-    Math.ceil(previewTotal / Math.max(tableQuery.pageSize, 1))
-  )
+  const scopedAccountId = resultPreview?.accountId
+  const previewItems = useMemo(() => {
+    const items = previewItemsFromAccounts(previewSource?.items ?? [])
+    if (scopedAccountId == null) return items
+    return items.filter((item) => item.accountId === scopedAccountId)
+  }, [previewSource?.items, scopedAccountId])
+  const previewTotal =
+    scopedAccountId != null
+      ? previewItems.length
+      : (previewSource?.total ?? query.data?.total ?? 0)
+  const previewPageCount =
+    scopedAccountId != null
+      ? 1
+      : Math.max(
+          1,
+          Math.ceil(previewTotal / Math.max(tableQuery.pageSize, 1))
+        )
   const previewPageLoading =
     resultPreview != null &&
+    scopedAccountId == null &&
     previewSource?.page !== resultPreview.page &&
     previewAccountsQuery.isFetching
   const profiles = useQuery({
@@ -1022,8 +1031,8 @@ export function QuarantinePage() {
       }
       setResultPreview({
         page,
-        index: Math.max(0, matchedIndex),
-        accountId,
+        index: required ? 0 : Math.max(0, matchedIndex),
+        accountId: required ? accountId : undefined,
       })
     },
     [accounts, page, query.data?.total]
@@ -2170,22 +2179,25 @@ export function QuarantinePage() {
             current ? { ...current, index } : current
           )
         }
-        page={resultPreview?.page ?? page}
+        page={scopedAccountId != null ? 1 : (resultPreview?.page ?? page)}
         pageCount={previewPageCount}
         total={previewTotal}
         pageLoading={previewPageLoading}
-        onPageChange={(nextPage, land) =>
-          setResultPreview((current) =>
-            current
-              ? {
-                  ...current,
-                  page: nextPage,
-                  land,
-                  index: 0,
-                  accountId: undefined,
-                }
-              : current
-          )
+        onPageChange={
+          scopedAccountId == null
+            ? (nextPage, land) =>
+                setResultPreview((current) =>
+                  current
+                    ? {
+                        ...current,
+                        page: nextPage,
+                        land,
+                        index: 0,
+                        accountId: undefined,
+                      }
+                    : current
+                )
+            : undefined
         }
         perspective='account'
       />
