@@ -547,7 +547,7 @@ export function RunsPage() {
     (runId: string, sampleId?: string) => {
       const items = previewItemsFromRuns(currentPageRuns, profileNameById)
       if (!items.length && !(query.data?.total ?? 0)) {
-        toast.error('当前筛选没有可预览的任务样本')
+        toast.error('当前筛选没有可预览的任务')
         return
       }
       const index = Math.max(

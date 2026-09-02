@@ -372,12 +372,14 @@ export function ContentPreviewCanvas({
   expectedImageUrl,
   expectedContent,
   compareExpected = false,
+  emptyText = '没有可预览的响应',
   className,
 }: {
   content: string
   expectedImageUrl?: string
   expectedContent?: string
   compareExpected?: boolean
+  emptyText?: string
   className?: string
 }) {
   const previews = useMemo(() => extractHtmlPreviews(content), [content])
@@ -470,7 +472,7 @@ export function ContentPreviewCanvas({
               </div>
             ) : (
               <div className='flex size-full items-center justify-center p-6 text-sm text-muted-foreground'>
-                没有可预览的响应
+                {emptyText}
               </div>
             )}
           </TabsContent>

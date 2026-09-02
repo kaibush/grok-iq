@@ -92,6 +92,7 @@ import { AccountRequestLedgerDialog } from '@/features/monitor/components/accoun
 import { AccountSampleExplorer } from '@/features/monitor/components/account-sample-explorer'
 import { AccountUpstreamDialog } from '@/features/monitor/components/account-upstream-dialog'
 import {
+  previewItemFromAccount,
   previewItemsFromAccounts,
   ResultPreviewGallery,
 } from '@/features/monitor/components/result-preview-gallery'
@@ -760,7 +761,12 @@ export function QuarantinePage() {
   const previewItems = useMemo(() => {
     const items = previewItemsFromAccounts(previewSource?.items ?? [])
     if (scopedAccountId == null) return items
-    return items.filter((item) => item.accountId === scopedAccountId)
+    const matched = items.filter((item) => item.accountId === scopedAccountId)
+    if (matched.length) return matched
+    const account = (previewSource?.items ?? []).find(
+      (item) => Number(item.id) === scopedAccountId
+    )
+    return account ? [previewItemFromAccount(account)] : []
   }, [previewSource?.items, scopedAccountId])
   const previewTotal =
     scopedAccountId != null
@@ -828,7 +834,11 @@ export function QuarantinePage() {
           ? 0
           : items.findIndex((item) => item.accountId === accountId)
       if (accountId != null && matchedIndex < 0 && required) {
-        toast.error('该账号没有可预览的样本')
+        setResultPreview({
+          page,
+          index: 0,
+          accountId,
+        })
         return
       }
       setResultPreview({

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProbeProfile, ProbeRun, ProbeSample } from '@/lib/api'
 import {
   hasAccountPreviewSamples,
+  previewPlaceholderLabel,
   slimAccountPreview,
   slimPreviewResponseText,
   slimRequestAuditRecord,
@@ -153,6 +154,9 @@ describe('slimAccountPreview', () => {
         profile_id: 'quality-marker',
         rounds: 3,
         completed_steps: 3,
+        total_steps: undefined,
+        status: undefined,
+        error: undefined,
         created_at: '2026-08-31T00:00:00Z',
       },
     ])
@@ -217,5 +221,26 @@ describe('hasAccountPreviewSamples', () => {
 
   it('rejects accounts with no sample history', () => {
     expect(hasAccountPreviewSamples(emptyAccount)).toBe(false)
+  })
+
+  it('opens preview for in-progress runs without completed samples', () => {
+    expect(
+      hasAccountPreviewSamples({
+        ...emptyAccount,
+        history: {
+          ...emptyAccount.history,
+          runs: [{ completed_steps: 0, status: 'running' }],
+        },
+      })
+    ).toBe(true)
+  })
+})
+
+describe('previewPlaceholderLabel', () => {
+  it('labels running probes instead of missing content', () => {
+    expect(previewPlaceholderLabel('running')).toBe('任务执行中')
+    expect(previewPlaceholderLabel('queued')).toBe('任务排队中')
+    expect(previewPlaceholderLabel('completed')).toBe('没有可预览正文')
+    expect(previewPlaceholderLabel(undefined, false)).toBe('滚动后加载')
   })
 })

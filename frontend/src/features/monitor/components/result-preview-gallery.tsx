@@ -42,6 +42,10 @@ import {
 } from '@/lib/html-preview-frame'
 import {
   ACCOUNT_PREVIEW_SAMPLE_LIMIT,
+  isActivePreviewRun,
+  previewPlaceholderLabel,
+  previewRunRefetchInterval,
+  previewRunsRefetchInterval,
   RUN_PREVIEW_GC_TIME,
   slimAccountPreview,
   slimRunPreview,
@@ -104,6 +108,9 @@ export type ResultPreviewItem = {
   sample?: ProbeSample
   rounds?: number
   completedSteps?: number
+  totalSteps?: number
+  status?: string
+  error?: string
   heading?: string
   source?: 'run' | 'account'
   roundNumber?: number
@@ -113,22 +120,23 @@ export function previewItemsFromRuns(
   runs: ProbeRun[],
   profileNames: Record<string, string> = {}
 ): ResultPreviewItem[] {
-  return runs
-    .filter((run) => run.completed_steps > 0)
-    .map((run) => ({
-      id: run.id,
-      runId: run.id,
-      accountId: run.account_id,
-      accountName:
-        run.account_name || run.account_email || `账号 ${run.account_id}`,
-      accountEmail: run.account_email,
-      accountCreatedAt: run.account_created_at,
-      createdAt: run.created_at,
-      profileId: run.profile_id,
-      profileName: profileNames[run.profile_id],
-      rounds: run.rounds,
-      completedSteps: run.completed_steps,
-    }))
+  return runs.map((run) => ({
+    id: run.id,
+    runId: run.id,
+    accountId: run.account_id,
+    accountName:
+      run.account_name || run.account_email || `账号 ${run.account_id}`,
+    accountEmail: run.account_email,
+    accountCreatedAt: run.account_created_at,
+    createdAt: run.created_at,
+    profileId: run.profile_id,
+    profileName: profileNames[run.profile_id],
+    rounds: run.rounds,
+    completedSteps: run.completed_steps,
+    totalSteps: run.total_steps,
+    status: run.status,
+    error: run.error,
+  }))
 }
 
 export function previewItemsFromSamples(
@@ -189,7 +197,7 @@ export function previewItemsFromAccounts(
     .map((account) => previewItemFromAccount(account))
 }
 
-function previewItemsFromAccountPreview(
+export function previewItemsFromAccountPreview(
   payload: AccountPreviewPayload,
   profileNames: Record<string, string> = {}
 ): ResultPreviewItem[] {
@@ -206,9 +214,7 @@ function previewItemsFromAccountPreview(
   const runById = new Map(payload.runs.map((run) => [run.id, run]))
   const runIds: string[] = []
   for (const run of payload.runs) {
-    if (run.completed_steps > 0 || samplesByRun.has(run.id)) {
-      runIds.push(run.id)
-    }
+    runIds.push(run.id)
   }
   for (const runId of samplesByRun.keys()) {
     if (!runIds.includes(runId)) runIds.push(runId)
@@ -233,6 +239,9 @@ function previewItemsFromAccountPreview(
         runSamples.length,
         sample ? 1 : 0
       ),
+      totalSteps: run?.total_steps,
+      status: run?.status,
+      error: run?.error,
       sample: sample ?? undefined,
       sampleId: sample?.id,
       content: sample?.response_text,
@@ -410,6 +419,13 @@ export function pickPreviewSample(
 
 function isAccountPreviewItem(item?: ResultPreviewItem | null) {
   return item?.source === 'account'
+}
+
+function previewStatusChip(status?: string | null) {
+  if (status === 'queued') return '排队中'
+  if (status === 'running' || status === 'recovering') return '执行中'
+  if (status === 'cancel_requested') return '取消中'
+  return ''
 }
 
 function parentPreviewIndex(
@@ -776,6 +792,8 @@ export function ResultPreviewGallery({
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      previewRunsRefetchInterval(query.state.data?.runs),
   })
   const selectedAccountRuns = useMemo(
     () =>
@@ -819,6 +837,10 @@ export function ResultPreviewGallery({
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      previewRunRefetchInterval(
+        query.state.data?.status || resolvedItem?.status
+      ),
   })
   const accountQuery = useQuery({
     queryKey: ['account', item?.accountId],
@@ -859,6 +881,7 @@ export function ResultPreviewGallery({
     sampleOverrideId
   )
   const content = resolvedItem?.content || sample?.response_text || ''
+  const resolvedStatus = runQuery.data?.status || resolvedItem?.status
   const expectedOutput =
     resolvedItem?.expectedOutput || runQuery.data?.profile?.expected_output || ''
   const expectedImageUrl =
@@ -1768,6 +1791,12 @@ export function ResultPreviewGallery({
                               : runQuery.error
                           )}
                         </div>
+                      ) : isActivePreviewRun(resolvedStatus) &&
+                        !content.trim() ? (
+                        <div className='flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground'>
+                          <Loader2 className='size-4 animate-spin' />
+                          {previewPlaceholderLabel(resolvedStatus)}
+                        </div>
                       ) : (
                         <ContentPreviewCanvas
                           key={`${resolvedItem?.id ?? item.id}:${sample?.id ?? 'empty'}`}
@@ -1775,6 +1804,7 @@ export function ResultPreviewGallery({
                           expectedImageUrl={expectedImageUrl}
                           expectedContent={expectedOutput}
                           compareExpected={compareExpected}
+                          emptyText={previewPlaceholderLabel(resolvedStatus)}
                           className='h-full min-w-0'
                         />
                       )}
@@ -2034,6 +2064,8 @@ function AccountPreviewGroupSection({
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
+    refetchInterval: (current) =>
+      previewRunsRefetchInterval(current.state.data?.runs),
   })
   const runItems = useMemo(
     () =>
@@ -2262,6 +2294,8 @@ function PreviewThumbCard({
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      previewRunRefetchInterval(query.state.data?.status || item.status),
   })
   const accountPreviewQuery = useQuery({
     queryKey: ['account-preview', item.accountId],
@@ -2273,6 +2307,8 @@ function PreviewThumbCard({
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      previewRunsRefetchInterval(query.state.data?.runs),
   })
   const sample = resolvePreviewSample(
     isAccountItem
@@ -2282,11 +2318,13 @@ function PreviewThumbCard({
   )
   const content = item.content || sample?.response_text || ''
   const html = extractHtmlPreviews(content)[0]
+  const status = runQuery.data?.status || item.status
   const loading =
     inView &&
     !hasLocal &&
     (isAccountItem ? accountPreviewQuery.isLoading : runQuery.isLoading) &&
     !content
+  const statusChip = previewStatusChip(status)
   return (
     <button
       ref={ref}
@@ -2302,6 +2340,11 @@ function PreviewThumbCard({
       onDoubleClick={() => onOpen(index)}
     >
       <div className='relative aspect-[16/10] min-h-0 w-full overflow-hidden border-b bg-muted/20'>
+        {statusChip ? (
+          <span className='absolute top-2 left-2 z-[1] rounded-md bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm'>
+            {statusChip}
+          </span>
+        ) : null}
         {(item.completedSteps || 0) > 1 && !item.sample && !item.sampleId ? (
           <span className='absolute top-2 right-2 z-[1] rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium shadow-sm'>
             {item.completedSteps} 轮
@@ -2318,8 +2361,11 @@ function PreviewThumbCard({
             {content.replace(/\s+/g, ' ').slice(0, 220)}
           </div>
         ) : (
-          <div className='flex h-full w-full items-center justify-center text-xs text-muted-foreground'>
-            {inView ? '没有可预览正文' : '滚动后加载'}
+          <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 text-xs text-muted-foreground'>
+            {inView && isActivePreviewRun(status) ? (
+              <Loader2 className='size-4 animate-spin' />
+            ) : null}
+            <span>{previewPlaceholderLabel(status, inView)}</span>
           </div>
         )}
       </div>
