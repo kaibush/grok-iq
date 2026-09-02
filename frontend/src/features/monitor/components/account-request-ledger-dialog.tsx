@@ -222,7 +222,7 @@ export function AccountRequestLedgerDialog({
     account?.name || account?.email || (accountId ? `账号 ${accountId}` : '账号')
   const [windowPreset, setWindowPreset] = useState<
     Exclude<RequestAuditWindowPreset, 'custom'>
-  >('7d')
+  >('today')
   const [risk, setRisk] = useState<(typeof RISK_OPTIONS)[number]['value']>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -230,7 +230,7 @@ export function AccountRequestLedgerDialog({
 
   useEffect(() => {
     if (!open) return
-    setWindowPreset('7d')
+    setWindowPreset('today')
     setRisk('all')
     setPage(1)
     setPageSize(25)
