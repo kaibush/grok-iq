@@ -22,6 +22,7 @@ import {
   matchWorkspaceTabId,
   workspaceTabLink,
   WORKSPACE_TAB_IDS,
+  WORKSPACE_TAB_SHORT_TITLES,
   WORKSPACE_TAB_TITLES,
   type WorkspaceTabId,
 } from './workspace-tabs'
@@ -153,7 +154,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     <div className='relative min-h-0 flex-1 overflow-hidden'>
       <WorkspaceKeepAlive />
       {showRouteOutlet ? (
-        <div className='h-full min-h-0 pb-16'>{children}</div>
+        <div className='h-full min-h-0 pb-[calc(4.75rem+env(safe-area-inset-bottom))]'>{children}</div>
       ) : null}
       <WorkspaceDock />
     </div>
@@ -207,7 +208,7 @@ function WorkspacePageFrame({
     <div
       data-workspace-tab={id}
       data-active='true'
-      className='absolute inset-0 z-10 min-h-0 overflow-hidden pb-16'
+      className='absolute inset-0 z-10 min-h-0 overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom))]'
     >
       {children}
     </div>
@@ -254,9 +255,9 @@ function WorkspaceDock() {
   return (
     <nav
       aria-label='工作区页面'
-      className='pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3'
+      className='pointer-events-none absolute inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 flex justify-center px-3'
     >
-      <div className='pointer-events-auto inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full border bg-muted/80 p-1 shadow-lg ring-1 shadow-black/10 ring-black/5 backdrop-blur-md dark:bg-background/80 dark:shadow-black/40 dark:ring-white/10'>
+      <div className='pointer-events-auto no-scrollbar inline-flex max-w-full items-end gap-0.5 overflow-x-auto rounded-[1.6rem] border bg-muted/80 p-1 shadow-lg ring-1 shadow-black/10 ring-black/5 backdrop-blur-md dark:bg-background/80 dark:shadow-black/40 dark:ring-white/10'>
         {WORKSPACE_TAB_IDS.map((id) => (
           <WorkspaceDockItem
             key={id}
@@ -283,6 +284,7 @@ function WorkspaceDockItem({
   onClose: () => void
 }) {
   const title = WORKSPACE_TAB_TITLES[id]
+  const shortTitle = WORKSPACE_TAB_SHORT_TITLES[id]
   const Icon = workspaceIcons[id]
   const lastLocation = useWorkspaceTabsStore((state) => state.lastLocations[id])
   const link = workspaceTabLink(id, lastLocation)
@@ -302,7 +304,7 @@ function WorkspaceDockItem({
             aria-label={tooltip}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'flex size-10 items-center justify-center rounded-full transition-colors',
+              'flex h-12 w-12 flex-col items-center justify-center gap-0.5 rounded-2xl transition-colors',
               'focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
               active && cn('shadow-sm', workspaceActive[id]),
               !active &&
@@ -320,7 +322,11 @@ function WorkspaceDockItem({
                   ? workspaceAccents[id]
                   : 'text-muted-foreground'
               )}
+              strokeWidth={active ? 2.25 : 1.75}
             />
+            <span className='text-[10px] leading-none font-medium tracking-wide'>
+              {shortTitle}
+            </span>
             <span className='sr-only'>{title}</span>
           </Link>
         </TooltipTrigger>

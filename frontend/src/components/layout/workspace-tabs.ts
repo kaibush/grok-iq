@@ -35,6 +35,14 @@ export const WORKSPACE_TAB_TITLES: Record<WorkspaceTabId, string> = {
   'request-audits': '请求审计',
 }
 
+export const WORKSPACE_TAB_SHORT_TITLES: Record<WorkspaceTabId, string> = {
+  accounts: '探针',
+  quarantine: '隔离',
+  cooldown: '冷却',
+  runs: '任务',
+  'request-audits': '审计',
+}
+
 export type WorkspaceTabTo =
   | (typeof WORKSPACE_TAB_PATHS)[WorkspaceTabId]
   | '/request-audits/workspace'
