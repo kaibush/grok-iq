@@ -6,6 +6,7 @@ import type {
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import {
   Select,
   SelectContent,
@@ -213,36 +214,34 @@ export function SettingsReasoningPolicyCard({
                       </Select>
                     </td>
                     <td className='px-3 py-2.5'>
-                      <Input
-                        type='number'
+                      <NumericInput
                         min={1}
                         max={4096}
                         value={policy.minimumOutputTokens}
                         className='h-9 w-24 font-mono'
                         aria-label={`策略 ${index + 1} 最低输出 Token`}
-                        onChange={(event) =>
+                        onChange={(next) =>
                           set(
                             'reasoningModelPolicies',
                             replacePolicy(form.reasoningModelPolicies, index, {
-                              minimumOutputTokens: Number(event.target.value),
+                              minimumOutputTokens: next,
                             })
                           )
                         }
                       />
                     </td>
                     <td className='px-3 py-2.5'>
-                      <Input
-                        type='number'
+                      <NumericInput
                         min={2}
                         max={100}
                         value={policy.minCount}
                         className='h-9 w-20 font-mono'
                         aria-label={`策略 ${index + 1} 连续命中次数`}
-                        onChange={(event) =>
+                        onChange={(next) =>
                           set(
                             'reasoningModelPolicies',
                             replacePolicy(form.reasoningModelPolicies, index, {
-                              minCount: Number(event.target.value),
+                              minCount: next,
                             })
                           )
                         }

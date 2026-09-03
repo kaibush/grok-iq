@@ -24,6 +24,7 @@ import { cn, getErrorMessage } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
@@ -412,8 +413,7 @@ export function SettingsIntegrationTab({
                         </Button>
                       </div>
                       <div className='relative w-24 shrink-0'>
-                        <Input
-                          type='number'
+                        <NumericInput
                           min={1}
                           max={20}
                           step={1}
@@ -423,15 +423,12 @@ export function SettingsIntegrationTab({
                             form.registerProbeProfileRounds[profileId] ??
                             form.registerProbeRounds
                           }
-                          onChange={(event) => {
-                            const next = Math.trunc(Number(event.target.value))
+                          onChange={(next) =>
                             set('registerProbeProfileRounds', {
                               ...form.registerProbeProfileRounds,
-                              [profileId]: Number.isFinite(next)
-                                ? Math.min(20, Math.max(1, next))
-                                : form.registerProbeRounds,
+                              [profileId]: next,
                             })
-                          }}
+                          }
                         />
                         <span className='pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs text-muted-foreground'>
                           轮

@@ -33,7 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import {
   Select,
   SelectContent,
@@ -325,14 +325,11 @@ export function ProbeDialog({
           )}
           <div className='grid gap-2'>
             <label className='text-sm font-medium'>轮数</label>
-            <Input
-              type='number'
+            <NumericInput
               min={1}
               max={20}
               value={rounds}
-              onChange={(event) =>
-                setRounds(Math.max(1, Math.min(20, Number(event.target.value))))
-              }
+              onChange={setRounds}
             />
           </div>
           <div className='grid gap-2'>

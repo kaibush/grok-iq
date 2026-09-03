@@ -14,7 +14,7 @@ import type { AutoIsolationMinStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import {
   Select,
   SelectContent,
@@ -653,22 +653,17 @@ function AuditRulesPanel({
                       </p>
                     </div>
                     <div className='flex shrink-0 items-center gap-2'>
-                      <Input
+                      <NumericInput
                         className='h-8 w-20'
-                        type='number'
                         min={-100000}
                         max={100000}
                         value={override?.priority ?? rule.priority}
                         disabled={!rule.configurable}
                         aria-label={`${rule.label}优先级`}
-                        onChange={(event) =>
+                        onChange={(next) =>
                           set(
                             'riskRuleOverrides',
-                            setRiskRulePriority(
-                              form,
-                              rule.id,
-                              Number(event.target.value)
-                            )
+                            setRiskRulePriority(form, rule.id, next)
                           )
                         }
                       />

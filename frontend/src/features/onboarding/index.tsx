@@ -31,6 +31,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import { Switch } from '@/components/ui/switch'
 import { PasswordInput } from '@/components/password-input'
 import { ThemeSwitch } from '@/components/theme-switch'
@@ -480,14 +481,11 @@ function CapacityStep({
           <span className='min-h-10 text-xs leading-5 text-muted-foreground'>
             可同时执行的探针任务数。账号之间并行，同一账号仍会避免并发冲突。
           </span>
-          <Input
-            type='number'
+          <NumericInput
             min={1}
             max={32}
             value={workerConcurrency}
-            onChange={(event) =>
-              onWorkerConcurrencyChange(Number(event.target.value))
-            }
+            onChange={onWorkerConcurrencyChange}
           />
           <span className='text-xs text-muted-foreground'>允许 1–32</span>
         </label>
@@ -499,12 +497,11 @@ function CapacityStep({
           <span className='min-h-10 text-xs leading-5 text-muted-foreground'>
             最多保留的待执行任务数量，用于限制批量计划和周期任务的积压规模。
           </span>
-          <Input
-            type='number'
+          <NumericInput
             min={1}
             max={100000}
             value={queueLimit}
-            onChange={(event) => onQueueLimitChange(Number(event.target.value))}
+            onChange={onQueueLimitChange}
           />
           <span className='text-xs text-muted-foreground'>允许 1–100,000</span>
         </label>
@@ -583,14 +580,11 @@ function StrategyStep({
             <Workflow className='size-4 text-primary' />
             风险分析窗口（小时）
           </span>
-          <Input
-            type='number'
+          <NumericInput
             min={1}
             max={8760}
             value={analysisWindow}
-            onChange={(event) =>
-              onAnalysisWindowChange(Number(event.target.value))
-            }
+            onChange={onAnalysisWindowChange}
           />
           <span className='text-xs leading-5 text-muted-foreground'>
             默认 168 小时，即最近 7 天的有效探针样本。

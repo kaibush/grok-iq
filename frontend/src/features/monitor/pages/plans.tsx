@@ -48,6 +48,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import {
   Popover,
   PopoverContent,
@@ -874,18 +875,12 @@ function SystemCronPanel({
             />
           </Field>
           <Field label='Misfire 宽限（秒）'>
-            <Input
-              type='number'
+            <NumericInput
               min={1}
               max={86400}
               value={form.schedulerMisfireGraceSeconds}
               disabled={disabled}
-              onChange={(event) =>
-                set(
-                  'schedulerMisfireGraceSeconds',
-                  Number(event.target.value)
-                )
-              }
+              onChange={(next) => set('schedulerMisfireGraceSeconds', next)}
             />
           </Field>
           <Field
@@ -910,17 +905,13 @@ function SystemCronPanel({
             hint='新账号首次探针完成后，周期计划在此时间内不会重复入队；0 表示关闭冷却。'
             className='sm:col-span-2'
           >
-            <Input
-              type='number'
+            <NumericInput
               min={0}
               max={10080}
               value={form.scheduledProbeRegisterCooldownMinutes}
               disabled={disabled}
-              onChange={(event) =>
-                set(
-                  'scheduledProbeRegisterCooldownMinutes',
-                  Number(event.target.value)
-                )
+              onChange={(next) =>
+                set('scheduledProbeRegisterCooldownMinutes', next)
               }
             />
           </Field>
@@ -1506,12 +1497,11 @@ function PlanDialog({
             />
           </Field>
           <Field label='轮数' required>
-            <Input
-              type='number'
+            <NumericInput
               min={1}
               max={20}
               value={rounds}
-              onChange={(event) => setRounds(Number(event.target.value))}
+              onChange={setRounds}
             />
           </Field>
           <Field label='重叠策略'>

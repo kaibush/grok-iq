@@ -29,6 +29,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -652,17 +653,14 @@ export function NumberField({
   return (
     <Field label={label} hint={hint}>
       <div className='relative'>
-        <Input
-          type='number'
+        <NumericInput
           value={value * displayMultiplier}
           min={min === undefined ? undefined : min * displayMultiplier}
           max={max === undefined ? undefined : max * displayMultiplier}
           step={step * displayMultiplier}
           disabled={disabled}
           className={suffix ? 'pr-9' : undefined}
-          onChange={(event) =>
-            onChange(Number(event.target.value) / displayMultiplier)
-          }
+          onChange={(next) => onChange(next / displayMultiplier)}
         />
         {suffix && (
           <span className='pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs text-muted-foreground'>
@@ -753,14 +751,13 @@ export function RiskFactorRow({
         <div className='mb-1.5 text-[11px] text-muted-foreground md:hidden'>
           {automaticCap ? '满占比得分' : '每次加分'}
         </div>
-        <Input
-          type='number'
+        <NumericInput
           value={weight}
           min={0}
           max={100}
           step={0.1}
           aria-label={`${title}${automaticCap ? '满占比得分' : '每次加分'}`}
-          onChange={(event) => onWeightChange(Number(event.target.value))}
+          onChange={onWeightChange}
         />
       </div>
       <div>
@@ -772,14 +769,13 @@ export function RiskFactorRow({
             同左侧
           </div>
         ) : (
-          <Input
-            type='number'
+          <NumericInput
             value={cap}
             min={0}
             max={100}
             step={0.1}
             aria-label={`${title}最多计分`}
-            onChange={(event) => onCapChange?.(Number(event.target.value))}
+            onChange={(next) => onCapChange?.(next)}
           />
         )}
       </div>
@@ -819,14 +815,13 @@ export function RiskScoreField({
         </span>
       </div>
       <div className='p-2'>
-        <Input
-          type='number'
+        <NumericInput
           value={value}
           min={min}
           max={100}
           step={0.1}
           aria-label={label}
-          onChange={(event) => onChange(Number(event.target.value))}
+          onChange={onChange}
         />
       </div>
     </div>

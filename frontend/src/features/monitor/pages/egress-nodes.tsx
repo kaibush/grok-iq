@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { NumericInput } from '@/components/numeric-input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -724,19 +725,15 @@ export function EgressNodesPage() {
             </div>
             <div className='space-y-1.5'>
               <Label htmlFor='egress-node-capacity'>账号容量</Label>
-              <Input
+              <NumericInput
                 id='egress-node-capacity'
-                type='number'
                 min={0}
                 max={100000}
-                value={nodeForm.accountCapacity || ''}
-                onChange={(event) =>
+                value={nodeForm.accountCapacity}
+                onChange={(next) =>
                   setNodeForm((current) => ({
                     ...current,
-                    accountCapacity: Math.max(
-                      0,
-                      Number(event.target.value) || 0
-                    ),
+                    accountCapacity: next,
                   }))
                 }
                 placeholder='0 表示不限'
@@ -849,17 +846,12 @@ export function EgressNodesPage() {
                   推荐 {recommendedAccountsPerNode || '—'}
                 </span>
               </div>
-              <Input
+              <NumericInput
                 id='egress-accounts-per-node'
-                type='number'
                 min={Math.max(1, recommendedAccountsPerNode)}
                 max={100000}
-                value={effectiveAccountsPerNode || ''}
-                onChange={(event) =>
-                  setAccountsPerNode(
-                    Math.max(0, Number(event.target.value) || 0)
-                  )
-                }
+                value={effectiveAccountsPerNode}
+                onChange={setAccountsPerNode}
                 disabled={accountTotalQuery.isFetching}
               />
               <p className='text-xs text-muted-foreground'>
