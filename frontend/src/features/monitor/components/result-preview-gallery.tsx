@@ -78,7 +78,6 @@ const AccountProbeDetailDialog = lazy(() =>
 const PREVIEW_ISOLATE_NOTE = 'HTML 预览人工判定降智'
 const THUMB_FRAME_WIDTH = HTML_THUMB_FRAME_WIDTH
 const THUMB_FRAME_HEIGHT = HTML_THUMB_FRAME_HEIGHT
-const THUMB_CAPTION_HEIGHT = 88
 const THUMB_GRID_CLASSNAME =
   'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 const PREVIEW_VIEW_STORAGE_KEY = 'grokiq.monitor.result-preview.v1'
@@ -2213,7 +2212,7 @@ function VirtualizedThumbGrid({
   const cellWidth =
     cols > 1 ? (viewport.width - gap * (cols - 1)) / cols : viewport.width
   const thumbHeight = cellWidth * (THUMB_FRAME_HEIGHT / THUMB_FRAME_WIDTH)
-  const rowHeight = thumbHeight + THUMB_CAPTION_HEIGHT + gap
+  const rowHeight = thumbHeight + gap
   const rows = Math.ceil(items.length / cols) || 1
   const measured = viewport.width > 0 && cellWidth > 0
   const startRow = measured
@@ -2353,7 +2352,7 @@ function PreviewThumbCard({
       type='button'
       data-preview-index={index}
       className={cn(
-        'relative isolate z-0 flex h-full w-full min-w-0 flex-col overflow-hidden rounded-xl border bg-background p-0 text-left transition-colors',
+        'relative isolate z-0 aspect-[16/10] h-full w-full min-w-0 overflow-hidden rounded-xl border bg-background p-0 text-left transition-colors',
         active
           ? 'border-primary after:pointer-events-none after:absolute after:inset-0 after:z-[2] after:rounded-[11px] after:ring-2 after:ring-inset after:ring-primary'
           : 'hover:border-primary/30'
@@ -2361,7 +2360,7 @@ function PreviewThumbCard({
       onClick={() => onSelect(index)}
       onDoubleClick={() => onOpen(index)}
     >
-      <div className='relative aspect-[16/10] min-h-0 w-full overflow-hidden border-b bg-muted/20'>
+      <div className='absolute inset-0 overflow-hidden bg-muted/20'>
         {statusChip ? (
           <span className='absolute top-2 left-2 z-[1] rounded-md bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm'>
             {statusChip}
@@ -2391,24 +2390,37 @@ function PreviewThumbCard({
           </div>
         )}
       </div>
-      <div
-        className='flex shrink-0 flex-col justify-start gap-0.5 overflow-hidden px-2.5 py-1.5'
-        style={{ minHeight: THUMB_CAPTION_HEIGHT }}
-      >
-        <div className='truncate text-xs font-medium'>{title}</div>
-        <ThumbInspectMeta item={item} sample={inspectSample} title={title} />
-        <div className='truncate text-[11px] text-muted-foreground'>
-          {sampleLeaves
-            ? sampleMeta(item)
-            : accountMeta(item, { includeAccountCreated: false })}
+      <div className='pointer-events-none absolute inset-x-0 bottom-0 z-[1] border-t border-border/50 bg-background/90 px-2.5 py-1.5 backdrop-blur-md'>
+        <div className='flex min-w-0 items-center gap-1.5'>
+          <div className='min-w-0 flex-1 truncate text-xs font-medium'>{title}</div>
+          <ThumbInspectBadge item={item} sample={inspectSample} title={title} />
         </div>
+        <ThumbInspectMeta
+          item={item}
+          sample={inspectSample}
+          title={title}
+          extra={
+            sampleLeaves
+              ? sampleMeta(item)
+              : accountMeta(item, { includeAccountCreated: false })
+          }
+        />
       </div>
     </button>
   )
 }
 
 
-function ThumbInspectMeta({
+function thumbInspectProfile(
+  item: ResultPreviewItem,
+  title: string
+) {
+  const profile = item.profileName?.trim() || ''
+  if (!profile || profile === title || profile === item.heading) return ''
+  return profile
+}
+
+function ThumbInspectBadge({
   item,
   sample,
   title,
@@ -2417,28 +2429,45 @@ function ThumbInspectMeta({
   sample?: ProbeSample | null
   title: string
 }) {
-  const showProfile =
-    Boolean(item.profileName) &&
-    item.profileName !== title &&
-    item.profileName !== item.heading
   const classification = sample?.classification?.trim()
-  if (!classification && !showProfile && !sample) return null
+  if (classification) {
+    return <StatusBadge value={classification} className='max-w-28 shrink-0 truncate text-[10px]' />
+  }
+  const profile = thumbInspectProfile(item, title)
+  if (!profile) return null
   return (
-    <>
-      {classification || showProfile ? (
-        <div className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5'>
-          {classification ? (
-            <StatusBadge value={classification} className='text-[10px]' />
+    <span className='max-w-24 shrink-0 truncate text-[10px] text-muted-foreground'>
+      {profile}
+    </span>
+  )
+}
+
+function ThumbInspectMeta({
+  item,
+  sample,
+  title,
+  extra,
+}: {
+  item: ResultPreviewItem
+  sample?: ProbeSample | null
+  title: string
+  extra?: string
+}) {
+  const profile = thumbInspectProfile(item, title)
+  const showProfile = Boolean(profile && sample?.classification?.trim())
+  if (!sample && !extra && !showProfile) return null
+  return (
+    <div className='mt-0.5 min-w-0 truncate text-[10px] leading-4 text-muted-foreground tabular-nums'>
+      {showProfile ? (
+        <>
+          {profile}
+          {sample || extra ? (
+            <span className='px-1 text-muted-foreground/50'>·</span>
           ) : null}
-          {showProfile ? (
-            <span className='min-w-0 truncate text-[10px] text-muted-foreground'>
-              {item.profileName}
-            </span>
-          ) : null}
-        </div>
+        </>
       ) : null}
       {sample ? (
-        <div className='min-w-0 truncate text-[10px] leading-4 text-muted-foreground tabular-nums'>
+        <>
           TPS{' '}
           <DualTpsValue
             tps={sample.tps}
@@ -2449,9 +2478,17 @@ function ThumbInspectMeta({
           首 Token {formatNumber(sample.first_token_ms, 0)} ms
           <span className='px-1 text-muted-foreground/50'>·</span>
           耗时 {formatNumber(sample.duration_ms, 0)} ms
-        </div>
+        </>
       ) : null}
-    </>
+      {extra ? (
+        <>
+          {sample || showProfile ? (
+            <span className='px-1 text-muted-foreground/50'>·</span>
+          ) : null}
+          {extra}
+        </>
+      ) : null}
+    </div>
   )
 }
 
