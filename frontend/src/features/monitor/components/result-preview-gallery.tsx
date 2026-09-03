@@ -78,6 +78,7 @@ const AccountProbeDetailDialog = lazy(() =>
 const PREVIEW_ISOLATE_NOTE = 'HTML 预览人工判定降智'
 const THUMB_FRAME_WIDTH = HTML_THUMB_FRAME_WIDTH
 const THUMB_FRAME_HEIGHT = HTML_THUMB_FRAME_HEIGHT
+const THUMB_CAPTION_HEIGHT = 120
 const THUMB_GRID_CLASSNAME =
   'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 const PREVIEW_VIEW_STORAGE_KEY = 'grokiq.monitor.result-preview.v1'
@@ -2212,7 +2213,7 @@ function VirtualizedThumbGrid({
   const cellWidth =
     cols > 1 ? (viewport.width - gap * (cols - 1)) / cols : viewport.width
   const thumbHeight = cellWidth * (THUMB_FRAME_HEIGHT / THUMB_FRAME_WIDTH)
-  const rowHeight = thumbHeight + 56 + gap
+  const rowHeight = thumbHeight + THUMB_CAPTION_HEIGHT + gap
   const rows = Math.ceil(items.length / cols) || 1
   const measured = viewport.width > 0 && cellWidth > 0
   const startRow = measured
@@ -2339,6 +2340,13 @@ function PreviewThumbCard({
     (isAccountItem ? accountPreviewQuery.isLoading : runQuery.isLoading) &&
     !content
   const statusChip = previewStatusChip(status)
+  const inspectSample = sample || item.sample
+  const title =
+    heading ||
+    item.heading ||
+    (sampleLeaves
+      ? `第 ${inspectSample?.round_number || item.sample?.round_number || 1} 轮`
+      : item.accountName)
   return (
     <button
       ref={ref}
@@ -2383,19 +2391,69 @@ function PreviewThumbCard({
           </div>
         )}
       </div>
-      <div className='h-14 shrink-0 px-2.5 py-2'>
-        <div className='truncate text-xs font-medium'>
-          {heading ||
-            item.heading ||
-            (sampleLeaves
-              ? `第 ${item.sample?.round_number || 1} 轮`
-              : item.accountName)}
-        </div>
-        <div className='mt-0.5 truncate text-[11px] text-muted-foreground'>
+      <div
+        className='flex shrink-0 flex-col justify-start gap-1 overflow-hidden px-2.5 py-2'
+        style={{ minHeight: THUMB_CAPTION_HEIGHT }}
+      >
+        <div className='truncate text-xs font-medium'>{title}</div>
+        <ThumbInspectMeta item={item} sample={inspectSample} title={title} />
+        <div className='truncate text-[11px] text-muted-foreground'>
           {sampleLeaves ? sampleMeta(item) : accountMeta(item)}
         </div>
       </div>
     </button>
+  )
+}
+
+
+function ThumbInspectMeta({
+  item,
+  sample,
+  title,
+}: {
+  item: ResultPreviewItem
+  sample?: ProbeSample | null
+  title: string
+}) {
+  const showProfile =
+    Boolean(item.profileName) &&
+    item.profileName !== title &&
+    item.profileName !== item.heading
+  const classification = sample?.classification?.trim()
+  if (!classification && !showProfile && !sample) return null
+  return (
+    <>
+      {classification || showProfile ? (
+        <div className='flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5'>
+          {classification ? (
+            <StatusBadge value={classification} className='text-[10px]' />
+          ) : null}
+          {showProfile ? (
+            <span className='min-w-0 truncate text-[10px] text-muted-foreground'>
+              {item.profileName}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {sample ? (
+        <div className='flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[10px] leading-4 text-muted-foreground'>
+          <span className='whitespace-nowrap tabular-nums'>
+            TPS{' '}
+            <DualTpsValue
+              tps={sample.tps}
+              upstreamTps={sample.upstream_tps}
+              compact
+            />
+          </span>
+          <span className='whitespace-nowrap tabular-nums'>
+            首 Token {formatNumber(sample.first_token_ms, 0)} ms
+          </span>
+          <span className='whitespace-nowrap tabular-nums'>
+            耗时 {formatNumber(sample.duration_ms, 0)} ms
+          </span>
+        </div>
+      ) : null}
+    </>
   )
 }
 
