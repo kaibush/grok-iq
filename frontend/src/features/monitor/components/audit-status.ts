@@ -20,6 +20,7 @@ const AUDIT_ERROR_LABELS: Record<string, string> = {
   upstream_forbidden_permission_denied: '上游拒绝访问',
   quality_degraded: '质量降级',
   request_canceled: '请求已取消',
+  client_stream_interrupted: '客户端中断',
   client_key_account_scope_unavailable: 'Key 账号范围不可用',
 }
 
