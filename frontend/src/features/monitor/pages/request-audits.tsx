@@ -1709,6 +1709,7 @@ export function RequestAuditsPage() {
     committedLedgerQuery.pinnedAccountId ?? '',
   ].join('|')
   const appliedLedgerInteractionKeyRef = useRef(ledgerInteractionKey)
+  const ledgerPaneRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!needsRecords) return
     if (appliedLedgerInteractionKeyRef.current === ledgerInteractionKey) return
@@ -3447,32 +3448,21 @@ export function RequestAuditsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className='relative p-0' aria-busy={ledgerFilterPending}>
-              {ledgerFilterPending ? (
-                <div
-                  className='sticky top-0 z-20 flex justify-center border-b bg-background/85 px-3 py-2 backdrop-blur-sm'
-                  role='status'
-                  aria-live='polite'
-                >
-                  <div className='flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm'>
-                    <RefreshCw className='size-3.5 animate-spin text-primary' />
-                    {committedLedgerQuery.clientKey === 'all'
-                      ? `正在加载第 ${committedLedgerQuery.page} 页请求流水`
-                      : '正在加载该 Key 的流水'}
-                  </div>
-                </div>
-              ) : null}
+              <div ref={ledgerPaneRef} className='relative'>
+              <RequestAuditClientBoard
+                items={clientKeyOptions}
+                selectedId={auditClientKey}
+                loading={recordsQuery.isLoading && !recordsQuery.data}
+                pending={ledgerFilterPending}
+                overlayHostRef={ledgerPaneRef}
+                onSelect={selectLedgerClientKey}
+                onPrefetch={prefetchLedgerClientKey}
+              />
               <div
                 className={cn(
                   ledgerFilterPending && 'pointer-events-none opacity-55'
                 )}
               >
-              <RequestAuditClientBoard
-                items={clientKeyOptions}
-                selectedId={auditClientKey}
-                loading={recordsQuery.isLoading && !recordsQuery.data}
-                onSelect={selectLedgerClientKey}
-                onPrefetch={prefetchLedgerClientKey}
-              />
               <div className='space-y-2 border-b bg-muted/15 px-3 py-2'>
                 <div className='flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between'>
                   <div className='flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center'>
@@ -3930,6 +3920,7 @@ export function RequestAuditsPage() {
                   onPageChange={changeLedgerPage}
                   onPageSizeChange={changeLedgerPageSize}
                 />
+              </div>
               </div>
               </div>
             </CardContent>

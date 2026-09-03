@@ -1,5 +1,15 @@
-import { memo, useDeferredValue, useMemo } from 'react'
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react'
 import { KeyRound, Loader2 } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { type RequestAuditClientKeyOption } from '@/lib/api'
 import { cn, formatNumber, formatRelativeTime } from '@/lib/utils'
 import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
@@ -79,6 +89,34 @@ function compareClientItems(
   if (left.id === 'unlabeled') return 1
   if (right.id === 'unlabeled') return -1
   return (left.name || left.id).localeCompare(right.name || right.id, 'zh')
+}
+
+function runAfterPaint(task: () => void) {
+  let innerId = 0
+  const outerId = window.requestAnimationFrame(() => {
+    innerId = window.requestAnimationFrame(task)
+  })
+  return () => {
+    window.cancelAnimationFrame(outerId)
+    window.cancelAnimationFrame(innerId)
+  }
+}
+
+function ClientSwitchOverlay({ message }: { message: string }) {
+  return (
+    <div
+      className='absolute inset-0 z-20 bg-background/65 backdrop-blur-[1px]'
+      role='status'
+      aria-live='polite'
+    >
+      <div className='sticky top-0 flex justify-center px-3 py-2'>
+        <div className='flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm'>
+          <Loader2 className='size-3.5 animate-spin text-primary' />
+          {message}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 type ClientCardModel = {
@@ -188,12 +226,16 @@ export function RequestAuditClientBoard({
   items,
   selectedId,
   loading = false,
+  pending = false,
+  overlayHostRef,
   onSelect,
   onPrefetch,
 }: {
   items: RequestAuditClientKeyOption[]
   selectedId: string
   loading?: boolean
+  pending?: boolean
+  overlayHostRef?: RefObject<HTMLDivElement | null>
   onSelect: (id: string) => void
   onPrefetch?: (id: string) => void
 }) {
@@ -203,6 +245,30 @@ export function RequestAuditClientBoard({
   const sort = sortView.value.sort === 'recent' ? 'recent' : 'requests'
   const deferredSort = useDeferredValue(sort)
   const sortPending = deferredSort !== sort
+  const [optimisticId, setOptimisticId] = useState<string | null>(null)
+  const [localPending, setLocalPending] = useState(false)
+  const onSelectRef = useRef(onSelect)
+  const cancelApplyRef = useRef<(() => void) | null>(null)
+  onSelectRef.current = onSelect
+  const activeId = optimisticId ?? selectedId
+  const switchPending = localPending || pending
+  const selectClient = useCallback((id: string) => {
+    setOptimisticId(id)
+    setLocalPending(true)
+    cancelApplyRef.current?.()
+    cancelApplyRef.current = runAfterPaint(() => {
+      cancelApplyRef.current = null
+      onSelectRef.current(id)
+    })
+  }, [])
+  useEffect(() => () => cancelApplyRef.current?.(), [])
+  useEffect(() => {
+    if (!localPending) return
+    if (optimisticId != null && selectedId !== optimisticId) return
+    if (pending) return
+    setLocalPending(false)
+    setOptimisticId(null)
+  }, [localPending, optimisticId, pending, selectedId])
   const totalRequests = useMemo(
     () => items.reduce((sum, item) => sum + (item.requestCount ?? 0), 0),
     [items]
@@ -247,149 +313,168 @@ export function RequestAuditClientBoard({
       ),
     [cardModels, deferredSort]
   )
-  const selected = selectedId !== 'all'
+  const selected = activeId !== 'all'
   const selectedItem = selected
-    ? items.find((item) => item.id === selectedId)
+    ? items.find((item) => item.id === activeId)
     : undefined
   const selectedQuality = selectedItem ? clientQuality(selectedItem) : null
+  const overlay =
+    !loading && switchPending ? (
+      <ClientSwitchOverlay
+        message={
+          activeId === 'all' ? '正在加载请求流水' : '正在加载该 Key 的流水'
+        }
+      />
+    ) : null
+  const overlayHost = overlayHostRef?.current
 
   if (!loading && items.length === 0) return null
 
   return (
-    <section className='border-b px-4 py-3'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <div className='flex min-w-0 items-center gap-2'>
-          <KeyRound className='size-3.5 text-muted-foreground' />
-          <span className='text-sm font-medium'>活跃客户端</span>
-          <InfoTooltip
-            label='活跃客户端'
-            content={`当前分析窗口内发过请求的客户端 Key。可按请求量或最近活跃时间排序。忙碌程度按窗口内请求量相对比较：条越长越忙，不是任务进度。点击卡片会按该 Key 过滤流水，并展示该 Key 在同一窗口内的正常率 / 异常率。${NORMAL_RATE_HINT}`}
-          />
-          {loading ? (
-            <Skeleton className='h-5 w-24 rounded-full' />
-          ) : (
-            <span className='text-[11px] text-muted-foreground'>
-              {formatNumber(items.length, 0)} 个 ·{' '}
-              {formatNumber(totalRequests, 0)} 次
-            </span>
-          )}
-        </div>
-        <div className='flex flex-wrap items-center justify-end gap-2'>
-          <SegmentedControl
-            ariaLabel='活跃客户端排序'
-            value={sort}
-            onChange={(value) => sortView.setValue({ sort: value })}
-            options={CLIENT_SORT_OPTIONS}
-          />
-          {selected ? (
-            <Button
-              type='button'
-              size='sm'
-              variant='ghost'
-              className='h-7 px-2 text-xs'
-              onPointerEnter={() => onPrefetch?.('all')}
-              onClick={() => onSelect('all')}
-            >
-              清除 Key 筛选
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {loading ? (
-        <div className='mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2'>
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className='h-[5.25rem] rounded-lg' />
-          ))}
-        </div>
-      ) : (
-        <div className='relative mt-3' aria-busy={sortPending}>
-          <div
-            className={cn(
-              'grid max-h-56 grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2 overflow-y-auto',
-              sortPending && 'pointer-events-none opacity-60'
+    <>
+      {overlay && overlayHost ? createPortal(overlay, overlayHost) : null}
+      <section className='relative border-b px-4 py-3'>
+        {overlay && !overlayHost ? overlay : null}
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <KeyRound className='size-3.5 text-muted-foreground' />
+            <span className='text-sm font-medium'>活跃客户端</span>
+            <InfoTooltip
+              label='活跃客户端'
+              content={`当前分析窗口内发过请求的客户端 Key。可按请求量或最近活跃时间排序。忙碌程度按窗口内请求量相对比较：条越长越忙，不是任务进度。点击卡片会按该 Key 过滤流水，并展示该 Key 在同一窗口内的正常率 / 异常率。${NORMAL_RATE_HINT}`}
+            />
+            {loading ? (
+              <Skeleton className='h-5 w-24 rounded-full' />
+            ) : (
+              <span className='text-[11px] text-muted-foreground'>
+                {formatNumber(items.length, 0)} 个 ·{' '}
+                {formatNumber(totalRequests, 0)} 次
+              </span>
             )}
-            role='list'
-            aria-label='当前窗口活跃客户端'
-          >
-            {sortedModels.map((model) => (
-              <RequestAuditClientCard
-                key={model.item.id}
-                model={model}
-                active={model.item.id === selectedId}
-                onSelect={onSelect}
-                onPrefetch={onPrefetch}
-              />
+          </div>
+          <div className='flex flex-wrap items-center justify-end gap-2'>
+            <SegmentedControl
+              ariaLabel='活跃客户端排序'
+              value={sort}
+              onChange={(value) => sortView.setValue({ sort: value })}
+              options={CLIENT_SORT_OPTIONS}
+            />
+            {selected ? (
+              <Button
+                type='button'
+                size='sm'
+                variant='ghost'
+                className='h-7 px-2 text-xs'
+                onPointerEnter={() => onPrefetch?.('all')}
+                onClick={() => selectClient('all')}
+              >
+                清除 Key 筛选
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        {loading ? (
+          <div className='mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2'>
+            {Array.from({ length: 4 }, (_, index) => (
+              <Skeleton key={index} className='h-[5.25rem] rounded-lg' />
             ))}
           </div>
-          {sortPending ? (
+        ) : (
+          <div
+            className='relative mt-3'
+            aria-busy={sortPending || switchPending}
+          >
             <div
-              className='absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/65 backdrop-blur-[1px]'
-              role='status'
-              aria-live='polite'
+              className={cn(
+                'grid max-h-56 grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2 overflow-y-auto',
+                (sortPending || switchPending) &&
+                  'pointer-events-none opacity-60'
+              )}
+              role='list'
+              aria-label='当前窗口活跃客户端'
             >
-              <div className='flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm'>
-                <Loader2 className='size-3.5 animate-spin text-primary' />
-                {sort === 'recent' ? '正在按活跃时间排序' : '正在按请求量排序'}
-              </div>
+              {sortedModels.map((model) => (
+                <RequestAuditClientCard
+                  key={model.item.id}
+                  model={model}
+                  active={model.item.id === activeId}
+                  onSelect={selectClient}
+                  onPrefetch={onPrefetch}
+                />
+              ))}
             </div>
-          ) : null}
-        </div>
-      )}
-      {selectedQuality ? (
-        <div className='mt-3 rounded-lg border bg-background px-3 py-2.5'>
-          <div className='flex items-center justify-between gap-3'>
-            <div className='min-w-0'>
-              <div className='truncate text-sm font-medium'>
-                {selectedItem?.name ||
-                  (selectedItem?.id === 'unlabeled'
-                    ? '未记录 Key'
-                    : `#${selectedItem?.id}`)}
-                <span className='ml-1.5 text-[11px] font-normal text-muted-foreground'>
-                  当前窗口质量
-                </span>
+            {sortPending && !switchPending ? (
+              <div
+                className='absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/65 backdrop-blur-[1px]'
+                role='status'
+                aria-live='polite'
+              >
+                <div className='flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm'>
+                  <Loader2 className='size-3.5 animate-spin text-primary' />
+                  {sort === 'recent'
+                    ? '正在按活跃时间排序'
+                    : '正在按请求量排序'}
+                </div>
               </div>
-              <div className='mt-0.5 text-[11px] text-muted-foreground'>
-                {formatNumber(selectedQuality.requests, 0)} 次 · 异常{' '}
+            ) : null}
+          </div>
+        )}
+        {selectedQuality ? (
+          <div className='mt-3 rounded-lg border bg-background px-3 py-2.5'>
+            <div className='flex items-center justify-between gap-3'>
+              <div className='min-w-0'>
+                <div className='truncate text-sm font-medium'>
+                  {selectedItem?.name ||
+                    (selectedItem?.id === 'unlabeled'
+                      ? '未记录 Key'
+                      : `#${selectedItem?.id}`)}
+                  <span className='ml-1.5 text-[11px] font-normal text-muted-foreground'>
+                    当前窗口质量
+                  </span>
+                </div>
+                <div className='mt-0.5 text-[11px] text-muted-foreground'>
+                  {formatNumber(selectedQuality.requests, 0)} 次 · 异常{' '}
+                  {formatRatePercent(
+                    selectedQuality.abnormal,
+                    selectedQuality.requests
+                  )}
+                  {selectedQuality.abnormal > 0
+                    ? ` · 观察 ${formatNumber(selectedQuality.watchRequests, 0)} · 高风险 ${formatNumber(selectedQuality.highRiskRequests, 0)}`
+                    : ''}
+                </div>
+              </div>
+              <span
+                className={cn(
+                  'shrink-0 rounded-md px-1.5 py-0.5 text-sm font-semibold tabular-nums',
+                  normalRateClass(
+                    selectedQuality.normalShare,
+                    selectedQuality.requests
+                  )
+                )}
+              >
                 {formatRatePercent(
-                  selectedQuality.abnormal,
+                  selectedQuality.normal,
                   selectedQuality.requests
                 )}
-                {selectedQuality.abnormal > 0
-                  ? ` · 观察 ${formatNumber(selectedQuality.watchRequests, 0)} · 高风险 ${formatNumber(selectedQuality.highRiskRequests, 0)}`
-                  : ''}
-              </div>
+              </span>
             </div>
-            <span
-              className={cn(
-                'shrink-0 rounded-md px-1.5 py-0.5 text-sm font-semibold tabular-nums',
-                normalRateClass(
-                  selectedQuality.normalShare,
-                  selectedQuality.requests
-                )
-              )}
-            >
-              {formatRatePercent(
-                selectedQuality.normal,
-                selectedQuality.requests
-              )}
-            </span>
+            <div className='mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-muted'>
+              <span
+                className='bg-emerald-500'
+                style={{ width: `${selectedQuality.normalShare}%` }}
+              />
+              <span
+                className='bg-amber-500'
+                style={{ width: `${selectedQuality.watchShare}%` }}
+              />
+              <span
+                className='bg-rose-500'
+                style={{ width: `${selectedQuality.highShare}%` }}
+              />
+            </div>
           </div>
-          <div className='mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-muted'>
-            <span
-              className='bg-emerald-500'
-              style={{ width: `${selectedQuality.normalShare}%` }}
-            />
-            <span
-              className='bg-amber-500'
-              style={{ width: `${selectedQuality.watchShare}%` }}
-            />
-            <span
-              className='bg-rose-500'
-              style={{ width: `${selectedQuality.highShare}%` }}
-            />
-          </div>
-        </div>
-      ) : null}
-    </section>
+        ) : null}
+      </section>
+    </>
   )
 }
