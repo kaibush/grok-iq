@@ -318,7 +318,15 @@ function UsageTrend({
             <ResponsiveContainer width='100%' height='100%'>
               <ComposedChart
                 data={chartData}
-                margin={{ left: 0, right: 8, top: 8, bottom: 0 }}
+                margin={{
+                  left:
+                    axisSides.tokens === 'left' || axisSides.requests === 'left'
+                      ? 56
+                      : 4,
+                  right: 8,
+                  top: 8,
+                  bottom: 0,
+                }}
               >
                 <defs>
                   <linearGradient
@@ -361,12 +369,12 @@ function UsageTrend({
                   yAxisId='tokens'
                   hide={!axisSides.tokens}
                   orientation={axisSides.tokens ?? 'left'}
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
                   tickLine={false}
                   axisLine={false}
-                  width={axisSides.tokens ? 48 : 0}
+                  width={axisSides.tokens ? 40 : 0}
                   allowDecimals={false}
-                  tickFormatter={(value) => formatCompact(Number(value))}
+                  tickFormatter={(value) => formatCompactTokens(Number(value))}
                 />
                 <YAxis
                   yAxisId='billing'
@@ -375,10 +383,23 @@ function UsageTrend({
                   tick={{ fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  width={axisSides.billing ? 48 : 0}
+                  width={axisSides.billing ? 52 : 0}
                   tickFormatter={(value) => formatCompactUsd(Number(value))}
                 />
-                <YAxis yAxisId='requests' hide />
+                {axisSides.requests ? (
+                  <YAxis
+                    yAxisId='requests'
+                    orientation={axisSides.requests}
+                    tick={{ fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={48}
+                    allowDecimals={false}
+                    tickFormatter={(value) => formatCompact(Number(value))}
+                  />
+                ) : (
+                  <YAxis yAxisId='requests' hide />
+                )}
                 <Tooltip
                   content={TrendTooltip}
                   cursor={{ stroke: 'var(--border)', strokeDasharray: '3 3' }}
@@ -391,6 +412,7 @@ function UsageTrend({
                   radius={[3, 3, 0, 0]}
                   hide={hiddenSeries.has('billing')}
                   maxBarSize={18}
+                  isAnimationActive={false}
                 />
                 <Area
                   yAxisId='tokens'
@@ -403,6 +425,7 @@ function UsageTrend({
                   hide={hiddenSeries.has('tokens')}
                   dot={false}
                   activeDot={{ r: 3 }}
+                  isAnimationActive={false}
                 />
                 <Line
                   yAxisId='requests'
@@ -415,6 +438,7 @@ function UsageTrend({
                   hide={hiddenSeries.has('requests')}
                   dot={false}
                   activeDot={{ r: 3 }}
+                  isAnimationActive={false}
                 />
               </ComposedChart>
             </ResponsiveContainer>
