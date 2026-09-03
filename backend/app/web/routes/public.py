@@ -9,6 +9,7 @@ from app.services.account_service import AccountService
 from app.services.auth_service import AuthenticationError, AuthService
 from app.services.client_key_quota_service import ClientKeyQuotaService
 from app.services.client_key_usage_service import ClientKeyUsageService
+from app.services.request_audit_service import RequestAuditService
 from app.web.schemas import ClientKeyQuotaInput, ClientKeyUsageInput
 
 from ._shared import disable_client_cache
@@ -18,6 +19,7 @@ def build_public_router(
     account_service: AccountService,
     client: Grok2APIClient,
     auth_service: AuthService,
+    request_audits: RequestAuditService | None = None,
 ) -> APIRouter:
     router = APIRouter()
     quota_service = ClientKeyQuotaService(client)
@@ -70,6 +72,13 @@ def build_public_router(
             timezone=timezone,
             refresh=refresh.strip().lower() in {"1", "true", "yes"},
         )
+
+    if request_audits is not None:
+
+        @router.get("/public/upstream-health")
+        async def public_upstream_health(response: Response) -> dict[str, Any]:
+            disable_client_cache(response)
+            return request_audits.recent_request_health()
 
     return router
 

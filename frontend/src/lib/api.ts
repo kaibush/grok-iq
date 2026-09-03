@@ -145,6 +145,62 @@ export type PublicUpstreamUsageOverview = {
   providers: PublicUpstreamUsageProviderStat[]
 }
 
+export type PublicUpstreamHealthWindow = {
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  successRate: number
+}
+
+export type PublicUpstreamHealthSeriesPoint = {
+  start: string
+  end: string
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  successRate: number
+}
+
+export type PublicUpstreamHealthModel = {
+  model: string
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  successRate: number
+  mainError: {
+    statusCode: number
+    errorCode: string
+    requests: number
+  } | null
+}
+
+export type PublicUpstreamHealthError = {
+  statusCode: number
+  errorCode: string
+  requests: number
+}
+
+export type PublicUpstreamHealth = {
+  provider: string
+  enabled: boolean
+  generatedAt: string | null
+  asOf: string | null
+  stale: boolean
+  scan: {
+    lastScanAt: string | null
+    lastSuccessAt: string | null
+    lastError: string
+  }
+  windows: {
+    '15m': PublicUpstreamHealthWindow
+    '30m': PublicUpstreamHealthWindow
+    '1h': PublicUpstreamHealthWindow
+  }
+  series: PublicUpstreamHealthSeriesPoint[]
+  models: PublicUpstreamHealthModel[]
+  errors: PublicUpstreamHealthError[]
+}
+
 export type PublicClientKeyUsage = {
   found: true
   period: string
@@ -3030,6 +3086,10 @@ export const api = {
       { skipAuth: true }
     )
   },
+  publicUpstreamHealth: () =>
+    request<PublicUpstreamHealth>('/public/upstream-health', {
+      skipAuth: true,
+    }),
   lookupPublicClientKeyQuota: (apiKey: string) =>
     request<PublicClientKeyQuotaLookup>('/public/client-key-quota', {
       method: 'POST',

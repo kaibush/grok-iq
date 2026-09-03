@@ -63,6 +63,12 @@ REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY = "request_audit_stream_sample_projecti
 REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES = 10
 REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY = "request_audit_reasoning_effort_projection_v1"
 REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_MAX_PAGES = 10
+REQUEST_HEALTH_WINDOWS = (("15m", 15), ("30m", 30), ("1h", 60))
+REQUEST_HEALTH_SERIES_BUCKET_MINUTES = 5
+REQUEST_HEALTH_SERIES_BUCKETS = 12
+# Audit scans are adaptive (seconds while busy, up to five minutes while
+# idle). Treat the board as stale only after the scan/rows fall far behind.
+REQUEST_HEALTH_STALE_AFTER_SECONDS = 600.0
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +337,187 @@ def _p95(values: list[float]) -> float:
         return ordered[lower]
     weight = rank - lower
     return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def _health_success(status_code: int, error_code: str) -> bool:
+    return 200 <= int(status_code or 0) < 300 and not str(error_code or "").strip()
+
+
+def _health_rows(
+    rows: list[dict[str, Any]],
+) -> list[tuple[datetime, bool, str, int, str]]:
+    normalized: list[tuple[datetime, bool, str, int, str]] = []
+    for row in rows:
+        created = ensure_utc(row.get("created_at"))
+        if created is None:
+            continue
+        status_code = int(row.get("status_code") or 0)
+        error_code = str(row.get("error_code") or "").strip()
+        model = str(
+            row.get("model_public_id") or row.get("model_upstream_model") or ""
+        ).strip()
+        normalized.append(
+            (
+                created,
+                _health_success(status_code, error_code),
+                model or "未知模型",
+                status_code,
+                error_code,
+            )
+        )
+    return normalized
+
+
+def _health_window_payload(requests: int, successful: int) -> dict[str, Any]:
+    return {
+        "requests": requests,
+        "successfulRequests": successful,
+        "failedRequests": max(0, requests - successful),
+        "successRate": round(successful * 100.0 / requests, 1) if requests else 0.0,
+    }
+
+
+def _health_windows(
+    normalized: list[tuple[datetime, bool, str, int, str]],
+    *,
+    end: datetime,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for key, minutes in REQUEST_HEALTH_WINDOWS:
+        cutoff = end - timedelta(minutes=minutes)
+        requests = sum(1 for item in normalized if item[0] >= cutoff)
+        successful = sum(
+            1 for item in normalized if item[0] >= cutoff and item[1]
+        )
+        result[key] = _health_window_payload(requests, successful)
+    return result
+
+
+def _health_series(
+    normalized: list[tuple[datetime, bool, str, int, str]],
+    *,
+    end: datetime,
+) -> list[dict[str, Any]]:
+    aligned_end = end.replace(
+        minute=(end.minute // REQUEST_HEALTH_SERIES_BUCKET_MINUTES)
+        * REQUEST_HEALTH_SERIES_BUCKET_MINUTES,
+        second=0,
+        microsecond=0,
+    )
+    series_start = aligned_end - timedelta(
+        minutes=REQUEST_HEALTH_SERIES_BUCKET_MINUTES
+        * (REQUEST_HEALTH_SERIES_BUCKETS - 1)
+    )
+    buckets: list[dict[str, Any]] = []
+    for index in range(REQUEST_HEALTH_SERIES_BUCKETS - 1):
+        bucket_start = series_start + timedelta(
+            minutes=REQUEST_HEALTH_SERIES_BUCKET_MINUTES * index
+        )
+        bucket_end = bucket_start + timedelta(
+            minutes=REQUEST_HEALTH_SERIES_BUCKET_MINUTES
+        )
+        requests = 0
+        successful = 0
+        for item in normalized:
+            if item[0] < bucket_start or item[0] >= bucket_end:
+                continue
+            requests += 1
+            if item[1]:
+                successful += 1
+        buckets.append(
+            {
+                "start": _iso(bucket_start),
+                "end": _iso(bucket_end),
+                **_health_window_payload(requests, successful),
+            }
+        )
+    if end > aligned_end:
+        requests = sum(1 for item in normalized if aligned_end <= item[0] < end)
+        successful = sum(
+            1
+            for item in normalized
+            if aligned_end <= item[0] < end and item[1]
+        )
+        buckets.append(
+            {
+                "start": _iso(aligned_end),
+                "end": _iso(end),
+                **_health_window_payload(requests, successful),
+            }
+        )
+    return buckets
+
+
+def _health_models(
+    normalized: list[tuple[datetime, bool, str, int, str]],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for _created, ok, model, status_code, error_code in normalized:
+        item = grouped.setdefault(
+            model,
+            {
+                "requests": 0,
+                "successfulRequests": 0,
+                "failedRequests": 0,
+                "_errors": {},
+            },
+        )
+        item["requests"] += 1
+        if ok:
+            item["successfulRequests"] += 1
+        else:
+            item["failedRequests"] += 1
+            error_key = (status_code, error_code)
+            item["_errors"][error_key] = item["_errors"].get(error_key, 0) + 1
+    models: list[dict[str, Any]] = []
+    for model, item in grouped.items():
+        main_error: dict[str, Any] | None = None
+        if item["failedRequests"] and item["_errors"]:
+            (status_code, error_code), count = max(
+                item["_errors"].items(), key=lambda pair: pair[1]
+            )
+            main_error = {
+                "statusCode": status_code,
+                "errorCode": error_code,
+                "requests": count,
+            }
+        models.append(
+            {
+                "model": model,
+                "requests": item["requests"],
+                "successfulRequests": item["successfulRequests"],
+                "failedRequests": item["failedRequests"],
+                "successRate": (
+                    round(item["successfulRequests"] * 100.0 / item["requests"], 1)
+                    if item["requests"]
+                    else 0.0
+                ),
+                "mainError": main_error,
+            }
+        )
+    models.sort(key=lambda item: item["requests"], reverse=True)
+    return models
+
+
+def _health_errors(
+    normalized: list[tuple[datetime, bool, str, int, str]],
+) -> list[dict[str, Any]]:
+    counts: dict[tuple[int, str], int] = {}
+    for _created, ok, _model, status_code, error_code in normalized:
+        if ok:
+            continue
+        error_key = (status_code, error_code)
+        counts[error_key] = counts.get(error_key, 0) + 1
+    errors = [
+        {
+            "statusCode": status_code,
+            "errorCode": error_code,
+            "requests": count,
+        }
+        for (status_code, error_code), count in counts.items()
+    ]
+    errors.sort(key=lambda item: item["requests"], reverse=True)
+    return errors[:10]
 
 
 class RequestAuditService:
@@ -2853,6 +3040,54 @@ class RequestAuditService:
             "trend": self._trend_payload(window, records, evaluations=evaluations),
             "quality": self._quality_breakdowns(records, evaluations=evaluations),
             "scan": self._state_payload(state, window=window),
+        }
+
+    def recent_request_health(self) -> dict[str, Any]:
+        """Aggregate the newest hour of local audit records for the status board.
+
+        The public status page needs a quick "is the upstream healthy right
+        now" answer without fanning out to grok2api. The local projection is
+        kept seconds fresh by the adaptive scanner, so counting its newest
+        hour is enough for 15m/30m/1h success rates.
+        """
+
+        end = utc_now()
+        start = end - timedelta(hours=1)
+        rows = self.repository.recent_health_rows(start)
+        normalized = _health_rows(rows)
+        state = self.repository.ensure_state(REQUEST_AUDIT_SCOPE)
+        last_success_at = ensure_utc(state.get("last_success_at"))
+        last_scan_at = ensure_utc(state.get("last_scan_at"))
+        latest_seen = max((item[0] for item in normalized), default=None)
+        scan_fresh = (
+            last_success_at is not None
+            and (end - last_success_at).total_seconds()
+            <= REQUEST_HEALTH_STALE_AFTER_SECONDS
+        )
+        if not scan_fresh:
+            # Before the first successful scan (or while idle without a scan),
+            # fall back to how recently the newest local row arrived so a
+            # healthy but quiet interval does not look stale.
+            scan_fresh = (
+                latest_seen is not None
+                and (end - latest_seen).total_seconds()
+                <= REQUEST_HEALTH_STALE_AFTER_SECONDS
+            )
+        return {
+            "provider": "grok_build",
+            "enabled": bool(self.settings.request_audit_enabled),
+            "generatedAt": _iso(end),
+            "asOf": _iso(latest_seen),
+            "stale": not scan_fresh,
+            "scan": {
+                "lastScanAt": _iso(last_scan_at),
+                "lastSuccessAt": _iso(last_success_at),
+                "lastError": str(state.get("last_error") or ""),
+            },
+            "windows": _health_windows(normalized, end=end),
+            "series": _health_series(normalized, end=end),
+            "models": _health_models(normalized),
+            "errors": _health_errors(normalized),
         }
 
     def _summary_payload(

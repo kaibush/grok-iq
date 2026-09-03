@@ -36,6 +36,7 @@ import { StatCard } from '@/components/stat-card'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { ClientKeyQuotaDialog } from '@/features/monitor/components/client-key-quota-dialog'
 import { PublicUsageDashboard } from '@/features/monitor/components/public-usage-dashboard'
+import { UpstreamRequestHealth } from '@/features/monitor/components/upstream-request-health'
 
 const USAGE_PERIOD_KEY = 'grokiq.public.upstream-usage-period.v1'
 const USAGE_PERIODS: PublicUpstreamUsagePeriod[] = ['24h', '7d', '30d', '90d']
@@ -108,11 +109,21 @@ export function PublicUpstreamStatusPage() {
     retry: 1,
     placeholderData: (previous) => previous,
   })
+  const healthQuery = useQuery({
+    queryKey: ['public', 'upstream-health'],
+    queryFn: api.publicUpstreamHealth,
+    refetchInterval: 20_000,
+    retry: 1,
+    placeholderData: (previous) => previous,
+  })
   const data = query.data ?? emptySummary
   const usageErrorMessage = usageQuery.isError
     ? getErrorMessage(usageQuery.error)
     : ''
   const errorMessage = query.isError ? getErrorMessage(query.error) : ''
+  const healthErrorMessage = healthQuery.isError
+    ? getErrorMessage(healthQuery.error)
+    : ''
   const hasData = query.data != null
   const ready = hasData && data.reachable && !query.isError
 
@@ -187,10 +198,17 @@ export function PublicUpstreamStatusPage() {
                 usageRefresh.current = true
                 void query.refetch()
                 void usageQuery.refetch()
+                void healthQuery.refetch()
               }}
-              disabled={query.isFetching || usageQuery.isFetching}
+              disabled={
+                query.isFetching ||
+                usageQuery.isFetching ||
+                healthQuery.isFetching
+              }
             >
-              {query.isFetching || usageQuery.isFetching ? (
+              {query.isFetching ||
+              usageQuery.isFetching ||
+              healthQuery.isFetching ? (
                 <Loader2 className='animate-spin' />
               ) : (
                 <RefreshCw />
@@ -286,6 +304,15 @@ export function PublicUpstreamStatusPage() {
             )
           )}
         </section>
+
+        <UpstreamRequestHealth
+          data={healthQuery.data}
+          loading={
+            (healthQuery.isPending || healthQuery.isPlaceholderData) &&
+            !healthQuery.isError
+          }
+          error={healthErrorMessage}
+        />
 
         <PublicUsageDashboard
           period={period}

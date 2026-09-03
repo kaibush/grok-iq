@@ -15,6 +15,7 @@ EXPECTED_ROUTES = {
     ("POST", "/api/auth/logout"),
     ("GET", "/api/health"),
     ("GET", "/api/public/upstream-accounts"),
+    ("GET", "/api/public/upstream-health"),
     ("POST", "/api/public/client-key-quota"),
     ("POST", "/api/public/client-key-usage"),
     ("GET", "/api/public/upstream-usage"),
@@ -120,6 +121,7 @@ PUBLIC_PATHS = {
     "/api/auth/login",
     "/api/health",
     "/api/public/upstream-accounts",
+    "/api/public/upstream-health",
     "/api/public/client-key-quota",
     "/api/public/client-key-usage",
     "/api/public/upstream-usage",
@@ -148,6 +150,7 @@ def build_test_router():
         register_integration=MagicMock(),
         wechat_notifications=MagicMock(),
         updates=MagicMock(),
+        request_audits=MagicMock(),
     )
 
 
