@@ -78,7 +78,7 @@ const AccountProbeDetailDialog = lazy(() =>
 const PREVIEW_ISOLATE_NOTE = 'HTML 预览人工判定降智'
 const THUMB_FRAME_WIDTH = HTML_THUMB_FRAME_WIDTH
 const THUMB_FRAME_HEIGHT = HTML_THUMB_FRAME_HEIGHT
-const THUMB_CAPTION_HEIGHT = 120
+const THUMB_CAPTION_HEIGHT = 88
 const THUMB_GRID_CLASSNAME =
   'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 const PREVIEW_VIEW_STORAGE_KEY = 'grokiq.monitor.result-preview.v1'
@@ -2392,13 +2392,15 @@ function PreviewThumbCard({
         )}
       </div>
       <div
-        className='flex shrink-0 flex-col justify-start gap-1 overflow-hidden px-2.5 py-2'
+        className='flex shrink-0 flex-col justify-start gap-0.5 overflow-hidden px-2.5 py-1.5'
         style={{ minHeight: THUMB_CAPTION_HEIGHT }}
       >
         <div className='truncate text-xs font-medium'>{title}</div>
         <ThumbInspectMeta item={item} sample={inspectSample} title={title} />
         <div className='truncate text-[11px] text-muted-foreground'>
-          {sampleLeaves ? sampleMeta(item) : accountMeta(item)}
+          {sampleLeaves
+            ? sampleMeta(item)
+            : accountMeta(item, { includeAccountCreated: false })}
         </div>
       </div>
     </button>
@@ -2436,21 +2438,17 @@ function ThumbInspectMeta({
         </div>
       ) : null}
       {sample ? (
-        <div className='flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[10px] leading-4 text-muted-foreground'>
-          <span className='whitespace-nowrap tabular-nums'>
-            TPS{' '}
-            <DualTpsValue
-              tps={sample.tps}
-              upstreamTps={sample.upstream_tps}
-              compact
-            />
-          </span>
-          <span className='whitespace-nowrap tabular-nums'>
-            首 Token {formatNumber(sample.first_token_ms, 0)} ms
-          </span>
-          <span className='whitespace-nowrap tabular-nums'>
-            耗时 {formatNumber(sample.duration_ms, 0)} ms
-          </span>
+        <div className='min-w-0 truncate text-[10px] leading-4 text-muted-foreground tabular-nums'>
+          TPS{' '}
+          <DualTpsValue
+            tps={sample.tps}
+            upstreamTps={sample.upstream_tps}
+            compact
+          />
+          <span className='px-1 text-muted-foreground/50'>·</span>
+          首 Token {formatNumber(sample.first_token_ms, 0)} ms
+          <span className='px-1 text-muted-foreground/50'>·</span>
+          耗时 {formatNumber(sample.duration_ms, 0)} ms
         </div>
       ) : null}
     </>
@@ -2537,9 +2535,10 @@ function groupPreviewItems(items: ResultPreviewItem[]) {
 
 function accountMeta(
   item: ResultPreviewItem,
-  options: { includeTaskTime?: boolean } = {}
+  options: { includeTaskTime?: boolean; includeAccountCreated?: boolean } = {}
 ) {
   const includeTaskTime = options.includeTaskTime ?? true
+  const includeAccountCreated = options.includeAccountCreated ?? true
   const email = item.accountEmail?.trim()
   const parts = [`ID ${item.accountId}`]
   if (email && email.toLowerCase() !== item.accountName.trim().toLowerCase()) {
@@ -2550,19 +2549,15 @@ function accountMeta(
       `${item.source === 'account' ? '样本' : '任务'} ${formatDate(item.createdAt)}`
     )
   }
-  if (item.accountCreatedAt) {
+  if (includeAccountCreated && item.accountCreatedAt) {
     parts.push(`账号 ${formatAccountCreatedAt(item.accountCreatedAt)}`)
   }
   return parts.join(' · ')
 }
 
 function sampleMeta(item: ResultPreviewItem) {
-  const parts = []
-  if (item.createdAt) parts.push(formatDate(item.createdAt))
-  if (item.accountCreatedAt) {
-    parts.push(`账号 ${formatAccountCreatedAt(item.accountCreatedAt)}`)
-  }
-  return parts.join(' · ') || `ID ${item.accountId}`
+  if (item.createdAt) return formatDate(item.createdAt)
+  return `ID ${item.accountId}`
 }
 
 function scrollChildIntoContainer(container: HTMLElement, child: HTMLElement) {
