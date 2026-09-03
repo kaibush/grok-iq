@@ -78,6 +78,7 @@ import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { ProgressBar } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -1437,7 +1438,6 @@ export function RequestAuditsPage() {
 
   const deferredWorkspaceSearch = useDeferredValue(workspaceSearch)
   const deferredAuditSearch = useDeferredValue(auditSearch)
-  const deferredAuditClientKey = useDeferredValue(auditClientKey)
   const windowParams = useMemo(
     () => ({
       window: selectedWindow.window,
@@ -1526,6 +1526,25 @@ export function RequestAuditsPage() {
     enabled: pinnedAccountId != null,
     staleTime: 30_000,
   })
+  const fetchLedgerRecords = (
+    clientKey: string,
+    pageNumber: number
+  ) =>
+    api
+      .requestAudits({
+        ...windowParams,
+        page: pageNumber,
+        pageSize,
+        account: deferredAuditSearch.trim(),
+        accountId: pinnedAccountId ?? undefined,
+        clientKey: clientKey === 'all' ? '' : clientKey.trim(),
+        risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
+        egressNodeId: auditNode === 'all' ? undefined : Number(auditNode),
+      })
+      .then((pageData) => ({
+        ...pageData,
+        items: pageData.items.map(slimRequestAuditRecord),
+      }))
   const recordsQuery = useQuery({
     queryKey: [
       'request-audits',
@@ -1534,35 +1553,40 @@ export function RequestAuditsPage() {
       page,
       pageSize,
       deferredAuditSearch,
-      deferredAuditClientKey,
+      auditClientKey,
       effectiveAuditRisk,
       auditNode,
       pinnedAccountId,
     ],
-    queryFn: async () => {
-      const pageData = await api.requestAudits({
-        ...windowParams,
-        page,
-        pageSize,
-        account: deferredAuditSearch.trim(),
-        accountId: pinnedAccountId ?? undefined,
-        clientKey:
-          deferredAuditClientKey === 'all' ? '' : deferredAuditClientKey.trim(),
-        risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
-        egressNodeId: auditNode === 'all' ? undefined : Number(auditNode),
-      })
-      return {
-        ...pageData,
-        items: pageData.items.map(slimRequestAuditRecord),
-      }
-    },
+    queryFn: () => fetchLedgerRecords(auditClientKey, page),
     enabled: needsRecords,
     placeholderData: keepPreviousData,
+    staleTime: 15_000,
     gcTime: 60_000,
     refetchInterval: needsRecords ? liveRefreshInterval : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
   })
+  const ledgerFilterPending = recordsQuery.isPlaceholderData
+  const prefetchLedgerClientKey = (clientKey: string) => {
+    if (!needsRecords) return
+    void queryClient.prefetchQuery({
+      queryKey: [
+        'request-audits',
+        'records',
+        windowParams,
+        1,
+        pageSize,
+        deferredAuditSearch,
+        clientKey,
+        effectiveAuditRisk,
+        auditNode,
+        pinnedAccountId,
+      ],
+      queryFn: () => fetchLedgerRecords(clientKey, 1),
+      staleTime: 15_000,
+    })
+  }
   const probeContextQuery = useQuery({
     queryKey: [
       'request-audits',
@@ -3315,6 +3339,7 @@ export function RequestAuditsPage() {
                   setAuditClientKey(id)
                   setPage(1)
                 }}
+                onPrefetch={prefetchLedgerClientKey}
               />
               <div className='space-y-2 border-b bg-muted/15 px-3 py-2'>
                 <div className='flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between'>
@@ -3555,9 +3580,9 @@ export function RequestAuditsPage() {
                             account: deferredAuditSearch.trim(),
                             accountId: pinnedAccountId ?? undefined,
                             clientKey:
-                              deferredAuditClientKey === 'all'
+                              auditClientKey === 'all'
                                 ? ''
-                                : deferredAuditClientKey.trim(),
+                                : auditClientKey.trim(),
                             risk:
                               effectiveAuditRisk === 'all'
                                 ? ''
@@ -3686,7 +3711,9 @@ export function RequestAuditsPage() {
                 )}
                 <div className='flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground'>
                   <Badge variant='outline'>
-                    本页 {ledgerRecords.length} 条
+                    {ledgerFilterPending
+                      ? '正在读取流水…'
+                      : `本页 ${ledgerRecords.length} 条`}
                   </Badge>
                   <span>
                     风险筛选“所有记录”包含正常请求；“所有异常”只包含观察与高风险。
@@ -3701,12 +3728,38 @@ export function RequestAuditsPage() {
                   </span>
                 </div>
               </div>
+              <div className='relative'>
+                <div
+                  className={cn(
+                    'h-0.5 overflow-hidden',
+                    ledgerFilterPending ? 'bg-primary/15' : 'bg-transparent'
+                  )}
+                >
+                  {ledgerFilterPending ? (
+                    <ProgressBar
+                      value={0}
+                      active
+                      className='h-0.5 rounded-none bg-transparent'
+                      indicatorClassName='bg-primary'
+                    />
+                  ) : null}
+                </div>
+                {ledgerFilterPending ? (
+                  <div className='pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center'>
+                    <div className='inline-flex items-center gap-1.5 rounded-full border bg-background/95 px-2.5 py-1 text-[11px] text-foreground shadow-sm'>
+                      <RefreshCw className='size-3 animate-spin text-primary' />
+                      {auditClientKey === 'all'
+                        ? '正在读取请求流水'
+                        : '正在读取该 Key 的流水'}
+                    </div>
+                  </div>
+                ) : null}
               <div
                 className={cn(
                   'overflow-x-auto transition-opacity',
-                  recordsQuery.isPlaceholderData && 'opacity-70'
+                  ledgerFilterPending && 'opacity-55'
                 )}
-                aria-busy={recordsQuery.isFetching}
+                aria-busy={recordsQuery.isFetching || ledgerFilterPending}
               >
                 <Table
                   className='min-w-[1380px] text-xs leading-4 [&_td]:py-1.5 [&_th]:h-9'
@@ -3777,13 +3830,14 @@ export function RequestAuditsPage() {
                   </TableBody>
                 </Table>
               </div>
+              </div>
               <div className='px-4 pb-4'>
                 <ServerPagination
                   page={recordsQuery.data?.page ?? page}
                   pageSize={pageSize}
                   total={recordsQuery.data?.total ?? 0}
                   disabled={recordsQuery.isFetching}
-                  loading={recordsQuery.isFetching}
+                  loading={recordsQuery.isFetching || ledgerFilterPending}
                   itemLabel='请求'
                   pageSizeOptions={[25, 50, 100]}
                   onPageChange={setPage}

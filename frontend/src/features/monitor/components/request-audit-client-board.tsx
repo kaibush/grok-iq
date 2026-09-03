@@ -50,11 +50,13 @@ export function RequestAuditClientBoard({
   selectedId,
   loading = false,
   onSelect,
+  onPrefetch,
 }: {
   items: RequestAuditClientKeyOption[]
   selectedId: string
   loading?: boolean
   onSelect: (id: string) => void
+  onPrefetch?: (id: string) => void
 }) {
   const totalRequests = items.reduce(
     (sum, item) => sum + (item.requestCount ?? 0),
@@ -97,6 +99,7 @@ export function RequestAuditClientBoard({
             size='sm'
             variant='ghost'
             className='h-7 px-2 text-xs'
+            onPointerEnter={() => onPrefetch?.('all')}
             onClick={() => onSelect('all')}
           >
             清除 Key 筛选
@@ -141,6 +144,8 @@ export function RequestAuditClientBoard({
                     ? 'border-primary/40 bg-primary/8'
                     : 'bg-muted/20 hover:bg-muted/40'
                 )}
+                onPointerEnter={() => onPrefetch?.(active ? 'all' : item.id)}
+                onFocus={() => onPrefetch?.(active ? 'all' : item.id)}
                 onClick={() => onSelect(active ? 'all' : item.id)}
               >
                 <div className='flex items-start justify-between gap-3'>
