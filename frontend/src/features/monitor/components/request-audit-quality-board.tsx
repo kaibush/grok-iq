@@ -57,6 +57,50 @@ function formatRatePercent(part: number, total: number) {
   return `${formatNumber(percent, 1)}%`
 }
 
+const NORMAL_RATE_BANDS = [
+  {
+    min: 95,
+    label: '≥95%',
+    swatch: 'bg-emerald-500',
+    className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  },
+  {
+    min: 80,
+    label: '≥80%',
+    swatch: 'bg-sky-500',
+    className: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  },
+  {
+    min: 60,
+    label: '≥60%',
+    swatch: 'bg-amber-500',
+    className: 'bg-amber-500/10 text-amber-800 dark:text-amber-300',
+  },
+  {
+    min: 40,
+    label: '≥40%',
+    swatch: 'bg-orange-500',
+    className: 'bg-orange-500/12 text-orange-700 dark:text-orange-300',
+  },
+  {
+    min: 0,
+    label: '<40%',
+    swatch: 'bg-rose-500',
+    className: 'bg-rose-500/10 text-rose-700 dark:text-rose-300',
+  },
+] as const
+
+const NORMAL_RATE_HINT =
+  '右侧百分比是正常率，越高越健康，按区间上色：绿 ≥95%、蓝 ≥80%、黄 ≥60%、橙 ≥40%、红 <40%。'
+
+function normalRateClass(normalShare: number, requests: number) {
+  if (requests <= 0) return 'text-muted-foreground'
+  return (
+    NORMAL_RATE_BANDS.find((band) => normalShare >= band.min)?.className ??
+    NORMAL_RATE_BANDS[NORMAL_RATE_BANDS.length - 1].className
+  )
+}
+
 function rowLabel(dimension: RequestAuditQualityDimension, row: RequestAuditQualityRow) {
   if (dimension !== 'reasoning') return row.label
   return REASONING_LABELS[row.id] || row.label
@@ -112,7 +156,7 @@ export function RequestAuditQualityBoard({
             请求质量拆分
             <InfoTooltip
               label='请求质量拆分'
-              content='和上方正常率同一套口径：异常 = 观察 + 高风险。默认列出异常最多的几项，方便看是客户端、账号还是节点在拉低窗口质量。可点击的行会跳到请求流水并带上对应筛选。'
+              content={`和上方正常率同一套口径：异常 = 观察 + 高风险。${NORMAL_RATE_HINT}默认列出异常最多的几项，可点击的行会跳到请求流水并带上对应筛选。`}
             />
           </CardTitle>
           <CardDescription>
@@ -140,12 +184,6 @@ export function RequestAuditQualityBoard({
               {rows.map((row) => {
                 const clickable = Boolean(onSelect) && isClickableRow(dimension, row)
                 const label = rowLabel(dimension, row)
-                const tone =
-                  row.highRiskRequests > 0
-                    ? 'danger'
-                    : row.watchRequests > 0
-                      ? 'warning'
-                      : 'ok'
                 const content = (
                   <>
                     <div className='flex items-center justify-between gap-3'>
@@ -155,11 +193,8 @@ export function RequestAuditQualityBoard({
                       </span>
                       <span
                         className={cn(
-                          'shrink-0 text-sm font-semibold tabular-nums',
-                          tone === 'danger' && 'text-destructive',
-                          tone === 'warning' &&
-                            'text-amber-700 dark:text-amber-300',
-                          tone === 'ok' && 'text-emerald-700 dark:text-emerald-300'
+                          'shrink-0 rounded-md px-1.5 py-0.5 text-sm font-semibold tabular-nums',
+                          normalRateClass(row.normalShare, row.requests)
                         )}
                       >
                         {formatRatePercent(row.normal, row.requests)}
@@ -216,6 +251,15 @@ export function RequestAuditQualityBoard({
                 : `共 ${formatNumber(total, 0)} 个${meta.noun}`}
               {meta.clickable ? '。点击可查看该维度的请求流水。' : '。'}
             </p>
+            <div className='flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground'>
+              <span>正常率</span>
+              {NORMAL_RATE_BANDS.map((band) => (
+                <span key={band.label} className='inline-flex items-center gap-1'>
+                  <span className={cn('size-2 rounded-[3px]', band.swatch)} />
+                  {band.label}
+                </span>
+              ))}
+            </div>
           </>
         )}
       </CardContent>
