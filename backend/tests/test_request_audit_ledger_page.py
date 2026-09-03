@@ -156,6 +156,7 @@ async def test_list_page_sql_filters_match_python_filters(tmp_path: Path):
                 account_name="alice",
                 client_key_id="9",
                 client_key_name="production",
+                risk_level="watch",
                 created_at=now,
             ),
             _record(
@@ -166,6 +167,7 @@ async def test_list_page_sql_filters_match_python_filters(tmp_path: Path):
                 account_name="alice-120",
                 client_key_id="11",
                 client_key_name="staging",
+                risk_level="high",
                 created_at=now - timedelta(seconds=1),
             ),
             _record(
@@ -176,6 +178,7 @@ async def test_list_page_sql_filters_match_python_filters(tmp_path: Path):
                 account_name="100%_prod",
                 client_key_id="",
                 client_key_name="",
+                risk_level="watch",
                 created_at=now - timedelta(seconds=2),
             ),
             _record(
@@ -236,6 +239,13 @@ async def test_list_page_sql_filters_match_python_filters(tmp_path: Path):
     )
     assert unlabeled_key["name"] == "未记录 Key"
     assert unlabeled_key["requestCount"] == 1
+    assert unlabeled_key["watchRequests"] == 1
+    assert unlabeled_key["highRiskRequests"] == 0
+    by_id = {item["id"]: item for item in unlabeled["clientKeys"]}
+    assert by_id["9"]["watchRequests"] == 1
+    assert by_id["9"]["highRiskRequests"] == 0
+    assert by_id["11"]["watchRequests"] == 0
+    assert by_id["11"]["highRiskRequests"] == 1
 
 
 async def test_list_page_risk_filter_still_scans_window(tmp_path: Path):

@@ -15,6 +15,13 @@ import {
 } from '@/lib/api'
 import { cn, formatNumber } from '@/lib/utils'
 import {
+  NORMAL_RATE_BANDS,
+  NORMAL_RATE_HINT,
+  formatRatePercent,
+  normalRateClass,
+  requestQualityParts,
+} from '@/features/monitor/components/request-audit-quality'
+import {
   Card,
   CardContent,
   CardDescription,
@@ -49,58 +56,6 @@ const REASONING_LABELS: Record<string, string> = {
   unlabeled: '未记录',
 }
 
-function formatRatePercent(part: number, total: number) {
-  if (total <= 0) return '—'
-  const percent = (part / total) * 100
-  if (percent <= 0) return '0%'
-  if (percent >= 100) return '100%'
-  return `${formatNumber(percent, 1)}%`
-}
-
-const NORMAL_RATE_BANDS = [
-  {
-    min: 95,
-    label: '≥95%',
-    swatch: 'bg-emerald-500',
-    className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-  },
-  {
-    min: 80,
-    label: '≥80%',
-    swatch: 'bg-sky-500',
-    className: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
-  },
-  {
-    min: 60,
-    label: '≥60%',
-    swatch: 'bg-amber-500',
-    className: 'bg-amber-500/10 text-amber-800 dark:text-amber-300',
-  },
-  {
-    min: 40,
-    label: '≥40%',
-    swatch: 'bg-orange-500',
-    className: 'bg-orange-500/12 text-orange-700 dark:text-orange-300',
-  },
-  {
-    min: 0,
-    label: '<40%',
-    swatch: 'bg-rose-500',
-    className: 'bg-rose-500/10 text-rose-700 dark:text-rose-300',
-  },
-] as const
-
-const NORMAL_RATE_HINT =
-  '右侧百分比是正常率，越高越健康，按区间上色：绿 ≥95%、蓝 ≥80%、黄 ≥60%、橙 ≥40%、红 <40%。'
-
-function normalRateClass(normalShare: number, requests: number) {
-  if (requests <= 0) return 'text-muted-foreground'
-  return (
-    NORMAL_RATE_BANDS.find((band) => normalShare >= band.min)?.className ??
-    NORMAL_RATE_BANDS[NORMAL_RATE_BANDS.length - 1].className
-  )
-}
-
 function rowLabel(dimension: RequestAuditQualityDimension, row: RequestAuditQualityRow) {
   if (dimension !== 'reasoning') return row.label
   return REASONING_LABELS[row.id] || row.label
@@ -128,20 +83,14 @@ export function RequestAuditQualityBoard({
   const total = group?.total ?? 0
   const rows = useMemo(
     () =>
-      items.map((item) => {
-        const abnormal = item.watchRequests + item.highRiskRequests
-        const normal = Math.max(0, item.requests - abnormal)
-        return {
-          ...item,
-          abnormal,
-          normal,
-          normalShare: item.requests > 0 ? (normal / item.requests) * 100 : 0,
-          watchShare:
-            item.requests > 0 ? (item.watchRequests / item.requests) * 100 : 0,
-          highShare:
-            item.requests > 0 ? (item.highRiskRequests / item.requests) * 100 : 0,
-        }
-      }),
+      items.map((item) => ({
+        ...item,
+        ...requestQualityParts(
+          item.requests,
+          item.watchRequests,
+          item.highRiskRequests
+        ),
+      })),
     [items]
   )
 
@@ -156,7 +105,7 @@ export function RequestAuditQualityBoard({
             请求质量拆分
             <InfoTooltip
               label='请求质量拆分'
-              content={`和上方正常率同一套口径：异常 = 观察 + 高风险。${NORMAL_RATE_HINT}默认列出异常最多的几项，可点击的行会跳到请求流水并带上对应筛选。`}
+              content={`和上方正常率同一套口径：异常 = 观察 + 高风险。右侧${NORMAL_RATE_HINT}默认列出异常最多的几项，可点击的行会跳到请求流水并带上对应筛选。`}
             />
           </CardTitle>
           <CardDescription>

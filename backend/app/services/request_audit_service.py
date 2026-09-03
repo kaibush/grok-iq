@@ -2561,18 +2561,48 @@ class RequestAuditService:
         return items
 
     @staticmethod
+    def _client_key_risk_counts(item: dict[str, Any]) -> tuple[int, int]:
+        if "watch_requests" in item or "watchRequests" in item:
+            return (
+                max(
+                    0,
+                    int(item.get("watch_requests") or item.get("watchRequests") or 0),
+                ),
+                max(
+                    0,
+                    int(
+                        item.get("high_risk_requests")
+                        or item.get("highRiskRequests")
+                        or 0
+                    ),
+                ),
+            )
+        risk = str(item.get("risk_level") or item.get("riskLevel") or "").strip().lower()
+        count = max(1, int(item.get("request_count") or 1))
+        if risk == "high":
+            return 0, count
+        if risk == "watch":
+            return count, 0
+        return 0, 0
+
+    @staticmethod
     def _client_key_options(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         options: dict[str, dict[str, Any]] = {}
         unlabeled_count = 0
+        unlabeled_watch = 0
+        unlabeled_high = 0
         unlabeled_last: Any = None
         for item in records:
             key_id = str(item.get("client_key_id") or "").strip()
             key_name = str(item.get("client_key_name") or "").strip()
             count = max(1, int(item.get("request_count") or 1))
+            watch_count, high_count = RequestAuditService._client_key_risk_counts(item)
             last_seen = item.get("last_seen_at") or item.get("created_at")
             last_iso = _iso(last_seen)
             if not key_id and not key_name:
                 unlabeled_count += count
+                unlabeled_watch += watch_count
+                unlabeled_high += high_count
                 if last_iso and (not unlabeled_last or last_iso > unlabeled_last):
                     unlabeled_last = last_iso
                 continue
@@ -2583,10 +2613,18 @@ class RequestAuditService:
                     "id": identity,
                     "name": key_name,
                     "requestCount": count,
+                    "watchRequests": watch_count,
+                    "highRiskRequests": high_count,
                     "lastSeenAt": last_iso,
                 }
                 continue
             current["requestCount"] = int(current.get("requestCount") or 0) + count
+            current["watchRequests"] = (
+                int(current.get("watchRequests") or 0) + watch_count
+            )
+            current["highRiskRequests"] = (
+                int(current.get("highRiskRequests") or 0) + high_count
+            )
             if key_name and not current.get("name"):
                 current["name"] = key_name
             current_last = str(current.get("lastSeenAt") or "")
@@ -2599,6 +2637,8 @@ class RequestAuditService:
                     "id": "unlabeled",
                     "name": "未记录 Key",
                     "requestCount": unlabeled_count,
+                    "watchRequests": unlabeled_watch,
+                    "highRiskRequests": unlabeled_high,
                     "lastSeenAt": unlabeled_last,
                 }
             )

@@ -164,28 +164,37 @@ def test_client_key_options_aggregates_window_activity():
             {
                 "client_key_id": "9",
                 "client_key_name": "production",
+                "risk_level": "watch",
                 "created_at": earlier,
             },
             {
                 "client_key_id": "9",
                 "client_key_name": "production",
+                "risk_level": "normal",
                 "created_at": now,
             },
             {
                 "client_key_id": "11",
                 "client_key_name": "staging",
+                "risk_level": "high",
                 "created_at": earlier,
             },
             {
                 "client_key_id": "",
                 "client_key_name": "",
+                "risk_level": "watch",
                 "created_at": now,
             },
         ]
     )
     by_id = {item["id"]: item for item in values}
     assert by_id["9"]["requestCount"] == 2
+    assert by_id["9"]["watchRequests"] == 1
+    assert by_id["9"]["highRiskRequests"] == 0
     assert by_id["11"]["requestCount"] == 1
+    assert by_id["11"]["watchRequests"] == 0
+    assert by_id["11"]["highRiskRequests"] == 1
     assert by_id["unlabeled"]["name"] == "未记录 Key"
     assert by_id["unlabeled"]["requestCount"] == 1
+    assert by_id["unlabeled"]["watchRequests"] == 1
     assert values[0]["id"] == "9"

@@ -4,6 +4,12 @@ import { cn, formatNumber, formatRelativeTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { InfoTooltip } from '@/components/info-tooltip'
+import {
+  NORMAL_RATE_HINT,
+  formatRatePercent,
+  normalRateClass,
+  requestQualityParts,
+} from '@/features/monitor/components/request-audit-quality'
 
 type BusyLevel = 'busy' | 'warm' | 'normal' | 'quiet'
 
@@ -31,6 +37,14 @@ function clientBusyLevel(
   return 'normal'
 }
 
+function clientQuality(item: RequestAuditClientKeyOption) {
+  return requestQualityParts(
+    item.requestCount ?? 0,
+    item.watchRequests ?? 0,
+    item.highRiskRequests ?? 0
+  )
+}
+
 export function RequestAuditClientBoard({
   items,
   selectedId,
@@ -51,6 +65,10 @@ export function RequestAuditClientBoard({
     ...items.map((item) => item.requestCount ?? 0)
   )
   const selected = selectedId !== 'all'
+  const selectedItem = selected
+    ? items.find((item) => item.id === selectedId)
+    : undefined
+  const selectedQuality = selectedItem ? clientQuality(selectedItem) : null
 
   if (!loading && items.length === 0) return null
 
@@ -62,7 +80,7 @@ export function RequestAuditClientBoard({
           <span className='text-sm font-medium'>活跃客户端</span>
           <InfoTooltip
             label='活跃客户端'
-            content='当前分析窗口内发过请求的客户端 Key。忙碌程度按窗口内请求量相对比较：条越长越忙，不是任务进度。点击卡片会按该 Key 过滤流水。'
+            content={`当前分析窗口内发过请求的客户端 Key。忙碌程度按窗口内请求量相对比较：条越长越忙，不是任务进度。点击卡片会按该 Key 过滤流水，并展示该 Key 在同一窗口内的正常率 / 异常率。${NORMAL_RATE_HINT}`}
           />
           {loading ? (
             <Skeleton className='h-5 w-24 rounded-full' />
@@ -88,7 +106,7 @@ export function RequestAuditClientBoard({
       {loading ? (
         <div className='mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2'>
           {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className='h-[4.75rem] rounded-lg' />
+            <Skeleton key={index} className='h-[5.25rem] rounded-lg' />
           ))}
         </div>
       ) : (
@@ -103,6 +121,7 @@ export function RequestAuditClientBoard({
               item.name ||
               (item.id === 'unlabeled' ? '未记录 Key' : `#${item.id}`)
             const count = item.requestCount ?? 0
+            const quality = clientQuality(item)
             const level = clientBusyLevel(
               count,
               totalRequests,
@@ -157,7 +176,14 @@ export function RequestAuditClientBoard({
                     <div className='font-mono text-sm font-semibold tabular-nums'>
                       {formatNumber(count, 0)}
                     </div>
-                    <div className='text-[10px] text-muted-foreground'>次</div>
+                    <div
+                      className={cn(
+                        'mt-0.5 rounded px-1 py-px text-[10px] font-semibold tabular-nums',
+                        normalRateClass(quality.normalShare, quality.requests)
+                      )}
+                    >
+                      {formatRatePercent(quality.normal, quality.requests)}
+                    </div>
                   </div>
                 </div>
                 <div className='mt-2'>
@@ -188,6 +214,61 @@ export function RequestAuditClientBoard({
           })}
         </div>
       )}
+      {selectedQuality ? (
+        <div className='mt-3 rounded-lg border bg-background px-3 py-2.5'>
+          <div className='flex items-center justify-between gap-3'>
+            <div className='min-w-0'>
+              <div className='truncate text-sm font-medium'>
+                {selectedItem?.name ||
+                  (selectedItem?.id === 'unlabeled'
+                    ? '未记录 Key'
+                    : `#${selectedItem?.id}`)}
+                <span className='ml-1.5 text-[11px] font-normal text-muted-foreground'>
+                  当前窗口质量
+                </span>
+              </div>
+              <div className='mt-0.5 text-[11px] text-muted-foreground'>
+                {formatNumber(selectedQuality.requests, 0)} 次 · 异常{' '}
+                {formatRatePercent(
+                  selectedQuality.abnormal,
+                  selectedQuality.requests
+                )}
+                {selectedQuality.abnormal > 0
+                  ? ` · 观察 ${formatNumber(selectedQuality.watchRequests, 0)} · 高风险 ${formatNumber(selectedQuality.highRiskRequests, 0)}`
+                  : ''}
+              </div>
+            </div>
+            <span
+              className={cn(
+                'shrink-0 rounded-md px-1.5 py-0.5 text-sm font-semibold tabular-nums',
+                normalRateClass(
+                  selectedQuality.normalShare,
+                  selectedQuality.requests
+                )
+              )}
+            >
+              {formatRatePercent(
+                selectedQuality.normal,
+                selectedQuality.requests
+              )}
+            </span>
+          </div>
+          <div className='mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-muted'>
+            <span
+              className='bg-emerald-500'
+              style={{ width: `${selectedQuality.normalShare}%` }}
+            />
+            <span
+              className='bg-amber-500'
+              style={{ width: `${selectedQuality.watchShare}%` }}
+            />
+            <span
+              className='bg-rose-500'
+              style={{ width: `${selectedQuality.highShare}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

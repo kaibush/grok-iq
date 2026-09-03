@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import String, cast, delete, func, or_, select, update
+from sqlalchemy import String, case, cast, delete, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import defer
 
@@ -796,6 +796,12 @@ class RequestAuditRepository:
                 RequestAuditRecord.client_key_name,
                 func.count().label("request_count"),
                 func.max(RequestAuditRecord.created_at).label("last_seen_at"),
+                func.sum(
+                    case((RequestAuditRecord.risk_level == "watch", 1), else_=0)
+                ).label("watch_requests"),
+                func.sum(
+                    case((RequestAuditRecord.risk_level == "high", 1), else_=0)
+                ).label("high_risk_requests"),
             )
             .where(
                 RequestAuditRecord.created_at >= start,
@@ -813,6 +819,8 @@ class RequestAuditRepository:
                     "client_key_name": str(row._mapping["client_key_name"] or ""),
                     "request_count": int(row._mapping["request_count"] or 0),
                     "last_seen_at": row._mapping["last_seen_at"],
+                    "watch_requests": int(row._mapping["watch_requests"] or 0),
+                    "high_risk_requests": int(row._mapping["high_risk_requests"] or 0),
                 }
                 for row in session.execute(stmt).all()
             ]
