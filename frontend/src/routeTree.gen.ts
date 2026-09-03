@@ -48,6 +48,7 @@ import { Route as AuthenticatedSettingsBootstrapRouteImport } from './routes/_au
 import { Route as AuthenticatedRequestAuditsWorkspaceRouteImport } from './routes/_authenticated/request-audits/workspace'
 import { Route as AuthenticatedRequestAuditsScheduleRouteImport } from './routes/_authenticated/request-audits/schedule'
 import { Route as AuthenticatedRequestAuditsLedgerRouteImport } from './routes/_authenticated/request-audits/ledger'
+import { Route as AuthenticatedRequestAuditsHistoryRouteImport } from './routes/_authenticated/request-audits/history'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 
 const StatusRoute = StatusRouteImport.update({
@@ -266,6 +267,12 @@ const AuthenticatedRequestAuditsLedgerRoute =
     path: '/request-audits/ledger',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedRequestAuditsHistoryRoute =
+  AuthenticatedRequestAuditsHistoryRouteImport.update({
+    id: '/request-audits/history',
+    path: '/request-audits/history',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedErrorsErrorRoute =
   AuthenticatedErrorsErrorRouteImport.update({
     id: '/errors/$error',
@@ -289,6 +296,7 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/request-audits/history': typeof AuthenticatedRequestAuditsHistoryRoute
   '/request-audits/ledger': typeof AuthenticatedRequestAuditsLedgerRoute
   '/request-audits/schedule': typeof AuthenticatedRequestAuditsScheduleRoute
   '/request-audits/workspace': typeof AuthenticatedRequestAuditsWorkspaceRoute
@@ -329,6 +337,7 @@ export interface FileRoutesByTo {
   '/503': typeof errors503Route
   '/': typeof AuthenticatedIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/request-audits/history': typeof AuthenticatedRequestAuditsHistoryRoute
   '/request-audits/ledger': typeof AuthenticatedRequestAuditsLedgerRoute
   '/request-audits/schedule': typeof AuthenticatedRequestAuditsScheduleRoute
   '/request-audits/workspace': typeof AuthenticatedRequestAuditsWorkspaceRoute
@@ -372,6 +381,7 @@ export interface FileRoutesById {
   '/(errors)/503': typeof errors503Route
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/_authenticated/request-audits/history': typeof AuthenticatedRequestAuditsHistoryRoute
   '/_authenticated/request-audits/ledger': typeof AuthenticatedRequestAuditsLedgerRoute
   '/_authenticated/request-audits/schedule': typeof AuthenticatedRequestAuditsScheduleRoute
   '/_authenticated/request-audits/workspace': typeof AuthenticatedRequestAuditsWorkspaceRoute
@@ -415,6 +425,7 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/errors/$error'
+    | '/request-audits/history'
     | '/request-audits/ledger'
     | '/request-audits/schedule'
     | '/request-audits/workspace'
@@ -455,6 +466,7 @@ export interface FileRouteTypes {
     | '/503'
     | '/'
     | '/errors/$error'
+    | '/request-audits/history'
     | '/request-audits/ledger'
     | '/request-audits/schedule'
     | '/request-audits/workspace'
@@ -497,6 +509,7 @@ export interface FileRouteTypes {
     | '/(errors)/503'
     | '/_authenticated/'
     | '/_authenticated/errors/$error'
+    | '/_authenticated/request-audits/history'
     | '/_authenticated/request-audits/ledger'
     | '/_authenticated/request-audits/schedule'
     | '/_authenticated/request-audits/workspace'
@@ -814,6 +827,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRequestAuditsLedgerRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/request-audits/history': {
+      id: '/_authenticated/request-audits/history'
+      path: '/request-audits/history'
+      fullPath: '/request-audits/history'
+      preLoaderRoute: typeof AuthenticatedRequestAuditsHistoryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/errors/$error': {
       id: '/_authenticated/errors/$error'
       path: '/errors/$error'
@@ -861,6 +881,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
+  AuthenticatedRequestAuditsHistoryRoute: typeof AuthenticatedRequestAuditsHistoryRoute
   AuthenticatedRequestAuditsLedgerRoute: typeof AuthenticatedRequestAuditsLedgerRoute
   AuthenticatedRequestAuditsScheduleRoute: typeof AuthenticatedRequestAuditsScheduleRoute
   AuthenticatedRequestAuditsWorkspaceRoute: typeof AuthenticatedRequestAuditsWorkspaceRoute
@@ -882,6 +903,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
+  AuthenticatedRequestAuditsHistoryRoute:
+    AuthenticatedRequestAuditsHistoryRoute,
   AuthenticatedRequestAuditsLedgerRoute: AuthenticatedRequestAuditsLedgerRoute,
   AuthenticatedRequestAuditsScheduleRoute:
     AuthenticatedRequestAuditsScheduleRoute,

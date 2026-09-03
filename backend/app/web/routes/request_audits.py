@@ -70,6 +70,41 @@ def build_request_audits_router(service: RequestAuditService) -> APIRouter:
             end_at=end_at,
         )
 
+    @router.get("/request-audits/account-history")
+    def request_audit_account_history(
+        response: Response,
+        account: str = "",
+        account_id: int | None = Query(default=None, ge=1, alias="accountId"),
+        risk: str = Query(
+            default="",
+            pattern="^(|risky|normal|watch|high)$",
+        ),
+        client_key: str = Query(default="", alias="clientKey"),
+        egress_node_id: int | None = Query(
+            default=None,
+            ge=1,
+            alias="egressNodeId",
+        ),
+        window_preset: str = Query(
+            default="today",
+            alias="window",
+            pattern="^(today|1h|3h|6h|24h|7d|30d|custom)$",
+        ),
+        start_at: str | None = Query(default=None, alias="startAt"),
+        end_at: str | None = Query(default=None, alias="endAt"),
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        return service.account_history(
+            account=account,
+            account_id=account_id,
+            risk=risk,
+            client_key=client_key,
+            egress_node_id=egress_node_id,
+            window_preset=window_preset,
+            start_at=start_at,
+            end_at=end_at,
+        )
+
     @router.get("/request-audits/status")
     def request_audit_status(response: Response) -> dict[str, Any]:
         disable_client_cache(response)

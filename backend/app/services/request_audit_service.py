@@ -520,6 +520,314 @@ def _health_errors(
     return errors[:10]
 
 
+
+REQUEST_HISTORY_ACCOUNT_LIMIT = 200
+REQUEST_HISTORY_EPISODE_LIMIT = 30
+REQUEST_HISTORY_SPARSE_REQUESTS = 3
+REQUEST_HISTORY_FAILING_RATE = 80.0
+REQUEST_HISTORY_REGULAR_CV = 0.35
+REQUEST_HISTORY_PATTERN_ORDER = (
+    "sparse",
+    "always_normal",
+    "occasional",
+    "recurrent",
+    "never_normal",
+    "still_abnormal",
+)
+
+
+def _history_bucket_minutes(start: datetime, end: datetime) -> int:
+    hours = max(0.0, (end - start).total_seconds() / 3600.0)
+    if hours <= 3:
+        return 5
+    if hours <= 24:
+        return 15
+    if hours <= 7 * 24:
+        return 60
+    return 240
+
+
+def _history_idle_split(bucket_minutes: int) -> timedelta:
+    return timedelta(minutes=max(bucket_minutes * 2, 30))
+
+
+def _history_risk_level(evaluation: AuditRiskEvaluation) -> str:
+    name = str(evaluation.classification.name or "")
+    return name if name in {"watch", "high"} else "normal"
+
+
+def _history_minutes(start: datetime, end: datetime) -> float:
+    return round(max(0.0, (end - start).total_seconds() / 60.0), 1)
+
+
+def _history_median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return round(ordered[middle], 1)
+    return round((ordered[middle - 1] + ordered[middle]) / 2.0, 1)
+
+
+def _history_stdev(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((item - mean) ** 2 for item in values) / (len(values) - 1)
+    return math.sqrt(variance)
+
+
+def _history_regularity(
+    episodes: list[dict[str, Any]],
+) -> tuple[bool, float | None]:
+    if len(episodes) < 3:
+        return False, None
+    starts = [ensure_utc(item.get("start")) for item in episodes]
+    times = [item for item in starts if item is not None]
+    if len(times) < 3:
+        return False, None
+    times.sort()
+    intervals = [
+        (later - earlier).total_seconds() / 60.0
+        for earlier, later in zip(times, times[1:], strict=False)
+        if later > earlier
+    ]
+    if len(intervals) < 2:
+        return False, None
+    mean = sum(intervals) / len(intervals)
+    if mean <= 0:
+        return False, None
+    cv = _history_stdev(intervals) / mean
+    if cv > REQUEST_HISTORY_REGULAR_CV:
+        return False, None
+    return True, round(mean, 1)
+
+
+def _history_pattern(
+    *,
+    requests: int,
+    normal_requests: int,
+    watch_requests: int,
+    high_requests: int,
+    episode_count: int,
+    regular: bool,
+    still_abnormal: bool,
+) -> str:
+    if requests < REQUEST_HISTORY_SPARSE_REQUESTS:
+        return "sparse"
+    if watch_requests + high_requests == 0:
+        return "always_normal"
+    if normal_requests == 0:
+        return "never_normal"
+    if episode_count >= 3 or regular:
+        return "recurrent"
+    if still_abnormal:
+        return "still_abnormal"
+    return "occasional"
+
+
+def _history_account_matches_risk(
+    *,
+    risk: str,
+    watch_requests: int,
+    high_requests: int,
+) -> bool:
+    needle = str(risk or "").strip().lower()
+    if not needle or needle == "all":
+        return True
+    if needle == "risky":
+        return watch_requests + high_requests > 0
+    if needle == "watch":
+        return watch_requests > 0
+    if needle == "high":
+        return high_requests > 0
+    if needle == "normal":
+        return watch_requests + high_requests == 0
+    return True
+
+
+def _history_bucket_frames(
+    start: datetime,
+    end: datetime,
+    minutes: int,
+) -> list[tuple[datetime, datetime]]:
+    step = timedelta(minutes=max(1, minutes))
+    frames: list[tuple[datetime, datetime]] = []
+    cursor = start
+    while cursor < end:
+        nxt = min(cursor + step, end)
+        frames.append((cursor, nxt))
+        cursor = nxt
+    return frames
+
+
+def _history_empty_bucket(start: datetime, end: datetime) -> dict[str, Any]:
+    return {
+        "start": _iso(start),
+        "end": _iso(end),
+        "requests": 0,
+        "normalRequests": 0,
+        "watchRequests": 0,
+        "highRiskRequests": 0,
+        "successfulRequests": 0,
+        "failedRequests": 0,
+        "dominant": "empty",
+    }
+
+
+def _history_paint_buckets(
+    rows: list[tuple[datetime, str, bool]],
+    *,
+    start: datetime,
+    end: datetime,
+    minutes: int,
+) -> list[dict[str, Any]]:
+    frames = _history_bucket_frames(start, end, minutes)
+    if not frames:
+        return []
+    buckets = [_history_empty_bucket(frame_start, frame_end) for frame_start, frame_end in frames]
+    step_seconds = max(1, minutes) * 60
+    span = max(1.0, (end - start).total_seconds())
+    for created, level, ok in rows:
+        if created < start or created >= end:
+            offset = min(max((created - start).total_seconds(), 0.0), span - 1)
+        else:
+            offset = (created - start).total_seconds()
+        index = min(len(buckets) - 1, max(0, int(offset // step_seconds)))
+        bucket = buckets[index]
+        bucket["requests"] += 1
+        if level == "high":
+            bucket["highRiskRequests"] += 1
+        elif level == "watch":
+            bucket["watchRequests"] += 1
+        else:
+            bucket["normalRequests"] += 1
+        if ok:
+            bucket["successfulRequests"] += 1
+        else:
+            bucket["failedRequests"] += 1
+    for bucket in buckets:
+        if bucket["highRiskRequests"]:
+            bucket["dominant"] = "high"
+        elif bucket["watchRequests"]:
+            bucket["dominant"] = "watch"
+        elif bucket["requests"]:
+            bucket["dominant"] = "normal"
+        else:
+            bucket["dominant"] = "empty"
+    return buckets
+
+
+def _history_episodes(
+    rows: list[tuple[datetime, str, bool]],
+    *,
+    idle_split: timedelta,
+) -> list[dict[str, Any]]:
+    episodes: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    last_abnormal: datetime | None = None
+
+    def close_recovered(recovered_at: datetime) -> None:
+        nonlocal current, last_abnormal
+        if current is None:
+            return
+        start = current["start"]
+        current["recovered"] = True
+        current["recoveredAt"] = _iso(recovered_at)
+        current["recoveryMinutes"] = _history_minutes(start, recovered_at)
+        current["durationMinutes"] = _history_minutes(start, current["end"])
+        current["start"] = _iso(start)
+        current["end"] = _iso(current["end"])
+        episodes.append(current)
+        current = None
+        last_abnormal = None
+
+    def close_open() -> None:
+        nonlocal current, last_abnormal
+        if current is None:
+            return
+        start = current["start"]
+        current["recovered"] = False
+        current["recoveredAt"] = None
+        current["recoveryMinutes"] = None
+        current["durationMinutes"] = _history_minutes(start, current["end"])
+        current["start"] = _iso(start)
+        current["end"] = _iso(current["end"])
+        episodes.append(current)
+        current = None
+        last_abnormal = None
+
+    for created, level, _ok in rows:
+        abnormal = level in {"watch", "high"}
+        if not abnormal:
+            if current is not None:
+                close_recovered(created)
+            continue
+        if current is not None and last_abnormal is not None and created - last_abnormal > idle_split:
+            close_open()
+        if current is None:
+            current = {
+                "start": created,
+                "end": created,
+                "severity": level,
+                "requests": 0,
+                "watchRequests": 0,
+                "highRiskRequests": 0,
+            }
+        current["end"] = created
+        current["requests"] += 1
+        if level == "high" or current["severity"] == "high":
+            current["severity"] = "high"
+            if level == "high":
+                current["highRiskRequests"] += 1
+            else:
+                current["watchRequests"] += 1
+        else:
+            current["watchRequests"] += 1
+        last_abnormal = created
+    close_open()
+    return episodes
+
+
+
+def _history_summary(accounts: list[dict[str, Any]]) -> dict[str, Any]:
+    def count(flag: str) -> int:
+        return sum(1 for item in accounts if item.get(flag))
+
+    pattern_counts = {key: 0 for key in REQUEST_HISTORY_PATTERN_ORDER}
+    for item in accounts:
+        pattern = str(item.get("pattern") or "")
+        if pattern in pattern_counts:
+            pattern_counts[pattern] += 1
+    return {
+        "accounts": len(accounts),
+        "requests": sum(int(item.get("requests") or 0) for item in accounts),
+        "sparse": pattern_counts["sparse"],
+        "alwaysNormal": pattern_counts["always_normal"],
+        "occasional": pattern_counts["occasional"],
+        "recurrent": pattern_counts["recurrent"],
+        "regular": count("regular"),
+        "neverNormal": pattern_counts["never_normal"],
+        "stillAbnormal": count("stillAbnormal"),
+        "recovered": count("recovered"),
+        "failing": count("failing"),
+    }
+
+
+def _history_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    last_seen = _parse_datetime(item.get("lastSeenAt"))
+    stamp = last_seen.timestamp() if last_seen is not None else 0.0
+    return (
+        0 if item.get("stillAbnormal") else 1,
+        0 if item.get("neverNormal") else 1,
+        0 if item.get("pattern") == "recurrent" else 1,
+        -float(item.get("longestAbnormalMinutes") or 0),
+        -stamp,
+        -int(item.get("requests") or 0),
+    )
+
+
 class RequestAuditService:
     """Projects grok_build audit windows and scores throughput by account/node."""
 
@@ -3088,6 +3396,202 @@ class RequestAuditService:
             "series": _health_series(normalized, end=end),
             "models": _health_models(normalized),
             "errors": _health_errors(normalized),
+        }
+
+    def account_history(
+        self,
+        *,
+        account: str = "",
+        account_id: int | None = None,
+        risk: str = "",
+        client_key: str = "",
+        egress_node_id: int | None = None,
+        window_preset: str = "today",
+        start_at: Any = None,
+        end_at: Any = None,
+    ) -> dict[str, Any]:
+        """Build per-account normal/abnormal timelines for the audit window."""
+
+        window = self.resolve_window(
+            window_preset=window_preset,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        start = window["start"]
+        end = window["end"]
+        records = self.repository.records_for_range(start, end)
+        evaluations = self._audit_risk_evaluations(records)
+        client_keys = self._client_key_options(records)
+        pinned_account_id = _positive_int(account_id)
+        filtered = self._apply_ledger_row_filters(
+            records,
+            account=account,
+            account_id=pinned_account_id,
+            client_key=client_key,
+            egress_node_id=egress_node_id,
+        )
+        bucket_minutes = _history_bucket_minutes(start, end)
+        idle_split = _history_idle_split(bucket_minutes)
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in filtered:
+            row_account_id = row.get("account_id")
+            key = (
+                str(row_account_id)
+                if row_account_id
+                else f"unknown:{row.get('account_name') or 'unknown'}"
+            )
+            grouped[key].append(row)
+
+        accounts: list[dict[str, Any]] = []
+        for rows in grouped.values():
+            payload = self._history_account_payload(
+                rows,
+                evaluations=evaluations,
+                start=start,
+                end=end,
+                bucket_minutes=bucket_minutes,
+                idle_split=idle_split,
+            )
+            if payload is None:
+                continue
+            if not _history_account_matches_risk(
+                risk=risk,
+                watch_requests=int(payload["watchRequests"]),
+                high_requests=int(payload["highRiskRequests"]),
+            ):
+                continue
+            accounts.append(payload)
+
+        accounts.sort(key=_history_sort_key)
+        truncated = len(accounts) > REQUEST_HISTORY_ACCOUNT_LIMIT
+        visible = accounts[:REQUEST_HISTORY_ACCOUNT_LIMIT]
+        node_options: dict[str, str] = {}
+        for row in filtered:
+            node_id = row.get("egress_node_id")
+            if not node_id:
+                continue
+            key = str(int(node_id))
+            if key not in node_options:
+                node_options[key] = str(
+                    row.get("egress_node_name") or f"节点 #{key}"
+                )
+        nodes = [
+            {"id": key, "name": name}
+            for key, name in sorted(node_options.items(), key=lambda item: item[1])
+        ]
+        return {
+            "provider": "grok_build",
+            "window": self._window_payload(window),
+            "bucketMinutes": bucket_minutes,
+            "generatedAt": _iso(utc_now()),
+            "thresholds": self.thresholds,
+            "truncated": truncated,
+            "clientKeys": client_keys,
+            "nodes": nodes,
+            "summary": _history_summary(accounts),
+            "accounts": visible,
+        }
+
+    def _history_account_payload(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        evaluations: dict[str, AuditRiskEvaluation],
+        start: datetime,
+        end: datetime,
+        bucket_minutes: int,
+        idle_split: timedelta,
+    ) -> dict[str, Any] | None:
+        prepared: list[tuple[datetime, str, bool, dict[str, Any]]] = []
+        for row in rows:
+            created = ensure_utc(row.get("created_at"))
+            if created is None:
+                continue
+            level = _history_risk_level(self._evaluation_for(row, evaluations))
+            ok = _health_success(
+                int(row.get("status_code") or 0),
+                str(row.get("error_code") or ""),
+            )
+            prepared.append((created, level, ok, row))
+        if not prepared:
+            return None
+        prepared.sort(key=lambda item: (item[0], str(item[3].get("upstream_id") or "")))
+        compact = [(created, level, ok) for created, level, ok, _row in prepared]
+        latest = prepared[-1][3]
+        account_id = _positive_int(latest.get("account_id"))
+        requests = len(prepared)
+        successful = sum(1 for item in compact if item[2])
+        failed = requests - successful
+        normal = sum(1 for item in compact if item[1] == "normal")
+        watch = sum(1 for item in compact if item[1] == "watch")
+        high = sum(1 for item in compact if item[1] == "high")
+        current_state = compact[-1][1]
+        still_abnormal = current_state in {"watch", "high"}
+        episodes = _history_episodes(compact, idle_split=idle_split)
+        regular, period_minutes = _history_regularity(episodes)
+        recoveries = [
+            float(item["recoveryMinutes"])
+            for item in episodes
+            if item.get("recovered") and item.get("recoveryMinutes") is not None
+        ]
+        durations = [float(item["durationMinutes"]) for item in episodes]
+        last_normal = next(
+            (item[0] for item in reversed(compact) if item[1] == "normal"),
+            None,
+        )
+        last_abnormal = next(
+            (item[0] for item in reversed(compact) if item[1] in {"watch", "high"}),
+            None,
+        )
+        success_rate = round(successful * 100.0 / requests, 1) if requests else 0.0
+        pattern = _history_pattern(
+            requests=requests,
+            normal_requests=normal,
+            watch_requests=watch,
+            high_requests=high,
+            episode_count=len(episodes),
+            regular=regular,
+            still_abnormal=still_abnormal,
+        )
+        always_normal = watch + high == 0 and requests >= REQUEST_HISTORY_SPARSE_REQUESTS
+        never_normal = normal == 0 and requests >= REQUEST_HISTORY_SPARSE_REQUESTS
+        recovered = bool(episodes) and not still_abnormal
+        failing = requests >= REQUEST_HISTORY_SPARSE_REQUESTS and success_rate < REQUEST_HISTORY_FAILING_RATE
+        return {
+            "accountId": account_id,
+            "accountName": str(latest.get("account_name") or ""),
+            "requests": requests,
+            "successfulRequests": successful,
+            "failedRequests": failed,
+            "successRate": success_rate,
+            "normalRequests": normal,
+            "watchRequests": watch,
+            "highRiskRequests": high,
+            "currentState": current_state,
+            "pattern": pattern,
+            "regular": regular,
+            "periodMinutes": period_minutes,
+            "stillAbnormal": still_abnormal,
+            "neverNormal": never_normal,
+            "alwaysNormal": always_normal,
+            "recovered": recovered,
+            "failing": failing,
+            "firstSeenAt": _iso(compact[0][0]),
+            "lastSeenAt": _iso(compact[-1][0]),
+            "lastNormalAt": _iso(last_normal),
+            "lastAbnormalAt": _iso(last_abnormal),
+            "abnormalEpisodes": len(episodes),
+            "longestAbnormalMinutes": round(max(durations, default=0.0), 1),
+            "totalAbnormalMinutes": round(sum(durations), 1),
+            "medianRecoveryMinutes": _history_median(recoveries),
+            "lastRecoveryMinutes": recoveries[-1] if recoveries else None,
+            "buckets": _history_paint_buckets(
+                compact,
+                start=start,
+                end=end,
+                minutes=bucket_minutes,
+            ),
+            "episodes": episodes[-REQUEST_HISTORY_EPISODE_LIMIT :],
         }
 
     def _summary_payload(

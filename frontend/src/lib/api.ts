@@ -1255,6 +1255,109 @@ export type RequestAuditSummaryResponse = {
   scan: RequestAuditScanState
 }
 
+export type RequestAuditHistoryPattern =
+  | 'sparse'
+  | 'always_normal'
+  | 'occasional'
+  | 'recurrent'
+  | 'never_normal'
+  | 'still_abnormal'
+
+export type RequestAuditHistoryBucketDominant =
+  | 'empty'
+  | 'normal'
+  | 'watch'
+  | 'high'
+
+export type RequestAuditHistoryBucket = {
+  start: string
+  end: string
+  requests: number
+  normalRequests: number
+  watchRequests: number
+  highRiskRequests: number
+  successfulRequests: number
+  failedRequests: number
+  dominant: RequestAuditHistoryBucketDominant
+}
+
+export type RequestAuditHistoryEpisode = {
+  start: string
+  end: string
+  severity: 'watch' | 'high'
+  requests: number
+  watchRequests: number
+  highRiskRequests: number
+  recovered: boolean
+  recoveredAt: string | null
+  durationMinutes: number
+  recoveryMinutes: number | null
+}
+
+export type RequestAuditHistoryAccount = {
+  accountId: number | null
+  accountName: string
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  successRate: number
+  normalRequests: number
+  watchRequests: number
+  highRiskRequests: number
+  currentState: RequestAuditRiskLevel
+  pattern: RequestAuditHistoryPattern
+  regular: boolean
+  periodMinutes: number | null
+  stillAbnormal: boolean
+  neverNormal: boolean
+  alwaysNormal: boolean
+  recovered: boolean
+  failing: boolean
+  firstSeenAt: string | null
+  lastSeenAt: string | null
+  lastNormalAt: string | null
+  lastAbnormalAt: string | null
+  abnormalEpisodes: number
+  longestAbnormalMinutes: number
+  totalAbnormalMinutes: number
+  medianRecoveryMinutes: number | null
+  lastRecoveryMinutes: number | null
+  buckets: RequestAuditHistoryBucket[]
+  episodes: RequestAuditHistoryEpisode[]
+}
+
+export type RequestAuditHistorySummary = {
+  accounts: number
+  requests: number
+  sparse: number
+  alwaysNormal: number
+  occasional: number
+  recurrent: number
+  regular: number
+  neverNormal: number
+  stillAbnormal: number
+  recovered: number
+  failing: number
+}
+
+export type RequestAuditHistoryNodeOption = {
+  id: string
+  name: string
+}
+
+export type RequestAuditHistoryResponse = {
+  provider: string
+  window: RequestAuditWindow
+  bucketMinutes: number
+  generatedAt: string | null
+  thresholds: RequestAuditThresholds
+  truncated: boolean
+  clientKeys: RequestAuditClientKeyOption[]
+  nodes: RequestAuditHistoryNodeOption[]
+  summary: RequestAuditHistorySummary
+  accounts: RequestAuditHistoryAccount[]
+}
+
 export type RequestAuditProbeContextResponse = {
   requestId: string
   auditId: number | null
@@ -3282,6 +3385,12 @@ export const api = {
   ) =>
     request<RequestAuditSummaryResponse>(
       `/request-audits/summary${query(params)}`
+    ),
+  requestAuditAccountHistory: (
+    params: Record<string, string | number | undefined> = {}
+  ) =>
+    request<RequestAuditHistoryResponse>(
+      `/request-audits/account-history${query(params)}`
     ),
   requestAuditStatus: () =>
     request<RequestAuditStatus>('/request-audits/status'),

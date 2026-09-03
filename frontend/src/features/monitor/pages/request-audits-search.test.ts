@@ -14,6 +14,7 @@ describe('request audit tab routes', () => {
     expect(requestAuditTabFromPath('/request-audits/workspace')).toBe(
       'workspace'
     )
+    expect(requestAuditTabFromPath('/request-audits/history')).toBe('history')
     expect(requestAuditTabFromPath('/request-audits/ledger/')).toBe('ledger')
     expect(requestAuditTabFromPath('/request-audits/schedule')).toBe('schedule')
   })
@@ -27,6 +28,7 @@ describe('request audit tab routes', () => {
 
   it('builds tab paths', () => {
     expect(requestAuditPathForTab('overview')).toBe('/request-audits')
+    expect(requestAuditPathForTab('history')).toBe('/request-audits/history')
     expect(requestAuditPathForTab('ledger')).toBe('/request-audits/ledger')
   })
 

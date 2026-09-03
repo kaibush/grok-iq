@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const REQUEST_AUDIT_TABS = [
   'overview',
   'workspace',
+  'history',
   'ledger',
   'schedule',
 ] as const
@@ -12,6 +13,7 @@ export type RequestAuditTab = (typeof REQUEST_AUDIT_TABS)[number]
 export const REQUEST_AUDIT_TAB_PATHS = {
   overview: '/request-audits',
   workspace: '/request-audits/workspace',
+  history: '/request-audits/history',
   ledger: '/request-audits/ledger',
   schedule: '/request-audits/schedule',
 } as const
@@ -31,6 +33,7 @@ export function isRequestAuditsPath(pathname: string): boolean {
 export function requestAuditTabFromPath(pathname: string): RequestAuditTab {
   const path = pathname.replace(/\/+$/, '') || '/'
   if (path === '/request-audits/workspace') return 'workspace'
+  if (path === '/request-audits/history') return 'history'
   if (path === '/request-audits/ledger') return 'ledger'
   if (path === '/request-audits/schedule') return 'schedule'
   return 'overview'

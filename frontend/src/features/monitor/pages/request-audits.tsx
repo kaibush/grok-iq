@@ -40,6 +40,7 @@ import {
   Timer,
   Undo2,
   UsersRound,
+  History,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
@@ -145,6 +146,7 @@ import { FilterChip } from '@/features/monitor/components/filter-chip'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import { RequestAuditClientBoard } from '@/features/monitor/components/request-audit-client-board'
 import { RequestAuditQualityBoard } from '@/features/monitor/components/request-audit-quality-board'
+import { RequestAuditAccountHistoryBoard } from '@/features/monitor/components/request-audit-account-history'
 import {
   formatSampleWindow,
   streamSampleDiagnostics,
@@ -247,6 +249,9 @@ const requestAuditPageHelp = (
       自动处置看连续次数，不是看这一条：高速 TPS 默认连续 2 次先冷却，冷却后
       仍连续 2 次且没有正常 TPS 才停用；思考为 0 按策略连续次数直接停用。
       探针监控判定是另一套累计规则，不会处理这里的高风险。
+    </p>
+    <p>
+      「账号历程」按同一分析窗口把每个账号的正常/观察/高风险过程摊成时间轴，用来区分偶发异常、反复异常、从未正常和已经恢复，不替代风险定位的处置入口。
     </p>
   </div>
 )
@@ -1417,6 +1422,7 @@ export function RequestAuditsPage() {
   )
   const needsSummary = mainView === 'overview' || mainView === 'workspace'
   const needsRecords = mainView === 'ledger'
+  const needsHistory = mainView === 'history'
 
   const settingsQuery = useQuery({
     queryKey: ['settings'],
@@ -1455,7 +1461,11 @@ export function RequestAuditsPage() {
   const egressQuery = useQuery({
     queryKey: ['egress'],
     queryFn: () => api.egress({ pageSize: 500 }),
-    enabled: needsRecords || probeSelection != null || sampleAccount != null,
+    enabled:
+      needsRecords ||
+      needsHistory ||
+      probeSelection != null ||
+      sampleAccount != null,
     staleTime: 60_000,
   })
   const accountSamplesQuery = useQuery({
@@ -1578,6 +1588,36 @@ export function RequestAuditsPage() {
     staleTime: 15_000,
     gcTime: 60_000,
     refetchInterval: needsRecords ? liveRefreshInterval : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  })
+  const historyQuery = useQuery({
+    queryKey: [
+      'request-audits',
+      'account-history',
+      windowParams,
+      deferredAuditSearch,
+      auditClientKey,
+      effectiveAuditRisk,
+      auditNode,
+      pinnedAccountId,
+    ],
+    queryFn: () =>
+      api.requestAuditAccountHistory({
+        window: windowParams.window,
+        startAt: windowParams.startAt,
+        endAt: windowParams.endAt,
+        account: pinnedAccountId ? '' : deferredAuditSearch.trim(),
+        accountId: pinnedAccountId ?? undefined,
+        clientKey: auditClientKey === 'all' ? '' : auditClientKey.trim(),
+        risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
+        egressNodeId: auditNode === 'all' ? undefined : Number(auditNode),
+      }),
+    enabled: needsHistory,
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+    gcTime: 60_000,
+    refetchInterval: needsHistory ? liveRefreshInterval : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
   })
@@ -2106,6 +2146,7 @@ export function RequestAuditsPage() {
     (statusQuery.isFetching && statusQuery.data) ||
     (summaryQuery.isFetching && summaryQuery.data) ||
     (recordsQuery.isFetching && recordsQuery.data) ||
+    (historyQuery.isFetching && historyQuery.data) ||
     (schedulerQuery.isFetching && schedulerQuery.data)
   )
   const accountActionPending =
@@ -2335,6 +2376,7 @@ export function RequestAuditsPage() {
     ]
     if (needsSummary) jobs.push(summaryQuery.refetch())
     if (needsRecords) jobs.push(recordsQuery.refetch())
+    if (needsHistory) jobs.push(historyQuery.refetch())
     void Promise.all(jobs)
   }
 
@@ -2394,6 +2436,15 @@ export function RequestAuditsPage() {
             风险定位
             <Badge variant='secondary'>
               {hasSummary ? formatNumber(summary?.watchAccounts ?? 0, 0) : '—'}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value='history'>
+            <History />
+            账号历程
+            <Badge variant='secondary'>
+              {historyQuery.data
+                ? formatNumber(historyQuery.data.summary.stillAbnormal, 0)
+                : '—'}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value='ledger'>
@@ -2526,7 +2577,10 @@ export function RequestAuditsPage() {
           </div>
         </div>
 
-        {(summaryQuery.error || recordsQuery.error || statusQuery.error) && (
+        {(summaryQuery.error ||
+          recordsQuery.error ||
+          historyQuery.error ||
+          statusQuery.error) && (
           <Card className='border-destructive/35 bg-destructive/5'>
             <CardContent className='flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between'>
               <div className='flex items-start gap-3'>
@@ -2539,6 +2593,7 @@ export function RequestAuditsPage() {
                     {getErrorMessage(
                       summaryQuery.error ??
                         recordsQuery.error ??
+                        historyQuery.error ??
                         statusQuery.error
                     )}
                   </div>
@@ -3398,6 +3453,58 @@ export function RequestAuditsPage() {
             </CardContent>
           </Card>
           ) : null}
+        </TabsContent>
+
+        <TabsContent value='history' className='mt-0 space-y-4'>
+          <RequestAuditAccountHistoryBoard
+            data={historyQuery.data}
+            loading={
+              (historyQuery.isPending || historyQuery.isPlaceholderData) &&
+              !historyQuery.isError
+            }
+            error={
+              historyQuery.isError ? getErrorMessage(historyQuery.error) : ''
+            }
+            riskEnabled={config.riskEnabled}
+            pinnedAccountId={pinnedAccountId}
+            search={auditSearch}
+            onSearchChange={(value) => {
+              setAuditSearch(value)
+            }}
+            clientKey={auditClientKey}
+            clientKeys={historyQuery.data?.clientKeys ?? EMPTY_CLIENT_KEYS}
+            onClientKeyChange={(value) => {
+              setAuditClientKey(value)
+            }}
+            node={auditNode}
+            nodeOptions={
+              historyQuery.data?.nodes?.length
+                ? historyQuery.data.nodes
+                : ledgerNodeOptions
+            }
+            onNodeChange={(value) => {
+              setAuditNode(value)
+            }}
+            risk={effectiveAuditRisk}
+            onRiskChange={(value) => {
+              setAuditRisk(value)
+            }}
+            onOpenLedger={(account) => {
+              if (!account.accountId) {
+                setAuditSearch(account.accountName)
+                setAuditClientKey('all')
+                setAuditNode('all')
+                setPage(1)
+                goToTab('ledger')
+                return
+              }
+              setAuditSearch('')
+              setAuditClientKey('all')
+              setAuditNode('all')
+              setPage(1)
+              goToTab('ledger', { account: String(account.accountId) })
+            }}
+          />
         </TabsContent>
 
         <TabsContent value='ledger' className='mt-0'>
