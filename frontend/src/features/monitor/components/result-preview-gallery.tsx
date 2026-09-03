@@ -2416,7 +2416,17 @@ function thumbInspectProfile(
   title: string
 ) {
   const profile = item.profileName?.trim() || ''
-  if (!profile || profile === title || profile === item.heading) return ''
+  if (!profile) return ''
+  const heading = item.heading?.trim() || ''
+  const label = title.trim()
+  if (
+    profile === label ||
+    profile === heading ||
+    label.includes(profile) ||
+    heading.includes(profile)
+  ) {
+    return ''
+  }
   return profile
 }
 
@@ -2457,17 +2467,9 @@ function ThumbInspectMeta({
   const showProfile = Boolean(profile && sample?.classification?.trim())
   if (!sample && !extra && !showProfile) return null
   return (
-    <div className='mt-0.5 min-w-0 truncate text-[10px] leading-4 text-muted-foreground tabular-nums'>
-      {showProfile ? (
-        <>
-          {profile}
-          {sample || extra ? (
-            <span className='px-1 text-muted-foreground/50'>·</span>
-          ) : null}
-        </>
-      ) : null}
+    <div className='mt-0.5 min-w-0 space-y-0.5 text-[10px] leading-4 text-muted-foreground tabular-nums'>
       {sample ? (
-        <>
+        <div className='whitespace-normal break-words'>
           TPS{' '}
           <DualTpsValue
             tps={sample.tps}
@@ -2478,15 +2480,16 @@ function ThumbInspectMeta({
           首 Token {formatNumber(sample.first_token_ms, 0)} ms
           <span className='px-1 text-muted-foreground/50'>·</span>
           耗时 {formatNumber(sample.duration_ms, 0)} ms
-        </>
+        </div>
       ) : null}
-      {extra ? (
-        <>
-          {sample || showProfile ? (
+      {showProfile || extra ? (
+        <div className='whitespace-normal break-words'>
+          {showProfile ? profile : null}
+          {showProfile && extra ? (
             <span className='px-1 text-muted-foreground/50'>·</span>
           ) : null}
-          {extra}
-        </>
+          {extra || null}
+        </div>
       ) : null}
     </div>
   )
