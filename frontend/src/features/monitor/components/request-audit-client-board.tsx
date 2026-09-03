@@ -1,9 +1,12 @@
+import { useMemo } from 'react'
 import { KeyRound } from 'lucide-react'
 import { type RequestAuditClientKeyOption } from '@/lib/api'
 import { cn, formatNumber, formatRelativeTime } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { InfoTooltip } from '@/components/info-tooltip'
+import { SegmentedControl } from '@/components/segmented-control'
+import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
 import {
   NORMAL_RATE_HINT,
   formatRatePercent,
@@ -45,6 +48,39 @@ function clientQuality(item: RequestAuditClientKeyOption) {
   )
 }
 
+type ClientSort = 'requests' | 'recent'
+
+const CLIENT_SORT_STORAGE_KEY = 'grokiq.monitor.request-audit-client-sort.v1'
+const CLIENT_SORT_OPTIONS: Array<{ value: ClientSort; label: string }> = [
+  { value: 'requests', label: '请求量' },
+  { value: 'recent', label: '活跃时间' },
+]
+
+function lastSeenValue(item: RequestAuditClientKeyOption) {
+  return item.lastSeenAt?.trim() || ''
+}
+
+function compareClientItems(
+  left: RequestAuditClientKeyOption,
+  right: RequestAuditClientKeyOption,
+  sort: ClientSort
+) {
+  if (sort === 'recent') {
+    const leftSeen = lastSeenValue(left)
+    const rightSeen = lastSeenValue(right)
+    if (leftSeen !== rightSeen) {
+      if (!leftSeen) return 1
+      if (!rightSeen) return -1
+      return rightSeen.localeCompare(leftSeen)
+    }
+  }
+  const countDiff = (right.requestCount ?? 0) - (left.requestCount ?? 0)
+  if (countDiff) return countDiff
+  if (left.id === 'unlabeled') return 1
+  if (right.id === 'unlabeled') return -1
+  return (left.name || left.id).localeCompare(right.name || right.id, 'zh')
+}
+
 export function RequestAuditClientBoard({
   items,
   selectedId,
@@ -58,6 +94,14 @@ export function RequestAuditClientBoard({
   onSelect: (id: string) => void
   onPrefetch?: (id: string) => void
 }) {
+  const sortView = usePersistedViewState(CLIENT_SORT_STORAGE_KEY, {
+    sort: 'requests' as ClientSort,
+  })
+  const sort = sortView.value.sort === 'recent' ? 'recent' : 'requests'
+  const sortedItems = useMemo(
+    () => [...items].sort((left, right) => compareClientItems(left, right, sort)),
+    [items, sort]
+  )
   const totalRequests = items.reduce(
     (sum, item) => sum + (item.requestCount ?? 0),
     0
@@ -82,7 +126,7 @@ export function RequestAuditClientBoard({
           <span className='text-sm font-medium'>活跃客户端</span>
           <InfoTooltip
             label='活跃客户端'
-            content={`当前分析窗口内发过请求的客户端 Key。忙碌程度按窗口内请求量相对比较：条越长越忙，不是任务进度。点击卡片会按该 Key 过滤流水，并展示该 Key 在同一窗口内的正常率 / 异常率。${NORMAL_RATE_HINT}`}
+            content={`当前分析窗口内发过请求的客户端 Key。可按请求量或最近活跃时间排序。忙碌程度按窗口内请求量相对比较：条越长越忙，不是任务进度。点击卡片会按该 Key 过滤流水，并展示该 Key 在同一窗口内的正常率 / 异常率。${NORMAL_RATE_HINT}`}
           />
           {loading ? (
             <Skeleton className='h-5 w-24 rounded-full' />
@@ -93,18 +137,26 @@ export function RequestAuditClientBoard({
             </span>
           )}
         </div>
-        {selected ? (
-          <Button
-            type='button'
-            size='sm'
-            variant='ghost'
-            className='h-7 px-2 text-xs'
-            onPointerEnter={() => onPrefetch?.('all')}
-            onClick={() => onSelect('all')}
-          >
-            清除 Key 筛选
-          </Button>
-        ) : null}
+        <div className='flex flex-wrap items-center justify-end gap-2'>
+          <SegmentedControl
+            ariaLabel='活跃客户端排序'
+            value={sort}
+            onChange={(value) => sortView.setValue({ sort: value })}
+            options={CLIENT_SORT_OPTIONS}
+          />
+          {selected ? (
+            <Button
+              type='button'
+              size='sm'
+              variant='ghost'
+              className='h-7 px-2 text-xs'
+              onPointerEnter={() => onPrefetch?.('all')}
+              onClick={() => onSelect('all')}
+            >
+              清除 Key 筛选
+            </Button>
+          ) : null}
+        </div>
       </div>
       {loading ? (
         <div className='mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2'>
@@ -118,7 +170,7 @@ export function RequestAuditClientBoard({
           role='list'
           aria-label='当前窗口活跃客户端'
         >
-          {items.map((item) => {
+          {sortedItems.map((item) => {
             const active = item.id === selectedId
             const label =
               item.name ||
