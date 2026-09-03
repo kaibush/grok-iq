@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState, type ReactNode } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   keepPreviousData,
   useMutation,
@@ -62,6 +62,7 @@ import {
   type UpstreamAccount,
   type RequestAuditActivity,
   type RequestAuditActivityLevel,
+  type RequestAuditClientKeyOption,
   type RequestAuditConfig,
   type RequestAuditNodeRisk,
   type RequestAuditPreDisableCheck,
@@ -78,7 +79,6 @@ import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { StatusBadge } from '@/lib/status'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
-import { ProgressBar } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -155,6 +155,8 @@ import {
   type RequestAuditsSearch,
 } from '@/features/monitor/pages/request-audits-search'
 import { runsSearchFromAccount } from '@/features/monitor/pages/runs-search'
+import { usePaintDeferredValue } from '@/hooks/use-paint-deferred-value'
+import { useServerTableLoading } from '@/hooks/use-server-table-loading'
 
 const riskVariant: Record<
   RequestAuditRiskLevel,
@@ -191,6 +193,10 @@ const waitingActivityTone = {
   dot: 'bg-muted-foreground/45',
   text: 'text-muted-foreground',
 }
+
+const EMPTY_AUDIT_RECORDS: RequestAuditRecord[] = []
+const EMPTY_CLIENT_KEYS: RequestAuditClientKeyOption[] = []
+const FALLBACK_THRESHOLDS: RequestAuditThresholds = { watch: 150, high: 500 }
 
 const fallbackConfig: RequestAuditConfig = {
   enabled: true,
@@ -1526,20 +1532,65 @@ export function RequestAuditsPage() {
     enabled: pinnedAccountId != null,
     staleTime: 30_000,
   })
-  const fetchLedgerRecords = (
-    clientKey: string,
-    pageNumber: number
-  ) =>
+  const committedLedgerQuery = useMemo(
+    () => ({
+      window: windowParams.window,
+      startAt: windowParams.startAt,
+      endAt: windowParams.endAt,
+      page,
+      pageSize,
+      search: deferredAuditSearch,
+      clientKey: auditClientKey,
+      risk: effectiveAuditRisk,
+      node: auditNode,
+      pinnedAccountId,
+    }),
+    [
+      auditClientKey,
+      auditNode,
+      deferredAuditSearch,
+      effectiveAuditRisk,
+      page,
+      pageSize,
+      pinnedAccountId,
+      windowParams.endAt,
+      windowParams.startAt,
+      windowParams.window,
+    ]
+  )
+  const ledgerQuery = usePaintDeferredValue(committedLedgerQuery)
+  const ledgerQueryPending =
+    ledgerQuery.window !== committedLedgerQuery.window ||
+    ledgerQuery.startAt !== committedLedgerQuery.startAt ||
+    ledgerQuery.endAt !== committedLedgerQuery.endAt ||
+    ledgerQuery.page !== committedLedgerQuery.page ||
+    ledgerQuery.pageSize !== committedLedgerQuery.pageSize ||
+    ledgerQuery.search !== committedLedgerQuery.search ||
+    ledgerQuery.clientKey !== committedLedgerQuery.clientKey ||
+    ledgerQuery.risk !== committedLedgerQuery.risk ||
+    ledgerQuery.node !== committedLedgerQuery.node ||
+    ledgerQuery.pinnedAccountId !== committedLedgerQuery.pinnedAccountId
+  const ledgerWindowParams = useMemo(
+    () => ({
+      window: ledgerQuery.window,
+      startAt: ledgerQuery.startAt,
+      endAt: ledgerQuery.endAt,
+    }),
+    [ledgerQuery.endAt, ledgerQuery.startAt, ledgerQuery.window]
+  )
+  const fetchLedgerRecords = (query: typeof committedLedgerQuery) =>
     api
       .requestAudits({
-        ...windowParams,
-        page: pageNumber,
-        pageSize,
-        account: deferredAuditSearch.trim(),
-        accountId: pinnedAccountId ?? undefined,
-        clientKey: clientKey === 'all' ? '' : clientKey.trim(),
-        risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
-        egressNodeId: auditNode === 'all' ? undefined : Number(auditNode),
+        window: query.window,
+        startAt: query.startAt,
+        endAt: query.endAt,
+        page: query.page,
+        pageSize: query.pageSize,
+        account: query.search.trim(),
+        accountId: query.pinnedAccountId ?? undefined,
+        clientKey: query.clientKey === 'all' ? '' : query.clientKey.trim(),
+        risk: query.risk === 'all' ? '' : query.risk,
+        egressNodeId: query.node === 'all' ? undefined : Number(query.node),
       })
       .then((pageData) => ({
         ...pageData,
@@ -1549,16 +1600,16 @@ export function RequestAuditsPage() {
     queryKey: [
       'request-audits',
       'records',
-      windowParams,
-      page,
-      pageSize,
-      deferredAuditSearch,
-      auditClientKey,
-      effectiveAuditRisk,
-      auditNode,
-      pinnedAccountId,
+      ledgerWindowParams,
+      ledgerQuery.page,
+      ledgerQuery.pageSize,
+      ledgerQuery.search,
+      ledgerQuery.clientKey,
+      ledgerQuery.risk,
+      ledgerQuery.node,
+      ledgerQuery.pinnedAccountId,
     ],
-    queryFn: () => fetchLedgerRecords(auditClientKey, page),
+    queryFn: () => fetchLedgerRecords(ledgerQuery),
     enabled: needsRecords,
     placeholderData: keepPreviousData,
     staleTime: 15_000,
@@ -1567,26 +1618,103 @@ export function RequestAuditsPage() {
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
   })
-  const ledgerFilterPending = recordsQuery.isPlaceholderData
-  const prefetchLedgerClientKey = (clientKey: string) => {
-    if (!needsRecords) return
-    void queryClient.prefetchQuery({
-      queryKey: [
-        'request-audits',
-        'records',
-        windowParams,
-        1,
-        pageSize,
-        deferredAuditSearch,
-        clientKey,
-        effectiveAuditRisk,
-        auditNode,
-        pinnedAccountId,
-      ],
-      queryFn: () => fetchLedgerRecords(clientKey, 1),
-      staleTime: 15_000,
+  const { beginTableInteraction, tableLoading: ledgerTableLoading } =
+    useServerTableLoading({
+      isFetching: recordsQuery.isFetching,
+      inputPending: ledgerQueryPending,
     })
-  }
+  const ledgerFilterPending =
+    ledgerTableLoading || recordsQuery.isPlaceholderData
+  const prefetchLedgerClientKey = useCallback(
+    (clientKey: string) => {
+      if (!needsRecords) return
+      void queryClient.prefetchQuery({
+        queryKey: [
+          'request-audits',
+          'records',
+          {
+            window: committedLedgerQuery.window,
+            startAt: committedLedgerQuery.startAt,
+            endAt: committedLedgerQuery.endAt,
+          },
+          1,
+          committedLedgerQuery.pageSize,
+          committedLedgerQuery.search,
+          clientKey,
+          committedLedgerQuery.risk,
+          committedLedgerQuery.node,
+          committedLedgerQuery.pinnedAccountId,
+        ],
+        queryFn: () =>
+          fetchLedgerRecords({
+            ...committedLedgerQuery,
+            clientKey,
+            page: 1,
+          }),
+        staleTime: 15_000,
+      })
+    },
+    [committedLedgerQuery, needsRecords, queryClient]
+  )
+  const selectLedgerClientKey = useCallback(
+    (id: string) => {
+      beginTableInteraction()
+      setAuditClientKey(id)
+      setPage(1)
+    },
+    [beginTableInteraction]
+  )
+  const changeLedgerPage = useCallback(
+    (nextPage: number) => {
+      beginTableInteraction()
+      setPage(nextPage)
+    },
+    [beginTableInteraction]
+  )
+  const changeLedgerPageSize = useCallback(
+    (value: number) => {
+      beginTableInteraction()
+      setPageSize(value)
+      setPage(1)
+    },
+    [beginTableInteraction]
+  )
+  const setAuditRowSelected = useCallback(
+    (record: RequestAuditRecord, checked: boolean) => {
+      setSelectedAuditRows((current) => {
+        if (!checked) {
+          const next = { ...current }
+          delete next[record.id]
+          return next
+        }
+        return { ...current, [record.id]: record }
+      })
+    },
+    []
+  )
+  const openAuditDetail = useCallback((record: RequestAuditRecord) => {
+    setSelectedAuditRecord(record)
+    setAuditDetailOpen(true)
+  }, [])
+  const ledgerInteractionKey = [
+    committedLedgerQuery.window,
+    committedLedgerQuery.startAt ?? '',
+    committedLedgerQuery.endAt ?? '',
+    committedLedgerQuery.page,
+    committedLedgerQuery.pageSize,
+    committedLedgerQuery.search,
+    committedLedgerQuery.clientKey,
+    committedLedgerQuery.risk,
+    committedLedgerQuery.node,
+    committedLedgerQuery.pinnedAccountId ?? '',
+  ].join('|')
+  const appliedLedgerInteractionKeyRef = useRef(ledgerInteractionKey)
+  useEffect(() => {
+    if (!needsRecords) return
+    if (appliedLedgerInteractionKeyRef.current === ledgerInteractionKey) return
+    appliedLedgerInteractionKeyRef.current = ledgerInteractionKey
+    beginTableInteraction()
+  }, [beginTableInteraction, ledgerInteractionKey, needsRecords])
   const probeContextQuery = useQuery({
     queryKey: [
       'request-audits',
@@ -1799,7 +1927,7 @@ export function RequestAuditsPage() {
   )
   const thresholds = statusQuery.data?.thresholds ??
     summaryQuery.data?.thresholds ??
-    recordsQuery.data?.thresholds ?? { watch: 150, high: 500 }
+    recordsQuery.data?.thresholds ?? FALLBACK_THRESHOLDS
   const upstreamAccountSnapshotAt =
     summaryQuery.data?.upstreamAccountSnapshotAt ??
     recordsQuery.data?.upstreamAccountSnapshotAt ??
@@ -1927,7 +2055,7 @@ export function RequestAuditsPage() {
   const someVisibleRiskAccountsSelected = selectableRiskAccountIds.some(
     (accountId) => selectedRiskAccountIds.includes(accountId)
   )
-  const ledgerRecords = recordsQuery.data?.items ?? []
+  const ledgerRecords = recordsQuery.data?.items ?? EMPTY_AUDIT_RECORDS
   const selectableLedgerRecords = ledgerRecords.filter((record) =>
     Boolean(record.accountId)
   )
@@ -1956,7 +2084,7 @@ export function RequestAuditsPage() {
       ? ''
       : ledgerNodeOptions.find((item) => item.id === auditNode)?.name ||
         `节点 #${auditNode}`
-  const clientKeyOptions = recordsQuery.data?.clientKeys ?? []
+  const clientKeyOptions = recordsQuery.data?.clientKeys ?? EMPTY_CLIENT_KEYS
   const selectedClientKey = clientKeyOptions.find(
     (item) => item.id === auditClientKey
   )
@@ -2058,20 +2186,6 @@ export function RequestAuditsPage() {
           )
         : Array.from(new Set([...current, ...selectableRiskAccountIds]))
     )
-  }
-
-  const setAuditRowSelected = (
-    record: RequestAuditRecord,
-    checked: boolean
-  ) => {
-    setSelectedAuditRows((current) => {
-      if (!checked) {
-        const next = { ...current }
-        delete next[record.id]
-        return next
-      }
-      return { ...current, [record.id]: record }
-    })
   }
 
   const toggleVisibleLedgerRows = () => {
@@ -2258,11 +2372,6 @@ export function RequestAuditsPage() {
     if (needsSummary) jobs.push(summaryQuery.refetch())
     if (needsRecords) jobs.push(recordsQuery.refetch())
     void Promise.all(jobs)
-  }
-
-  const openAuditDetail = (record: RequestAuditRecord) => {
-    setSelectedAuditRecord(record)
-    setAuditDetailOpen(true)
   }
 
   return (
@@ -2513,6 +2622,8 @@ export function RequestAuditsPage() {
         )}
 
         <TabsContent value='overview' className='mt-0 space-y-4'>
+          {mainView === 'overview' ? (
+          <>
           {!hasSummary ? (
             <LoadingState
               label={
@@ -2614,20 +2725,20 @@ export function RequestAuditsPage() {
                 setPage(1)
                 if (dimension === 'clients') {
                   setAuditSearch('')
-                  setAuditClientKey(row.id)
+                  selectLedgerClientKey(row.id)
                   setAuditNode('all')
                   goToTab('ledger', { account: '' })
                   return
                 }
                 if (dimension === 'accounts') {
-                  setAuditClientKey('all')
+                  selectLedgerClientKey('all')
                   setAuditNode('all')
                   goToTab('ledger', { account: row.id })
                   return
                 }
                 if (dimension === 'nodes') {
                   setAuditSearch('')
-                  setAuditClientKey('all')
+                  selectLedgerClientKey('all')
                   setAuditNode(row.id)
                   goToTab('ledger', { account: '' })
                 }
@@ -2838,9 +2949,12 @@ export function RequestAuditsPage() {
               </CardContent>
             </Card>
           </div>
+          </>
+          ) : null}
         </TabsContent>
 
         <TabsContent value='workspace' className='mt-0'>
+          {mainView === 'workspace' ? (
           <Card>
             <CardHeader className='border-b'>
               <CardTitle className='flex items-center gap-1.5'>
@@ -3319,9 +3433,11 @@ export function RequestAuditsPage() {
               </Tabs>
             </CardContent>
           </Card>
+          ) : null}
         </TabsContent>
 
         <TabsContent value='ledger' className='mt-0'>
+          {mainView === 'ledger' ? (
           <Card>
             <CardHeader className='border-b'>
               <CardTitle>请求审计流水</CardTitle>
@@ -3330,15 +3446,31 @@ export function RequestAuditsPage() {
                 检查或批量隔离，详情中可继续查看对应探针任务样本。
               </CardDescription>
             </CardHeader>
-            <CardContent className='p-0'>
+            <CardContent className='relative p-0' aria-busy={ledgerFilterPending}>
+              {ledgerFilterPending ? (
+                <div
+                  className='sticky top-0 z-20 flex justify-center border-b bg-background/85 px-3 py-2 backdrop-blur-sm'
+                  role='status'
+                  aria-live='polite'
+                >
+                  <div className='flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm'>
+                    <RefreshCw className='size-3.5 animate-spin text-primary' />
+                    {committedLedgerQuery.clientKey === 'all'
+                      ? `正在加载第 ${committedLedgerQuery.page} 页请求流水`
+                      : '正在加载该 Key 的流水'}
+                  </div>
+                </div>
+              ) : null}
+              <div
+                className={cn(
+                  ledgerFilterPending && 'pointer-events-none opacity-55'
+                )}
+              >
               <RequestAuditClientBoard
                 items={clientKeyOptions}
                 selectedId={auditClientKey}
                 loading={recordsQuery.isLoading && !recordsQuery.data}
-                onSelect={(id) => {
-                  setAuditClientKey(id)
-                  setPage(1)
-                }}
+                onSelect={selectLedgerClientKey}
                 onPrefetch={prefetchLedgerClientKey}
               />
               <div className='space-y-2 border-b bg-muted/15 px-3 py-2'>
@@ -3395,11 +3527,10 @@ export function RequestAuditsPage() {
                                 size='sm'
                                 className='h-8'
                                 onClick={() => {
-                                  setAuditClientKey('all')
+                                  selectLedgerClientKey('all')
                                   setAuditClientKeyQuery('')
                                   setAuditNode('all')
                                   setAuditRisk('all')
-                                  setPage(1)
                                 }}
                               >
                                 清除全部
@@ -3439,10 +3570,7 @@ export function RequestAuditsPage() {
                                     ? 'bg-accent text-accent-foreground'
                                     : 'hover:bg-accent/60'
                                 )}
-                                onClick={() => {
-                                  setAuditClientKey('all')
-                                  setPage(1)
-                                }}
+                                onClick={() => selectLedgerClientKey('all')}
                               >
                                 所有客户端 Key
                               </button>
@@ -3461,10 +3589,7 @@ export function RequestAuditsPage() {
                                         ? 'bg-accent text-accent-foreground'
                                         : 'hover:bg-accent/60'
                                     )}
-                                    onClick={() => {
-                                      setAuditClientKey(item.id)
-                                      setPage(1)
-                                    }}
+                                    onClick={() => selectLedgerClientKey(item.id)}
                                   >
                                     <span className='text-sm'>{label}</span>
                                     <span className='text-[11px] text-muted-foreground'>
@@ -3683,10 +3808,7 @@ export function RequestAuditsPage() {
                     {auditClientKey !== 'all' && (
                       <FilterChip
                         label={`Key：${auditClientKeyLabel}`}
-                        onClear={() => {
-                          setAuditClientKey('all')
-                          setPage(1)
-                        }}
+                        onClear={() => selectLedgerClientKey('all')}
                       />
                     )}
                     {auditNode !== 'all' && (
@@ -3728,39 +3850,7 @@ export function RequestAuditsPage() {
                   </span>
                 </div>
               </div>
-              <div className='relative'>
-                <div
-                  className={cn(
-                    'h-0.5 overflow-hidden',
-                    ledgerFilterPending ? 'bg-primary/15' : 'bg-transparent'
-                  )}
-                >
-                  {ledgerFilterPending ? (
-                    <ProgressBar
-                      value={0}
-                      active
-                      className='h-0.5 rounded-none bg-transparent'
-                      indicatorClassName='bg-primary'
-                    />
-                  ) : null}
-                </div>
-                {ledgerFilterPending ? (
-                  <div className='pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center'>
-                    <div className='inline-flex items-center gap-1.5 rounded-full border bg-background/95 px-2.5 py-1 text-[11px] text-foreground shadow-sm'>
-                      <RefreshCw className='size-3 animate-spin text-primary' />
-                      {auditClientKey === 'all'
-                        ? '正在读取请求流水'
-                        : '正在读取该 Key 的流水'}
-                    </div>
-                  </div>
-                ) : null}
-              <div
-                className={cn(
-                  'overflow-x-auto transition-opacity',
-                  ledgerFilterPending && 'opacity-55'
-                )}
-                aria-busy={recordsQuery.isFetching || ledgerFilterPending}
-              >
+              <div className='overflow-x-auto'>
                 <Table
                   className='min-w-[1380px] text-xs leading-4 [&_td]:py-1.5 [&_th]:h-9'
                   rememberRowKey='request-audit-ledger'
@@ -3803,19 +3893,17 @@ export function RequestAuditsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(recordsQuery.data?.items ?? []).map((row) => (
+                    {ledgerRecords.map((row) => (
                       <AuditRow
                         key={row.id}
                         row={row}
                         thresholds={thresholds}
                         selected={Boolean(selectedAuditRows[row.id])}
-                        onSelectedChange={(checked) =>
-                          setAuditRowSelected(row, checked)
-                        }
+                        onSelectedChange={setAuditRowSelected}
                         onOpenDetail={openAuditDetail}
                       />
                     ))}
-                    {!recordsQuery.data?.items.length && (
+                    {!ledgerRecords.length && (
                       <TableRow>
                         <TableCell colSpan={11}>
                           <EmptyState
@@ -3830,28 +3918,27 @@ export function RequestAuditsPage() {
                   </TableBody>
                 </Table>
               </div>
-              </div>
               <div className='px-4 pb-4'>
                 <ServerPagination
                   page={recordsQuery.data?.page ?? page}
                   pageSize={pageSize}
                   total={recordsQuery.data?.total ?? 0}
-                  disabled={recordsQuery.isFetching}
-                  loading={recordsQuery.isFetching || ledgerFilterPending}
+                  disabled={ledgerFilterPending}
+                  loading={ledgerFilterPending}
                   itemLabel='请求'
                   pageSizeOptions={[25, 50, 100]}
-                  onPageChange={setPage}
-                  onPageSizeChange={(value) => {
-                    setPageSize(value)
-                    setPage(1)
-                  }}
+                  onPageChange={changeLedgerPage}
+                  onPageSizeChange={changeLedgerPageSize}
                 />
+              </div>
               </div>
             </CardContent>
           </Card>
+          ) : null}
         </TabsContent>
 
         <TabsContent value='schedule' className='mt-0'>
+          {mainView === 'schedule' ? (
           <AuditSchedulePanel
             config={config}
             activity={activity}
@@ -3861,6 +3948,7 @@ export function RequestAuditsPage() {
             nextRunError={schedulerQuery.isError}
             backgroundRefreshing={backgroundRefreshing}
           />
+          ) : null}
         </TabsContent>
       </Tabs>
 
@@ -5494,7 +5582,7 @@ function AccountRiskRow({
   )
 }
 
-function AuditRow({
+const AuditRow = memo(function AuditRow({
   row,
   thresholds,
   selected,
@@ -5504,7 +5592,7 @@ function AuditRow({
   row: RequestAuditRecord
   thresholds: RequestAuditThresholds
   selected: boolean
-  onSelectedChange: (checked: boolean) => void
+  onSelectedChange: (row: RequestAuditRecord, checked: boolean) => void
   onOpenDetail: (row: RequestAuditRecord) => void
 }) {
   return (
@@ -5513,7 +5601,7 @@ function AuditRow({
         <Checkbox
           checked={selected}
           disabled={!row.accountId}
-          onCheckedChange={(value) => onSelectedChange(value === true)}
+          onCheckedChange={(value) => onSelectedChange(row, value === true)}
           aria-label={`选择请求 ${row.requestId || row.id}`}
         />
       </TableCell>
@@ -5681,4 +5769,4 @@ function AuditRow({
       </TableCell>
     </TableRow>
   )
-}
+})
