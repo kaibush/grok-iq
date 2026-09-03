@@ -993,6 +993,32 @@ export type RequestAuditNodeRisk = {
   egressRecommendationCount?: number
 }
 
+export type RequestAuditQualityRow = {
+  id: string
+  label: string
+  requests: number
+  watchRequests: number
+  highRiskRequests: number
+}
+
+export type RequestAuditQualityGroup = {
+  total: number
+  items: RequestAuditQualityRow[]
+}
+
+export type RequestAuditQualityDimension =
+  | 'clients'
+  | 'accounts'
+  | 'nodes'
+  | 'models'
+  | 'reasoning'
+  | 'operations'
+
+export type RequestAuditQualityBreakdown = Record<
+  RequestAuditQualityDimension,
+  RequestAuditQualityGroup
+>
+
 export type RequestAuditSummary = {
   requests: number
   measuredRequests: number
@@ -1152,6 +1178,7 @@ export type RequestAuditSummaryResponse = {
   upstreamAccountSnapshotAt: string | null
   thresholds: RequestAuditThresholds
   summary: RequestAuditSummary
+  quality?: RequestAuditQualityBreakdown
   accounts: RequestAuditAccountRisk[]
   nodes: RequestAuditNodeRisk[]
   trend: Array<{

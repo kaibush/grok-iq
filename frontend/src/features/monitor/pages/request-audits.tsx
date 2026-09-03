@@ -138,6 +138,7 @@ import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-nod
 import { FilterChip } from '@/features/monitor/components/filter-chip'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import { RequestAuditClientBoard } from '@/features/monitor/components/request-audit-client-board'
+import { RequestAuditQualityBoard } from '@/features/monitor/components/request-audit-quality-board'
 import {
   formatSampleWindow,
   streamSampleDiagnostics,
@@ -2579,6 +2580,34 @@ export function RequestAuditsPage() {
               detail={`${nodes.filter((item) => item.riskLevel !== 'normal').length} 个异常代理节点`}
               hint={requestAuditAutoDisableHelp}
               tone={(summary?.highRiskAccounts ?? 0) > 0 ? 'danger' : 'default'}
+            />
+          </div>
+
+          <div className={hasSummary ? '' : 'hidden'}>
+            <RequestAuditQualityBoard
+              quality={summaryQuery.data?.quality}
+              onSelect={(dimension, row) => {
+                setPage(1)
+                if (dimension === 'clients') {
+                  setAuditSearch('')
+                  setAuditClientKey(row.id)
+                  setAuditNode('all')
+                  goToTab('ledger', { account: '' })
+                  return
+                }
+                if (dimension === 'accounts') {
+                  setAuditClientKey('all')
+                  setAuditNode('all')
+                  goToTab('ledger', { account: row.id })
+                  return
+                }
+                if (dimension === 'nodes') {
+                  setAuditSearch('')
+                  setAuditClientKey('all')
+                  setAuditNode(row.id)
+                  goToTab('ledger', { account: '' })
+                }
+              }}
             />
           </div>
 

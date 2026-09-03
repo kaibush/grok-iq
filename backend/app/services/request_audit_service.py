@@ -44,6 +44,15 @@ REQUEST_AUDIT_MAX_PAGES = 200
 # its actual busy/normal/idle intervals in status payloads.
 REQUEST_AUDIT_SCAN_CRON = "*/5 * * * *"
 REQUEST_AUDIT_WINDOW_PRESETS = frozenset({"today", "1h", "3h", "6h", "24h", "7d", "30d"})
+REQUEST_AUDIT_QUALITY_BREAKDOWN_LIMIT = 8
+REQUEST_AUDIT_QUALITY_KINDS = (
+    "clients",
+    "accounts",
+    "nodes",
+    "models",
+    "reasoning",
+    "operations",
+)
 REQUEST_AUDIT_ACTIVITY_MINUTES = 5
 REQUEST_AUDIT_ACCOUNT_CACHE_SECONDS = 120
 REQUEST_AUDIT_MEDIA_BACKFILL_KEY = "request_audit_media_input_projection_v1"
@@ -2802,6 +2811,7 @@ class RequestAuditService:
                 evaluations=evaluations,
             ),
             "trend": self._trend_payload(window, records, evaluations=evaluations),
+            "quality": self._quality_breakdowns(records, evaluations=evaluations),
             "scan": self._state_payload(state, window=window),
         }
 
@@ -2863,6 +2873,114 @@ class RequestAuditService:
             "day": current_day_key(),
             "window": self._window_payload(window),
         }
+
+    def _quality_breakdowns(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        evaluations: dict[str, AuditRiskEvaluation] | None = None,
+    ) -> dict[str, Any]:
+        buckets: dict[str, dict[str, dict[str, int]]] = {
+            kind: {} for kind in REQUEST_AUDIT_QUALITY_KINDS
+        }
+        labels: dict[str, dict[str, str]] = {
+            kind: {} for kind in REQUEST_AUDIT_QUALITY_KINDS
+        }
+        for row in records:
+            evaluation = self._evaluation_for(row, evaluations)
+            risk_name = evaluation.classification.name
+            risk_bucket = (
+                "highRiskRequests"
+                if risk_name == "high"
+                else "watchRequests"
+                if risk_name == "watch"
+                else None
+            )
+            for kind in REQUEST_AUDIT_QUALITY_KINDS:
+                group_id, group_label = self._quality_group_identity(kind, row)
+                stats = buckets[kind].setdefault(
+                    group_id,
+                    {
+                        "requests": 0,
+                        "watchRequests": 0,
+                        "highRiskRequests": 0,
+                    },
+                )
+                stats["requests"] += 1
+                if risk_bucket is not None:
+                    stats[risk_bucket] += 1
+                current_label = labels[kind].get(group_id, "")
+                if group_label and (not current_label or current_label == group_id):
+                    labels[kind][group_id] = group_label
+        return {
+            kind: self._quality_group_payload(buckets[kind], labels[kind])
+            for kind in REQUEST_AUDIT_QUALITY_KINDS
+        }
+
+    @staticmethod
+    def _quality_group_identity(
+        kind: str, row: dict[str, Any]
+    ) -> tuple[str, str]:
+        if kind == "clients":
+            key_id = str(row.get("client_key_id") or "").strip()
+            key_name = str(row.get("client_key_name") or "").strip()
+            if not key_id and not key_name:
+                return "unlabeled", "未记录 Key"
+            return key_id or key_name, key_name or key_id
+        if kind == "accounts":
+            account_id = _positive_int(row.get("account_id"))
+            name = str(row.get("account_name") or "").strip()
+            if account_id is None:
+                return "unlabeled", "未关联账号"
+            return str(account_id), name or f"账号 {account_id}"
+        if kind == "nodes":
+            node_id = _positive_int(row.get("egress_node_id"))
+            name = str(row.get("egress_node_name") or "").strip()
+            if node_id is None:
+                return "unmapped", "未映射节点"
+            return str(node_id), name or f"节点 #{node_id}"
+        if kind == "models":
+            public_id = str(row.get("model_public_id") or "").strip()
+            upstream = str(row.get("model_upstream_model") or "").strip()
+            label = public_id or upstream
+            if not label:
+                return "unlabeled", "未记录模型"
+            return label, label
+        if kind == "reasoning":
+            effort = _normalize_reasoning_effort(
+                row.get("reasoning_effort") or row.get("reasoningEffort")
+            )
+            if not effort:
+                return "unlabeled", "未记录"
+            return effort, effort
+        operation = str(row.get("operation") or "").strip() or "responses"
+        return operation, operation
+
+    @staticmethod
+    def _quality_group_payload(
+        stats: dict[str, dict[str, int]],
+        labels: dict[str, str],
+        *,
+        limit: int = REQUEST_AUDIT_QUALITY_BREAKDOWN_LIMIT,
+    ) -> dict[str, Any]:
+        items = [
+            {
+                "id": group_id,
+                "label": labels.get(group_id) or group_id,
+                "requests": value["requests"],
+                "watchRequests": value["watchRequests"],
+                "highRiskRequests": value["highRiskRequests"],
+            }
+            for group_id, value in stats.items()
+        ]
+        items.sort(
+            key=lambda item: (
+                -(int(item["highRiskRequests"]) * 3 + int(item["watchRequests"])),
+                -int(item["requests"]),
+                str(item["label"]).casefold(),
+            )
+        )
+        return {"total": len(items), "items": items[:limit]}
 
     def _assessment_payloads(
         self, records: list[dict[str, Any]]
