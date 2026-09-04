@@ -8,7 +8,7 @@ from app.core.clock import utc_now
 from app.core.config import Settings
 from app.persistence.database import Database
 from app.persistence.request_audit_repository import RequestAuditRepository
-from app.services.request_audit_service import RequestAuditService
+from app.services.request_audit_service import RequestAuditService, _history_regularity
 
 
 def _build(tmp_path: Path) -> tuple[RequestAuditRepository, RequestAuditService]:
@@ -345,3 +345,37 @@ def test_account_history_sorts_still_abnormal_first(tmp_path: Path):
     payload = _history(service, start, end)
     assert payload["accounts"][0]["accountName"] == "bad"
     assert payload["accounts"][0]["stillAbnormal"] is True
+
+
+def test_history_regularity_accepts_iso_episode_starts():
+    regular, period = _history_regularity(
+        [
+            {"start": "2026-09-03T10:00:00+08:00"},
+            {"start": "2026-09-03T11:00:00+08:00"},
+            {"start": "2026-09-03T12:00:00+08:00"},
+        ]
+    )
+    assert regular is True
+    assert period == 60.0
+
+
+def test_account_history_24h_regular_episodes_do_not_crash(tmp_path: Path):
+    repository, service = _build(tmp_path)
+    now = utc_now()
+    rows = []
+    for burst, offset in enumerate([90, 210, 330]):
+        for index in range(3):
+            rows.append(
+                _record(
+                    now - timedelta(hours=20) + timedelta(minutes=offset + index),
+                    upstream_id=f"burst-{burst}-{index}",
+                    tps=600,
+                )
+            )
+    repository.upsert_records(rows)
+    payload = service.account_history(window_preset="24h")
+    assert payload["bucketMinutes"] == 15
+    account = payload["accounts"][0]
+    assert account["abnormalEpisodes"] >= 3
+    assert account["regular"] is True
+

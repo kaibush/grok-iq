@@ -583,7 +583,7 @@ def _history_regularity(
 ) -> tuple[bool, float | None]:
     if len(episodes) < 3:
         return False, None
-    starts = [ensure_utc(item.get("start")) for item in episodes]
+    starts = [_parse_datetime(item.get("start")) for item in episodes]
     times = [item for item in starts if item is not None]
     if len(times) < 3:
         return False, None
