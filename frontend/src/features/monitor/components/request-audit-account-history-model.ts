@@ -525,6 +525,102 @@ export function historyAxisTicks(
   return ticks
 }
 
+export type HistorySwimlaneEpisodePaint = {
+  key: string
+  left: number
+  width: number
+  severity: 'watch' | 'high'
+  recovered: boolean
+  title: string
+}
+
+export type HistorySwimlanePaint = {
+  activityGradient?: string
+  failGradient?: string
+  episodes: HistorySwimlaneEpisodePaint[]
+}
+
+export function paintHistorySwimlane(
+  account: Pick<RequestAuditHistoryAccount, 'buckets' | 'episodes'>
+): HistorySwimlanePaint {
+  const buckets = account.buckets
+  const range = historyWindowRange(buckets)
+  const rowMaxRequests = buckets.reduce(
+    (maximum, bucket) => Math.max(maximum, bucket.requests),
+    0
+  )
+  const minPercent =
+    buckets.length > 0 ? Math.max(0.8, 100 / buckets.length) : 2
+  return {
+    activityGradient: historyLayerGradient(buckets, (bucket) => {
+      const alpha = quantizeAlpha(
+        historyActivityOpacity(bucket, rowMaxRequests)
+      )
+      return bucket.requests > 0 && alpha > 0
+        ? `rgb(16 185 129 / ${alpha})`
+        : 'transparent'
+    }),
+    failGradient: historyLayerGradient(buckets, (bucket) => {
+      const alpha = quantizeAlpha(historyFailOpacity(bucket))
+      return alpha > 0 ? `rgb(244 63 94 / ${alpha})` : 'transparent'
+    }),
+    episodes:
+      range == null
+        ? []
+        : account.episodes.map((episode) => {
+            const place = historyEpisodePlacement(
+              episode,
+              range.start,
+              range.end,
+              minPercent
+            )
+            return {
+              key: `${episode.start}-${episode.end}-${episode.severity}`,
+              left: place.left,
+              width: place.width,
+              severity: episode.severity,
+              recovered: episode.recovered,
+              title: [
+                HISTORY_RISK_LEVEL_LABELS[episode.severity],
+                formatHistoryTimeRange(episode.start, episode.end),
+                formatHistoryMinutes(episode.durationMinutes),
+                episode.recovered ? '已恢复' : '未恢复',
+              ].join(' · '),
+            }
+          }),
+  }
+}
+
+function quantizeAlpha(value: number) {
+  if (value <= 0) return 0
+  return Math.round(value * 10) / 10
+}
+
+function historyLayerGradient(
+  buckets: RequestAuditHistoryBucket[],
+  colorFor: (bucket: RequestAuditHistoryBucket) => string
+) {
+  if (buckets.length === 0) return undefined
+  const stops: Array<{ start: number; end: number; color: string }> = []
+  buckets.forEach((bucket, index) => {
+    const start = (index / buckets.length) * 100
+    const end = ((index + 1) / buckets.length) * 100
+    const color = colorFor(bucket)
+    const last = stops[stops.length - 1]
+    if (last && last.color === color) {
+      last.end = end
+      return
+    }
+    stops.push({ start, end, color })
+  })
+  return `linear-gradient(to right, ${stops
+    .flatMap((stop) => [
+      `${stop.color} ${stop.start}%`,
+      `${stop.color} ${stop.end}%`,
+    ])
+    .join(', ')})`
+}
+
 export function historyBucketTitle(bucket: RequestAuditHistoryBucket) {
   const range = formatHistoryTimeRange(bucket.start, bucket.end)
   if (bucket.dominant === 'empty' || bucket.requests <= 0) {

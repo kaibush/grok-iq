@@ -1,7 +1,15 @@
-import { useMemo, useState } from 'react'
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   ChevronDown,
   History,
+  Loader2,
   KeyRound,
   Layers3,
   Search,
@@ -51,16 +59,11 @@ import {
   historyAccountDisplayName,
   historyAccountHasName,
   historyAccountKey,
-  historyActivityOpacity,
   historyAxisTicks,
-  historyBucketIndexAt,
   historyClientKeyLabel,
-  historyEpisodeAt,
-  historyEpisodePlacement,
-  historyFailOpacity,
-  historyRowMaxRequests,
-  historyWindowRange,
+  paintHistorySwimlane,
   sortHistoryAccounts,
+  type HistorySwimlanePaint,
   type HistoryAccountPatternFilter,
   type HistoryAccountSort,
   type HistoryRiskFilter,
@@ -85,6 +88,8 @@ export type RequestAuditAccountHistoryBoardProps = {
   onNodeChange: (value: string) => void
   risk: HistoryRiskFilter
   onRiskChange: (value: HistoryRiskFilter) => void
+  pending?: boolean
+  onPrefetchClientKey?: (value: string) => void
   onOpenLedger: (account: {
     accountId: number | null
     accountName: string
@@ -107,6 +112,8 @@ export function RequestAuditAccountHistoryBoard({
   onNodeChange,
   risk,
   onRiskChange,
+  pending = false,
+  onPrefetchClientKey,
   onOpenLedger,
 }: RequestAuditAccountHistoryBoardProps) {
   const [patternFilter, setPatternFilter] =
@@ -114,6 +121,10 @@ export function RequestAuditAccountHistoryBoard({
   const [sort, setSort] = useState<HistoryAccountSort>(
     DEFAULT_HISTORY_ACCOUNT_SORT
   )
+  const deferredPatternFilter = useDeferredValue(patternFilter)
+  const deferredSort = useDeferredValue(sort)
+  const listPending =
+    deferredPatternFilter !== patternFilter || deferredSort !== sort
   const pinnedKey = pinnedAccountId == null ? null : String(pinnedAccountId)
   const [expandedAccountKey, setExpandedAccountKey] = useState<string | null>(
     pinnedKey
@@ -123,62 +134,147 @@ export function RequestAuditAccountHistoryBoard({
     setSeenPinnedKey(pinnedKey)
     if (pinnedKey != null) setExpandedAccountKey(pinnedKey)
   }
+  const [optimisticClientKey, setOptimisticClientKey] = useState<string | null>(
+    null
+  )
+  const [optimisticNode, setOptimisticNode] = useState<string | null>(null)
+  const [optimisticRisk, setOptimisticRisk] =
+    useState<HistoryRiskFilter | null>(null)
+  const [localPending, setLocalPending] = useState(false)
+  const cancelApplyRef = useRef<(() => void) | null>(null)
+  const activeClientKey = optimisticClientKey ?? clientKey
+  const activeNode = optimisticNode ?? node
+  const activeRisk = optimisticRisk ?? risk
+  const switchPending = localPending || pending
+
+  const applyAfterPaint = useCallback((task: () => void) => {
+    setLocalPending(true)
+    cancelApplyRef.current?.()
+    cancelApplyRef.current = runAfterPaint(() => {
+      cancelApplyRef.current = null
+      task()
+    })
+  }, [])
+
+  const selectClientKey = useCallback(
+    (value: string) => {
+      setOptimisticClientKey(value)
+      applyAfterPaint(() => onClientKeyChange(value))
+    },
+    [applyAfterPaint, onClientKeyChange]
+  )
+  const selectNode = useCallback(
+    (value: string) => {
+      setOptimisticNode(value)
+      applyAfterPaint(() => onNodeChange(value))
+    },
+    [applyAfterPaint, onNodeChange]
+  )
+  const selectRisk = useCallback(
+    (value: HistoryRiskFilter) => {
+      setOptimisticRisk(value)
+      applyAfterPaint(() => onRiskChange(value))
+    },
+    [applyAfterPaint, onRiskChange]
+  )
+
+  const parentCaughtUp =
+    (optimisticClientKey == null || optimisticClientKey === clientKey) &&
+    (optimisticNode == null || optimisticNode === node) &&
+    (optimisticRisk == null || optimisticRisk === risk)
+  if (localPending && !pending && parentCaughtUp) {
+    setLocalPending(false)
+    setOptimisticClientKey(null)
+    setOptimisticNode(null)
+    setOptimisticRisk(null)
+  }
 
   const errorMessage = error?.trim() ?? ''
   const showSkeletons = loading && !data
   const summary = data?.summary
+  const paintedAccounts = useMemo(
+    () =>
+      (data?.accounts ?? []).map((account) => ({
+        account,
+        key: historyAccountKey(account),
+        paint: paintHistorySwimlane(account),
+      })),
+    [data?.accounts]
+  )
   const visibleAccounts = useMemo(() => {
-    const filtered = filterHistoryAccounts(data?.accounts ?? [], {
-      pattern: patternFilter,
-    })
-    return sortHistoryAccounts(filtered, sort)
-  }, [data?.accounts, patternFilter, sort])
+    const filtered = filterHistoryAccounts(
+      paintedAccounts.map((item) => item.account),
+      { pattern: deferredPatternFilter }
+    )
+    const ordered = sortHistoryAccounts(filtered, deferredSort)
+    const paintByKey = new Map(
+      paintedAccounts.map((item) => [item.key, item.paint])
+    )
+    return ordered.map((account) => ({
+      account,
+      key: historyAccountKey(account),
+      paint:
+        paintByKey.get(historyAccountKey(account)) ??
+        paintHistorySwimlane(account),
+    }))
+  }, [deferredPatternFilter, deferredSort, paintedAccounts])
   const axisBuckets = useMemo(() => {
     const fromVisible = visibleAccounts.find(
-      (account) => account.buckets.length > 0
+      (item) => item.account.buckets.length > 0
     )
-    if (fromVisible) return fromVisible.buckets
+    if (fromVisible) return fromVisible.account.buckets
     return (
       data?.accounts.find((account) => account.buckets.length > 0)?.buckets ??
       []
     )
   }, [data?.accounts, visibleAccounts])
 
-  const selectedClientKey = clientKeys.find((item) => item.id === clientKey)
-  const selectedNode = nodeOptions.find((item) => item.id === node)
+  const selectedClientKey = clientKeys.find(
+    (item) => item.id === activeClientKey
+  )
+  const selectedNode = nodeOptions.find((item) => item.id === activeNode)
   const resolvedClientKeys = useMemo(() => {
     if (
-      clientKey === 'all' ||
-      clientKeys.some((item) => item.id === clientKey)
+      activeClientKey === 'all' ||
+      clientKeys.some((item) => item.id === activeClientKey)
     ) {
       return clientKeys
     }
-    return [{ id: clientKey, name: `#${clientKey}` }, ...clientKeys]
-  }, [clientKey, clientKeys])
+    return [{ id: activeClientKey, name: `#${activeClientKey}` }, ...clientKeys]
+  }, [activeClientKey, clientKeys])
   const resolvedNodeOptions = useMemo(() => {
-    if (node === 'all' || nodeOptions.some((item) => item.id === node)) {
+    if (
+      activeNode === 'all' ||
+      nodeOptions.some((item) => item.id === activeNode)
+    ) {
       return nodeOptions
     }
-    return [{ id: node, name: `节点 #${node}` }, ...nodeOptions]
-  }, [node, nodeOptions])
+    return [{ id: activeNode, name: `节点 #${activeNode}` }, ...nodeOptions]
+  }, [activeNode, nodeOptions])
 
   const riskLabel =
-    HISTORY_RISK_FILTER_OPTIONS.find((item) => item.value === risk)?.label ??
-    '全部'
+    HISTORY_RISK_FILTER_OPTIONS.find((item) => item.value === activeRisk)
+      ?.label ?? '全部'
   const hasActiveFilters =
     Boolean(search.trim()) ||
-    clientKey !== 'all' ||
-    node !== 'all' ||
-    (riskEnabled && risk !== 'all') ||
+    activeClientKey !== 'all' ||
+    activeNode !== 'all' ||
+    (riskEnabled && activeRisk !== 'all') ||
     patternFilter != null
 
   function clearFilters() {
     onSearchChange('')
-    onClientKeyChange('all')
-    onNodeChange('all')
-    onRiskChange('all')
+    selectClientKey('all')
+    selectNode('all')
+    selectRisk('all')
     setPatternFilter(null)
   }
+
+  const toggleAccount = useCallback((accountKey: string) => {
+    setExpandedAccountKey((current) =>
+      current === accountKey ? null : accountKey
+    )
+  }, [])
 
   function togglePattern(next: HistoryAccountPatternFilter) {
     setPatternFilter((current) => (current === next ? null : next))
@@ -191,7 +287,7 @@ export function RequestAuditAccountHistoryBoard({
       title='账号历程'
       description='把每个账号的正常 / 观察 / 高风险过程摊成时间轴，用来区分偶发异常、反复异常、从未正常和已经恢复。'
       hint='色带是异常段，底轨绿色是这段有请求，底边红线是 HTTP 失败，灰色空档是没请求。'
-      contentClassName='space-y-4'
+      contentClassName='relative space-y-4'
     >
       {errorMessage ? (
         <Card className='border-destructive/30 bg-destructive/5'>
@@ -214,7 +310,7 @@ export function RequestAuditAccountHistoryBoard({
             />
           </div>
           <div className='grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[min(42rem,100%)]'>
-            <Select value={clientKey} onValueChange={onClientKeyChange}>
+            <Select value={activeClientKey} onValueChange={selectClientKey}>
               <SelectTrigger
                 className='w-full min-w-0'
                 aria-label='按客户端 Key 筛选账号历程'
@@ -223,15 +319,24 @@ export function RequestAuditAccountHistoryBoard({
                 <SelectValue placeholder='所有客户端 Key' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='all'>所有客户端 Key</SelectItem>
+                <SelectItem
+                  value='all'
+                  onPointerEnter={() => onPrefetchClientKey?.('all')}
+                >
+                  所有客户端 Key
+                </SelectItem>
                 {resolvedClientKeys.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
+                  <SelectItem
+                    key={item.id}
+                    value={item.id}
+                    onPointerEnter={() => onPrefetchClientKey?.(item.id)}
+                  >
                     {historyClientKeyLabel(item)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select value={node} onValueChange={onNodeChange}>
+            <Select value={activeNode} onValueChange={selectNode}>
               <SelectTrigger
                 className='w-full min-w-0'
                 aria-label='按代理节点筛选账号历程'
@@ -249,11 +354,9 @@ export function RequestAuditAccountHistoryBoard({
               </SelectContent>
             </Select>
             <Select
-              value={risk}
+              value={activeRisk}
               disabled={!riskEnabled}
-              onValueChange={(value) =>
-                onRiskChange(value as HistoryRiskFilter)
-              }
+              onValueChange={(value) => selectRisk(value as HistoryRiskFilter)}
             >
               <SelectTrigger
                 className='w-full min-w-0'
@@ -281,22 +384,22 @@ export function RequestAuditAccountHistoryBoard({
                 onClear={() => onSearchChange('')}
               />
             ) : null}
-            {clientKey !== 'all' ? (
+            {activeClientKey !== 'all' ? (
               <FilterChip
-                label={`Key：${selectedClientKey ? historyClientKeyLabel(selectedClientKey) : `#${clientKey}`}`}
-                onClear={() => onClientKeyChange('all')}
+                label={`Key：${selectedClientKey ? historyClientKeyLabel(selectedClientKey) : `#${activeClientKey}`}`}
+                onClear={() => selectClientKey('all')}
               />
             ) : null}
-            {node !== 'all' ? (
+            {activeNode !== 'all' ? (
               <FilterChip
-                label={`节点：${selectedNode?.name || node}`}
-                onClear={() => onNodeChange('all')}
+                label={`节点：${selectedNode?.name || activeNode}`}
+                onClear={() => selectNode('all')}
               />
             ) : null}
-            {riskEnabled && risk !== 'all' ? (
+            {riskEnabled && activeRisk !== 'all' ? (
               <FilterChip
                 label={`风险：${riskLabel}`}
-                onClear={() => onRiskChange('all')}
+                onClear={() => selectRisk('all')}
               />
             ) : null}
             {patternFilter ? (
@@ -359,34 +462,43 @@ export function RequestAuditAccountHistoryBoard({
               description='换一个时间窗口，或清除筛选后再看。'
             />
           ) : (
-            <div className='space-y-1.5'>
-              <div className='flex flex-col gap-2 xl:flex-row xl:items-end'>
-                <div className={cn('hidden xl:block', IDENTITY_COL)} />
-                <div className='min-w-0 flex-1'>
-                  <HistoryTimeAxis buckets={axisBuckets} />
+            <div className='relative' aria-busy={switchPending || listPending}>
+              <div
+                className={cn(
+                  'space-y-1.5',
+                  (switchPending || listPending) &&
+                    'pointer-events-none opacity-60'
+                )}
+              >
+                <div className='flex flex-col gap-2 xl:flex-row xl:items-end'>
+                  <div className={cn('hidden xl:block', IDENTITY_COL)} />
+                  <div className='min-w-0 flex-1'>
+                    <HistoryTimeAxis buckets={axisBuckets} />
+                  </div>
+                  <div className={cn('hidden xl:block', STATS_COL)} />
                 </div>
-                <div className={cn('hidden xl:block', STATS_COL)} />
-              </div>
-              {visibleAccounts.map((account) => {
-                const accountKey = historyAccountKey(account)
-                return (
+                {visibleAccounts.map((item) => (
                   <HistoryAccountRow
-                    key={accountKey}
-                    account={account}
-                    expanded={expandedAccountKey === accountKey}
+                    key={item.key}
+                    account={item.account}
+                    paint={item.paint}
+                    expanded={expandedAccountKey === item.key}
                     pinned={
                       pinnedAccountId != null &&
-                      account.accountId === pinnedAccountId
+                      item.account.accountId === pinnedAccountId
                     }
-                    onToggle={() =>
-                      setExpandedAccountKey((current) =>
-                        current === accountKey ? null : accountKey
-                      )
-                    }
+                    onToggle={toggleAccount}
                     onOpenLedger={onOpenLedger}
                   />
-                )
-              })}
+                ))}
+              </div>
+              {switchPending || listPending ? (
+                <HistorySwitchOverlay
+                  message={
+                    switchPending ? '正在加载账号历程' : '正在更新账号历程'
+                  }
+                />
+              ) : null}
             </div>
           )}
           <HistoryLegend />
@@ -483,27 +595,57 @@ function HistorySummaryCards({
   )
 }
 
-function HistoryAccountRow({
+function runAfterPaint(task: () => void) {
+  let innerId = 0
+  const outerId = window.requestAnimationFrame(() => {
+    innerId = window.requestAnimationFrame(task)
+  })
+  return () => {
+    window.cancelAnimationFrame(outerId)
+    window.cancelAnimationFrame(innerId)
+  }
+}
+
+function HistorySwitchOverlay({ message }: { message: string }) {
+  return (
+    <div
+      className='absolute inset-0 z-20 bg-background/65 backdrop-blur-[1px]'
+      role='status'
+      aria-live='polite'
+    >
+      <div className='sticky top-0 flex justify-center px-3 py-2'>
+        <div className='flex items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm'>
+          <Loader2 className='size-3.5 animate-spin text-primary' />
+          {message}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const HistoryAccountRow = memo(function HistoryAccountRow({
   account,
+  paint,
   expanded,
   pinned,
   onToggle,
   onOpenLedger,
 }: {
   account: RequestAuditHistoryAccount
+  paint: HistorySwimlanePaint
   expanded: boolean
   pinned: boolean
-  onToggle: () => void
+  onToggle: (accountKey: string) => void
   onOpenLedger: RequestAuditAccountHistoryBoardProps['onOpenLedger']
 }) {
   const displayName = historyAccountDisplayName(account)
   const hasName = historyAccountHasName(account)
-  const rowMaxRequests = historyRowMaxRequests(account)
   const recoveryText = rowRecoveryText(account)
+  const accountKey = historyAccountKey(account)
   return (
     <div
       className={cn(
-        'rounded-lg border bg-background',
+        'rounded-lg border bg-background [contain-intrinsic-size:auto_4.75rem] [content-visibility:auto]',
         account.currentState === 'high' && 'border-l-rose-500',
         account.currentState === 'watch' && 'border-l-amber-500',
         account.currentState === 'normal' && 'border-l-emerald-500',
@@ -515,7 +657,7 @@ function HistoryAccountRow({
         type='button'
         aria-expanded={expanded}
         aria-label={`${expanded ? '收起' : '展开'}${displayName}的历程`}
-        onClick={onToggle}
+        onClick={() => onToggle(accountKey)}
         className='w-full px-3 py-2 text-left transition-colors hover:bg-muted/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
       >
         <div className='flex flex-col gap-2 xl:flex-row xl:items-center'>
@@ -591,11 +733,7 @@ function HistoryAccountRow({
             </div>
           </div>
           <div className='min-w-0 flex-1'>
-            <HistorySwimlane
-              buckets={account.buckets}
-              episodes={account.episodes}
-              rowMaxRequests={rowMaxRequests}
-            />
+            <HistorySwimlane paint={paint} />
           </div>
           <div
             className={cn(
@@ -697,71 +835,41 @@ function HistoryAccountRow({
       ) : null}
     </div>
   )
+}, areHistoryAccountRowsEqual)
+
+function areHistoryAccountRowsEqual(
+  previous: {
+    account: RequestAuditHistoryAccount
+    paint: HistorySwimlanePaint
+    expanded: boolean
+    pinned: boolean
+  },
+  next: {
+    account: RequestAuditHistoryAccount
+    paint: HistorySwimlanePaint
+    expanded: boolean
+    pinned: boolean
+  }
+) {
+  return (
+    previous.account === next.account &&
+    previous.paint === next.paint &&
+    previous.expanded === next.expanded &&
+    previous.pinned === next.pinned
+  )
 }
 
-function HistorySwimlane({
-  buckets,
-  episodes,
-  rowMaxRequests,
-}: {
-  buckets: RequestAuditHistoryBucket[]
-  episodes: RequestAuditHistoryEpisode[]
-  rowMaxRequests: number
-}) {
-  const [hover, setHover] = useState<{
-    index: number
-    x: number
-    y: number
-  } | null>(null)
-  const range = historyWindowRange(buckets)
-  const activityGradient = useMemo(
-    () =>
-      historyLayerGradient(buckets, (bucket) => {
-        const alpha = historyActivityOpacity(bucket, rowMaxRequests)
-        return bucket.requests > 0
-          ? `rgb(16 185 129 / ${alpha})`
-          : 'transparent'
-      }),
-    [buckets, rowMaxRequests]
-  )
-  const failGradient = useMemo(
-    () =>
-      historyLayerGradient(buckets, (bucket) => {
-        const alpha = historyFailOpacity(bucket)
-        return alpha > 0 ? `rgb(244 63 94 / ${alpha})` : 'transparent'
-      }),
-    [buckets]
-  )
-  if (buckets.length === 0) {
-    return <span className='block h-9 w-full rounded-md bg-muted/30' />
-  }
-  const hoverBucket = hover ? buckets[hover.index] : null
-  const hoverEpisode =
-    hoverBucket != null ? historyEpisodeAt(episodes, hoverBucket) : null
-  const minPercent = Math.max(0.8, 100 / buckets.length)
+function HistorySwimlane({ paint }: { paint: HistorySwimlanePaint }) {
   return (
-    <div
-      className='relative h-9'
-      onMouseMove={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect()
-        const ratio =
-          rect.width <= 0 ? 0 : (event.clientX - rect.left) / rect.width
-        setHover({
-          index: historyBucketIndexAt(buckets, ratio),
-          x: event.clientX,
-          y: event.clientY,
-        })
-      }}
-      onMouseLeave={() => setHover(null)}
-    >
+    <div className='relative h-9'>
       <div className='absolute inset-0 overflow-hidden rounded-md bg-muted/30'>
         <div
           className='absolute inset-0'
-          style={{ backgroundImage: activityGradient }}
+          style={{ backgroundImage: paint.activityGradient }}
         />
         <div
           className='absolute inset-x-0 bottom-0 h-[3px]'
-          style={{ backgroundImage: failGradient }}
+          style={{ backgroundImage: paint.failGradient }}
         />
         {[25, 50, 75].map((percent) => (
           <span
@@ -770,90 +878,25 @@ function HistorySwimlane({
             style={{ left: `${percent}%` }}
           />
         ))}
-        {range
-          ? episodes.map((episode) => {
-              const place = historyEpisodePlacement(
-                episode,
-                range.start,
-                range.end,
-                minPercent
-              )
-              return (
-                <span
-                  key={`${episode.start}-${episode.end}-${episode.severity}`}
-                  className={cn(
-                    'pointer-events-none absolute top-[5px] h-[18px] rounded-sm shadow-sm',
-                    episode.severity === 'high'
-                      ? 'bg-rose-500'
-                      : 'bg-amber-500',
-                    !episode.recovered && 'ring-1 ring-foreground/15'
-                  )}
-                  style={{
-                    left: `${place.left}%`,
-                    width: `${place.width}%`,
-                    opacity: episode.recovered ? 0.82 : 0.95,
-                  }}
-                />
-              )
-            })
-          : null}
-        {hoverBucket ? (
+        {paint.episodes.map((episode) => (
           <span
-            className='pointer-events-none absolute inset-y-0 w-px bg-foreground/70'
+            key={episode.key}
+            title={episode.title}
+            className={cn(
+              'absolute top-[5px] h-[18px] rounded-sm shadow-sm',
+              episode.severity === 'high' ? 'bg-rose-500' : 'bg-amber-500',
+              !episode.recovered && 'ring-1 ring-foreground/15'
+            )}
             style={{
-              left: `${((hover?.index ?? 0) + 0.5) * (100 / buckets.length)}%`,
+              left: `${episode.left}%`,
+              width: `${episode.width}%`,
+              opacity: episode.recovered ? 0.82 : 0.95,
             }}
           />
-        ) : null}
+        ))}
       </div>
-      {hoverBucket ? (
-        <div
-          className='pointer-events-none fixed z-50 w-56 rounded-md border bg-popover px-2.5 py-2 text-[11px] leading-4 text-popover-foreground shadow-md'
-          style={{
-            left: Math.min(hover!.x + 14, window.innerWidth - 240),
-            top: Math.max(8, hover!.y - 76),
-          }}
-        >
-          <div className='font-medium text-foreground'>
-            {formatHistoryTimeRange(hoverBucket.start, hoverBucket.end)}
-          </div>
-          <div className='mt-1 text-muted-foreground'>
-            {hoverBucket.requests > 0
-              ? `${formatNumber(hoverBucket.requests, 0)} 次 · 成功 ${formatNumber(hoverBucket.successfulRequests, 0)} / 失败 ${formatNumber(hoverBucket.failedRequests, 0)}`
-              : '空档（没有请求）'}
-          </div>
-          {hoverBucket.requests > 0 ? (
-            <div className='text-muted-foreground'>
-              正常 {formatNumber(hoverBucket.normalRequests, 0)} / 观察{' '}
-              {formatNumber(hoverBucket.watchRequests, 0)} / 高风险{' '}
-              {formatNumber(hoverBucket.highRiskRequests, 0)}
-            </div>
-          ) : null}
-          {hoverEpisode ? (
-            <div className='mt-1 text-foreground'>
-              {HISTORY_RISK_LEVEL_LABELS[hoverEpisode.severity]}段 ·{' '}
-              {formatHistoryMinutes(hoverEpisode.durationMinutes)} ·{' '}
-              {episodeRecoveryText(hoverEpisode)}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   )
-}
-
-function historyLayerGradient(
-  buckets: RequestAuditHistoryBucket[],
-  colorFor: (bucket: RequestAuditHistoryBucket) => string
-) {
-  if (buckets.length === 0) return undefined
-  const stops = buckets.flatMap((bucket, index) => {
-    const start = (index / buckets.length) * 100
-    const end = ((index + 1) / buckets.length) * 100
-    const color = colorFor(bucket)
-    return [`${color} ${start}%`, `${color} ${end}%`]
-  })
-  return `linear-gradient(to right, ${stops.join(', ')})`
 }
 
 function HistoryTimeAxis({

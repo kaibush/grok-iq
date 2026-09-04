@@ -1719,6 +1719,109 @@ export function RequestAuditsPage() {
     appliedLedgerInteractionKeyRef.current = ledgerInteractionKey
     beginTableInteraction()
   }, [beginTableInteraction, ledgerInteractionKey, needsRecords])
+  const {
+    beginTableInteraction: beginHistoryInteraction,
+    tableLoading: historyTableLoading,
+  } = useServerTableLoading({
+    isFetching: historyQuery.isFetching,
+    inputPending: historyQuery.isPlaceholderData,
+  })
+  const historyFilterPending =
+    needsHistory && (historyTableLoading || historyQuery.isPlaceholderData)
+  const prefetchHistoryClientKey = useCallback(
+    (clientKey: string) => {
+      if (!needsHistory) return
+      void queryClient.prefetchQuery({
+        queryKey: [
+          'request-audits',
+          'account-history',
+          windowParams,
+          deferredAuditSearch,
+          clientKey,
+          effectiveAuditRisk,
+          auditNode,
+          pinnedAccountId,
+        ],
+        queryFn: () =>
+          api.requestAuditAccountHistory({
+            window: windowParams.window,
+            startAt: windowParams.startAt,
+            endAt: windowParams.endAt,
+            account: pinnedAccountId ? '' : deferredAuditSearch.trim(),
+            accountId: pinnedAccountId ?? undefined,
+            clientKey: clientKey === 'all' ? '' : clientKey.trim(),
+            risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
+            egressNodeId: auditNode === 'all' ? undefined : Number(auditNode),
+          }),
+        staleTime: 15_000,
+      })
+    },
+    [
+      auditNode,
+      deferredAuditSearch,
+      effectiveAuditRisk,
+      needsHistory,
+      pinnedAccountId,
+      queryClient,
+      windowParams,
+    ]
+  )
+  const selectHistoryClientKey = useCallback(
+    (id: string) => {
+      beginHistoryInteraction()
+      setAuditClientKey(id)
+    },
+    [beginHistoryInteraction]
+  )
+  const selectHistoryNode = useCallback(
+    (id: string) => {
+      beginHistoryInteraction()
+      setAuditNode(id)
+    },
+    [beginHistoryInteraction]
+  )
+  const selectHistoryRisk = useCallback(
+    (value: typeof effectiveAuditRisk) => {
+      beginHistoryInteraction()
+      setAuditRisk(value)
+    },
+    [beginHistoryInteraction]
+  )
+  const openHistoryLedger = useCallback(
+    (account: { accountId: number | null; accountName: string }) => {
+      if (!account.accountId) {
+        setAuditSearch(account.accountName)
+        setAuditClientKey('all')
+        setAuditNode('all')
+        setPage(1)
+        goToTab('ledger')
+        return
+      }
+      setAuditSearch('')
+      setAuditClientKey('all')
+      setAuditNode('all')
+      setPage(1)
+      goToTab('ledger', { account: String(account.accountId) })
+    },
+    [goToTab]
+  )
+  const historyInteractionKey = [
+    windowParams.window,
+    windowParams.startAt ?? '',
+    windowParams.endAt ?? '',
+    deferredAuditSearch,
+    auditClientKey,
+    effectiveAuditRisk,
+    auditNode,
+    pinnedAccountId ?? '',
+  ].join('|')
+  const appliedHistoryInteractionKeyRef = useRef(historyInteractionKey)
+  useEffect(() => {
+    if (!needsHistory) return
+    if (appliedHistoryInteractionKeyRef.current === historyInteractionKey) return
+    appliedHistoryInteractionKeyRef.current = historyInteractionKey
+    beginHistoryInteraction()
+  }, [beginHistoryInteraction, historyInteractionKey, needsHistory])
   const probeContextQuery = useQuery({
     queryKey: [
       'request-audits',
@@ -3459,7 +3562,8 @@ export function RequestAuditsPage() {
           <RequestAuditAccountHistoryBoard
             data={historyQuery.data}
             loading={
-              (historyQuery.isPending || historyQuery.isPlaceholderData) &&
+              historyQuery.isPending &&
+              !historyQuery.data &&
               !historyQuery.isError
             }
             error={
@@ -3473,37 +3577,19 @@ export function RequestAuditsPage() {
             }}
             clientKey={auditClientKey}
             clientKeys={historyQuery.data?.clientKeys ?? EMPTY_CLIENT_KEYS}
-            onClientKeyChange={(value) => {
-              setAuditClientKey(value)
-            }}
+            onClientKeyChange={selectHistoryClientKey}
             node={auditNode}
             nodeOptions={
               historyQuery.data?.nodes?.length
                 ? historyQuery.data.nodes
                 : ledgerNodeOptions
             }
-            onNodeChange={(value) => {
-              setAuditNode(value)
-            }}
+            onNodeChange={selectHistoryNode}
             risk={effectiveAuditRisk}
-            onRiskChange={(value) => {
-              setAuditRisk(value)
-            }}
-            onOpenLedger={(account) => {
-              if (!account.accountId) {
-                setAuditSearch(account.accountName)
-                setAuditClientKey('all')
-                setAuditNode('all')
-                setPage(1)
-                goToTab('ledger')
-                return
-              }
-              setAuditSearch('')
-              setAuditClientKey('all')
-              setAuditNode('all')
-              setPage(1)
-              goToTab('ledger', { account: String(account.accountId) })
-            }}
+            onRiskChange={selectHistoryRisk}
+            pending={historyFilterPending}
+            onPrefetchClientKey={prefetchHistoryClientKey}
+            onOpenLedger={openHistoryLedger}
           />
         </TabsContent>
 

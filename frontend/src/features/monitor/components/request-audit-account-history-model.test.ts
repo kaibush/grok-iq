@@ -9,6 +9,7 @@ import {
   historyAxisTicks,
   historyEpisodeAt,
   historyEpisodePlacement,
+  paintHistorySwimlane,
   sortHistoryAccounts,
 } from './request-audit-account-history-model'
 
@@ -151,5 +152,28 @@ describe('request audit account history helpers', () => {
         bucket('2026-09-04T03:00:00+08:00', '2026-09-04T03:15:00+08:00')
       )
     ).toBeNull()
+  })
+
+  it('compresses empty swimlane color stops', () => {
+    const buckets = Array.from({ length: 24 }, (_, index) => {
+      const startHour = String(index).padStart(2, '0')
+      const end =
+        index === 23
+          ? '2026-09-05T00:00:00+08:00'
+          : `2026-09-04T${String(index + 1).padStart(2, '0')}:00:00+08:00`
+      return bucket(`2026-09-04T${startHour}:00:00+08:00`, end)
+    })
+    buckets[4] = {
+      ...buckets[4],
+      requests: 6,
+      normalRequests: 6,
+      successfulRequests: 6,
+      dominant: 'normal',
+    }
+    const paint = paintHistorySwimlane({ buckets, episodes: [] })
+    expect(paint.activityGradient).toBeTruthy()
+    expect((paint.activityGradient?.match(/rgb\(/g) ?? []).length).toBeLessThan(
+      6
+    )
   })
 })
