@@ -50,7 +50,6 @@ import {
   HISTORY_RISK_FILTER_OPTIONS,
   HISTORY_RISK_LEVEL_BADGE_VARIANTS,
   HISTORY_RISK_LEVEL_LABELS,
-  HISTORY_SORT_OPTIONS,
   HISTORY_SUMMARY_CARDS,
   filterHistoryAccounts,
   formatHistoryMinutes,
@@ -61,7 +60,9 @@ import {
   historyAccountKey,
   historyAxisTicks,
   historyClientKeyLabel,
+  historySortOptionsForFilter,
   paintHistorySwimlane,
+  resolveHistorySort,
   sortHistoryAccounts,
   type HistorySwimlanePaint,
   type HistoryAccountPatternFilter,
@@ -121,10 +122,12 @@ export function RequestAuditAccountHistoryBoard({
   const [sort, setSort] = useState<HistoryAccountSort>(
     DEFAULT_HISTORY_ACCOUNT_SORT
   )
+  const sortOptions = historySortOptionsForFilter(patternFilter)
+  const effectiveSort = resolveHistorySort(sort, patternFilter)
   const deferredPatternFilter = useDeferredValue(patternFilter)
-  const deferredSort = useDeferredValue(sort)
+  const deferredSort = useDeferredValue(effectiveSort)
   const listPending =
-    deferredPatternFilter !== patternFilter || deferredSort !== sort
+    deferredPatternFilter !== patternFilter || deferredSort !== effectiveSort
   const pinnedKey = pinnedAccountId == null ? null : String(pinnedAccountId)
   const [expandedAccountKey, setExpandedAccountKey] = useState<string | null>(
     pinnedKey
@@ -447,12 +450,15 @@ export function RequestAuditAccountHistoryBoard({
                 </span>
               ) : null}
             </div>
-            <SegmentedControl
-              ariaLabel='账号历程排序'
-              value={sort}
-              onChange={setSort}
-              options={HISTORY_SORT_OPTIONS}
-            />
+            <div className='flex items-center gap-2'>
+              <span className='text-xs text-muted-foreground'>排序</span>
+              <SegmentedControl
+                ariaLabel='账号历程排序'
+                value={effectiveSort}
+                onChange={setSort}
+                options={sortOptions}
+              />
+            </div>
           </div>
           {visibleAccounts.length === 0 ? (
             <EmptyState

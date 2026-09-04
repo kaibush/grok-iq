@@ -9,7 +9,9 @@ import {
   historyAxisTicks,
   historyEpisodeAt,
   historyEpisodePlacement,
+  historySortOptionsForFilter,
   paintHistorySwimlane,
+  resolveHistorySort,
   sortHistoryAccounts,
 } from './request-audit-account-history-model'
 
@@ -152,6 +154,20 @@ describe('request audit account history helpers', () => {
         bucket('2026-09-04T03:00:00+08:00', '2026-09-04T03:15:00+08:00')
       )
     ).toBeNull()
+  })
+
+  it('hides always-normal sort when viewing never-normal accounts', () => {
+    const options = historySortOptionsForFilter('never_normal')
+    expect(options.map((item) => item.value)).not.toContain('always_normal')
+    expect(resolveHistorySort('always_normal', 'never_normal')).toBe(
+      'still_abnormal'
+    )
+  })
+
+  it('hides abnormal sorts when viewing always-normal accounts', () => {
+    const options = historySortOptionsForFilter('always_normal')
+    expect(options.map((item) => item.value)).toEqual(['recent'])
+    expect(resolveHistorySort('longest', 'always_normal')).toBe('recent')
   })
 
   it('compresses empty swimlane color stops', () => {

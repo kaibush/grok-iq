@@ -141,6 +141,59 @@ export const HISTORY_SORT_OPTIONS: Array<{
   { value: 'recent', label: '最近' },
 ]
 
+const ALWAYS_NORMAL_SORTS: HistoryAccountSort[] = ['recent']
+const ABNORMAL_SORTS: HistoryAccountSort[] = [
+  'still_abnormal',
+  'recurrent',
+  'longest',
+  'slow_recovery',
+  'recent',
+]
+const RECOVERED_SORTS: HistoryAccountSort[] = [
+  'slow_recovery',
+  'longest',
+  'recurrent',
+  'recent',
+]
+
+export function historySortOptionsForFilter(
+  pattern?: HistoryAccountPatternFilter | null
+) {
+  if (pattern === 'always_normal') {
+    return HISTORY_SORT_OPTIONS.filter((item) =>
+      ALWAYS_NORMAL_SORTS.includes(item.value)
+    )
+  }
+  if (
+    pattern === 'never_normal' ||
+    pattern === 'still_abnormal' ||
+    pattern === 'occasional' ||
+    pattern === 'recurrent'
+  ) {
+    return HISTORY_SORT_OPTIONS.filter((item) =>
+      ABNORMAL_SORTS.includes(item.value)
+    )
+  }
+  if (pattern === 'recovered') {
+    return HISTORY_SORT_OPTIONS.filter((item) =>
+      RECOVERED_SORTS.includes(item.value)
+    )
+  }
+  if (pattern === 'sparse') {
+    return HISTORY_SORT_OPTIONS.filter((item) => item.value === 'recent')
+  }
+  return HISTORY_SORT_OPTIONS
+}
+
+export function resolveHistorySort(
+  sort: HistoryAccountSort,
+  pattern?: HistoryAccountPatternFilter | null
+): HistoryAccountSort {
+  const options = historySortOptionsForFilter(pattern)
+  if (options.some((item) => item.value === sort)) return sort
+  return options[0]?.value ?? DEFAULT_HISTORY_ACCOUNT_SORT
+}
+
 export const HISTORY_RISK_FILTER_OPTIONS: Array<{
   value: HistoryRiskFilter
   label: string
