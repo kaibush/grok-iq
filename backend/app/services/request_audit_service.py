@@ -689,6 +689,7 @@ def _history_paint_buckets(
     buckets = [_history_empty_bucket(frame_start, frame_end) for frame_start, frame_end in frames]
     step_seconds = max(1, minutes) * 60
     span = max(1.0, (end - start).total_seconds())
+    last_levels = ["empty"] * len(buckets)
     for created, level, ok in rows:
         if created < start or created >= end:
             offset = min(max((created - start).total_seconds(), 0.0), span - 1)
@@ -707,16 +708,54 @@ def _history_paint_buckets(
             bucket["successfulRequests"] += 1
         else:
             bucket["failedRequests"] += 1
-    for bucket in buckets:
-        if bucket["highRiskRequests"]:
-            bucket["dominant"] = "high"
-        elif bucket["watchRequests"]:
-            bucket["dominant"] = "watch"
-        elif bucket["requests"]:
-            bucket["dominant"] = "normal"
-        else:
-            bucket["dominant"] = "empty"
+        last_levels[index] = level if level in {"watch", "high"} else "normal"
+    for bucket, last_level in zip(buckets, last_levels, strict=True):
+        bucket["dominant"] = last_level if bucket["requests"] else "empty"
     return buckets
+
+
+def _history_spans(
+    rows: list[tuple[datetime, str, bool]],
+    *,
+    start: datetime,
+    end: datetime,
+    minutes: int,
+) -> list[dict[str, Any]]:
+    gap = timedelta(minutes=max(1, minutes))
+    spans: list[dict[str, Any]] = []
+    for created, level, ok in rows:
+        if created < start or created > end:
+            continue
+        last = spans[-1] if spans else None
+        if (
+            last is not None
+            and last["level"] == level
+            and created - last["end"] <= gap
+        ):
+            last["end"] = created
+            last["requests"] += 1
+            if ok:
+                last["successfulRequests"] += 1
+            continue
+        spans.append(
+            {
+                "start": created,
+                "end": created,
+                "level": level if level in {"watch", "high"} else "normal",
+                "requests": 1,
+                "successfulRequests": 1 if ok else 0,
+            }
+        )
+    return [
+        {
+            "start": _iso(item["start"]),
+            "end": _iso(item["end"]),
+            "level": item["level"],
+            "requests": item["requests"],
+            "successfulRequests": item["successfulRequests"],
+        }
+        for item in spans
+    ]
 
 
 def _history_episodes(
@@ -3586,6 +3625,12 @@ class RequestAuditService:
             "medianRecoveryMinutes": _history_median(recoveries),
             "lastRecoveryMinutes": recoveries[-1] if recoveries else None,
             "buckets": _history_paint_buckets(
+                compact,
+                start=start,
+                end=end,
+                minutes=bucket_minutes,
+            ),
+            "spans": _history_spans(
                 compact,
                 start=start,
                 end=end,

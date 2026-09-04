@@ -47,6 +47,7 @@ function account(
     medianRecoveryMinutes: null,
     lastRecoveryMinutes: null,
     buckets: [],
+    spans: [],
     episodes: [],
     ...patch,
   }
@@ -179,33 +180,75 @@ describe('request audit account history helpers', () => {
       successfulRequests: 6,
       dominant: 'normal',
     }
-    const paint = paintHistorySwimlane({ buckets })
-    expect(paint.statusGradient).toBeTruthy()
-    expect((paint.statusGradient?.match(/rgb\(/g) ?? []).length).toBeLessThan(6)
-    expect(paint.title).toContain('正常 1 格')
+    const paint = paintHistorySwimlane({
+      buckets,
+      spans: [],
+      normalRequests: 6,
+      watchRequests: 0,
+      highRiskRequests: 0,
+    })
+    expect(paint.spans).toHaveLength(1)
+    expect(paint.spans[0]?.level).toBe('normal')
+    expect(paint.title).toContain('正常 6 次')
   })
 
   it('paints never-normal swimlanes without green', () => {
     const buckets = hourBuckets()
-    buckets[4] = {
-      ...buckets[4],
-      requests: 4,
+    const paint = paintHistorySwimlane({
+      buckets,
+      spans: [
+        {
+          start: '2026-09-04T04:00:00+08:00',
+          end: '2026-09-04T04:00:00+08:00',
+          level: 'watch',
+          requests: 4,
+          successfulRequests: 0,
+        },
+        {
+          start: '2026-09-04T12:00:00+08:00',
+          end: '2026-09-04T12:00:00+08:00',
+          level: 'high',
+          requests: 3,
+          successfulRequests: 0,
+        },
+      ],
+      normalRequests: 0,
       watchRequests: 4,
-      failedRequests: 4,
-      dominant: 'watch',
-    }
-    buckets[12] = {
-      ...buckets[12],
-      requests: 3,
       highRiskRequests: 3,
-      failedRequests: 3,
-      dominant: 'high',
-    }
-    const paint = paintHistorySwimlane({ buckets })
-    expect(paint.statusGradient).toContain('245 158 11')
-    expect(paint.statusGradient).toContain('244 63 94')
-    expect(paint.statusGradient).not.toContain('16 185 129')
-    expect(paint.title).toBe('观察 1 格 · 高风险 1 格 · 空档 22 格')
+    })
+    expect(paint.spans.map((item) => item.level)).toEqual(['watch', 'high'])
+    expect(paint.spans[1]?.left ?? 0).toBeGreaterThan(paint.spans[0]?.left ?? 0)
+    expect(paint.title).toBe('观察 4 次 · 高风险 3 次')
+  })
+
+  it('keeps recovered green after a same-time watch mark', () => {
+    const paint = paintHistorySwimlane({
+      buckets: hourBuckets(),
+      spans: [
+        {
+          start: '2026-09-04T16:00:00+08:00',
+          end: '2026-09-04T16:00:00+08:00',
+          level: 'watch',
+          requests: 1,
+          successfulRequests: 1,
+        },
+        {
+          start: '2026-09-04T16:00:00+08:00',
+          end: '2026-09-04T16:00:00+08:00',
+          level: 'normal',
+          requests: 2,
+          successfulRequests: 2,
+        },
+      ],
+      normalRequests: 2,
+      watchRequests: 1,
+      highRiskRequests: 0,
+    })
+    expect(paint.spans.map((item) => item.level)).toEqual(['watch', 'normal'])
+    expect(paint.spans[1]?.left ?? 0).toBeGreaterThanOrEqual(
+      (paint.spans[0]?.left ?? 0) + (paint.spans[0]?.width ?? 0)
+    )
+    expect(paint.title).toContain('正常 2 次')
   })
 })
 

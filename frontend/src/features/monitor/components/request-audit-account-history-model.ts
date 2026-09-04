@@ -4,6 +4,7 @@ import {
   type RequestAuditHistoryBucket,
   type RequestAuditHistoryBucketDominant,
   type RequestAuditHistoryPattern,
+  type RequestAuditHistorySpan,
   type RequestAuditHistorySummary,
   type RequestAuditRiskLevel,
 } from '@/lib/api'
@@ -113,14 +114,10 @@ export const HISTORY_BUCKET_DOMINANT_CLASSES: Record<
   high: 'bg-rose-500',
 }
 
-export const HISTORY_BUCKET_DOMINANT_COLORS: Record<
-  RequestAuditHistoryBucketDominant,
-  string
-> = {
-  empty: 'transparent',
-  normal: 'rgb(16 185 129)',
-  watch: 'rgb(245 158 11)',
-  high: 'rgb(244 63 94)',
+export const HISTORY_SPAN_CLASSES: Record<RequestAuditRiskLevel, string> = {
+  normal: 'bg-emerald-500',
+  watch: 'bg-amber-500',
+  high: 'bg-rose-500',
 }
 
 export const HISTORY_SWIMLANE_LEGEND: Array<{
@@ -590,65 +587,118 @@ export function historyAxisTicks(
   return ticks
 }
 
+export type HistorySwimlaneSpanPaint = {
+  key: string
+  left: number
+  width: number
+  level: RequestAuditRiskLevel
+  title: string
+}
+
 export type HistorySwimlanePaint = {
-  statusGradient?: string
+  spans: HistorySwimlaneSpanPaint[]
   title: string
 }
 
 export function paintHistorySwimlane(
-  account: Pick<RequestAuditHistoryAccount, 'buckets'>
+  account: Pick<
+    RequestAuditHistoryAccount,
+    | 'buckets'
+    | 'spans'
+    | 'normalRequests'
+    | 'watchRequests'
+    | 'highRiskRequests'
+  >
 ): HistorySwimlanePaint {
+  const range = historyWindowRange(account.buckets)
+  const source = historySpansForPaint(account)
+  const minPercent =
+    account.buckets.length > 0
+      ? Math.max(1.5, 70 / account.buckets.length)
+      : 2
+  const spans: HistorySwimlaneSpanPaint[] = []
+  if (range != null) {
+    source.forEach((span, index) => {
+      const startPercent = historyTimePercent(span.start, range.start, range.end)
+      const endPercent = historyTimePercent(span.end, range.start, range.end)
+      const naturalWidth = Math.max(0, endPercent - startPercent)
+      const width = Math.max(naturalWidth, minPercent)
+      let left =
+        naturalWidth >= minPercent ? startPercent : startPercent - width / 2
+      const previous = spans[spans.length - 1]
+      if (previous && left < previous.left + previous.width) {
+        left = previous.left + previous.width
+      }
+      left = Math.min(Math.max(0, left), Math.max(0, 100 - width))
+      spans.push({
+        key: `${span.start}-${span.end}-${span.level}-${index}`,
+        left,
+        width: Math.min(width, 100 - left),
+        level: span.level,
+        title: historySpanTitle(span),
+      })
+    })
+  }
   return {
-    statusGradient: historyLayerGradient(
-      account.buckets,
-      (bucket) => HISTORY_BUCKET_DOMINANT_COLORS[bucket.dominant]
-    ),
-    title: historySwimlaneTitle(account.buckets),
+    spans,
+    title: historySwimlaneTitle(account),
   }
 }
 
-export function historySwimlaneTitle(buckets: RequestAuditHistoryBucket[]) {
-  if (buckets.length === 0) return '当前窗口没有时间格'
-  const counts: Record<RequestAuditHistoryBucketDominant, number> = {
-    empty: 0,
-    normal: 0,
-    watch: 0,
-    high: 0,
-  }
-  buckets.forEach((bucket) => {
-    counts[bucket.dominant] += 1
-  })
-  return (
-    ['normal', 'watch', 'high', 'empty'] as RequestAuditHistoryBucketDominant[]
-  )
-    .filter((key) => counts[key] > 0)
-    .map((key) => `${HISTORY_BUCKET_DOMINANT_LABELS[key]} ${counts[key]} 格`)
-    .join(' · ')
-}
-
-function historyLayerGradient(
-  buckets: RequestAuditHistoryBucket[],
-  colorFor: (bucket: RequestAuditHistoryBucket) => string
+export function historySwimlaneTitle(
+  account: Pick<
+    RequestAuditHistoryAccount,
+    'normalRequests' | 'watchRequests' | 'highRiskRequests' | 'buckets'
+  >
 ) {
-  if (buckets.length === 0) return undefined
-  const stops: Array<{ start: number; end: number; color: string }> = []
-  buckets.forEach((bucket, index) => {
-    const start = (index / buckets.length) * 100
-    const end = ((index + 1) / buckets.length) * 100
-    const color = colorFor(bucket)
-    const last = stops[stops.length - 1]
-    if (last && last.color === color) {
-      last.end = end
-      return
-    }
-    stops.push({ start, end, color })
-  })
-  return `linear-gradient(to right, ${stops
-    .flatMap((stop) => [
-      `${stop.color} ${stop.start}%`,
-      `${stop.color} ${stop.end}%`,
-    ])
-    .join(', ')})`
+  const parts = (
+    [
+      ['normal', account.normalRequests ?? 0],
+      ['watch', account.watchRequests ?? 0],
+      ['high', account.highRiskRequests ?? 0],
+    ] as Array<[RequestAuditRiskLevel, number]>
+  )
+    .filter(([, count]) => count > 0)
+    .map(
+      ([level, count]) =>
+        `${HISTORY_RISK_LEVEL_LABELS[level]} ${formatNumber(count, 0)} 次`
+    )
+  if (parts.length) return parts.join(' · ')
+  if (account.buckets.length === 0) return '当前窗口没有时间格'
+  return '当前窗口没有请求'
+}
+
+export function historyWindowRange(buckets: RequestAuditHistoryBucket[]) {
+  if (buckets.length === 0) return null
+  return {
+    start: buckets[0].start,
+    end: buckets[buckets.length - 1].end,
+  }
+}
+
+function historySpansForPaint(
+  account: Pick<RequestAuditHistoryAccount, 'buckets' | 'spans'>
+): RequestAuditHistorySpan[] {
+  if (account.spans?.length) return account.spans
+  return account.buckets
+    .filter((bucket) => bucket.dominant !== 'empty' && bucket.requests > 0)
+    .map((bucket) => ({
+      start: bucket.start,
+      end: bucket.end,
+      level:
+        bucket.dominant === 'high'
+          ? 'high'
+          : bucket.dominant === 'watch'
+            ? 'watch'
+            : 'normal',
+      requests: bucket.requests,
+      successfulRequests: bucket.successfulRequests,
+    }))
+}
+
+function historySpanTitle(span: RequestAuditHistorySpan) {
+  const range = formatHistoryTimeRange(span.start, span.end)
+  return `${HISTORY_RISK_LEVEL_LABELS[span.level]} · ${range} · ${formatNumber(span.requests, 0)} 次`
 }
 
 export function historyBucketTitle(bucket: RequestAuditHistoryBucket) {

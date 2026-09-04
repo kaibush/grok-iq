@@ -379,3 +379,30 @@ def test_account_history_24h_regular_episodes_do_not_crash(tmp_path: Path):
     assert account["abnormalEpisodes"] >= 3
     assert account["regular"] is True
 
+
+
+def test_account_history_recovery_span_stays_green(tmp_path: Path):
+    repository, service = _build(tmp_path)
+    now = utc_now()
+    start = now - timedelta(hours=3)
+    end = now + timedelta(minutes=1)
+    watch_at = end - timedelta(minutes=10)
+    recover_at = watch_at + timedelta(seconds=20)
+    repository.upsert_records(
+        [
+            _record(watch_at - timedelta(minutes=1), upstream_id="n1", tps=80),
+            _record(watch_at, upstream_id="w1", tps=200),
+            _record(recover_at, upstream_id="n2", tps=80),
+        ]
+    )
+    payload = _history(service, start, end)
+    account = payload["accounts"][0]
+    assert account["recovered"] is True
+    assert account["currentState"] == "normal"
+    levels = [item["level"] for item in account["spans"]]
+    assert "watch" in levels
+    assert levels[-1] == "normal"
+    watch = next(item for item in account["spans"] if item["level"] == "watch")
+    last = account["spans"][-1]
+    assert last["level"] == "normal"
+    assert last["start"] >= watch["end"]

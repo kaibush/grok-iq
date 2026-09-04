@@ -1282,6 +1282,14 @@ export type RequestAuditHistoryBucket = {
   dominant: RequestAuditHistoryBucketDominant
 }
 
+export type RequestAuditHistorySpan = {
+  start: string
+  end: string
+  level: RequestAuditRiskLevel
+  requests: number
+  successfulRequests: number
+}
+
 export type RequestAuditHistoryEpisode = {
   start: string
   end: string
@@ -1324,6 +1332,7 @@ export type RequestAuditHistoryAccount = {
   medianRecoveryMinutes: number | null
   lastRecoveryMinutes: number | null
   buckets: RequestAuditHistoryBucket[]
+  spans?: RequestAuditHistorySpan[]
   episodes: RequestAuditHistoryEpisode[]
 }
 

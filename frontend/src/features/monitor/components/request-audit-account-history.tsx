@@ -50,6 +50,7 @@ import {
   HISTORY_RISK_FILTER_OPTIONS,
   HISTORY_RISK_LEVEL_BADGE_VARIANTS,
   HISTORY_RISK_LEVEL_LABELS,
+  HISTORY_SPAN_CLASSES,
   HISTORY_SUMMARY_CARDS,
   HISTORY_SWIMLANE_LEGEND,
   filterHistoryAccounts,
@@ -872,10 +873,17 @@ function HistorySwimlane({ paint }: { paint: HistorySwimlanePaint }) {
   return (
     <div className='relative h-9' title={paint.title}>
       <div className='absolute inset-0 overflow-hidden rounded-md bg-muted/30'>
-        <div
-          className='absolute inset-0'
-          style={{ backgroundImage: paint.statusGradient }}
-        />
+        {paint.spans.map((span) => (
+          <span
+            key={span.key}
+            title={span.title}
+            className={cn(
+              'absolute top-[6px] h-[18px] rounded-sm',
+              HISTORY_SPAN_CLASSES[span.level]
+            )}
+            style={{ left: `${span.left}%`, width: `${span.width}%` }}
+          />
+        ))}
         {[25, 50, 75].map((percent) => (
           <span
             key={percent}
