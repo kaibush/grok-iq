@@ -406,3 +406,44 @@ def test_account_history_recovery_span_stays_green(tmp_path: Path):
     last = account["spans"][-1]
     assert last["level"] == "normal"
     assert last["start"] >= watch["end"]
+
+
+def test_account_history_account_search_uses_sql_filter(tmp_path: Path):
+    repository, service = _build(tmp_path)
+    now = utc_now()
+    start = now - timedelta(days=7)
+    end = now + timedelta(minutes=1)
+    repository.upsert_records(
+        [
+            _record(
+                now - timedelta(hours=2),
+                upstream_id="alice-1",
+                account_id=11,
+                account_name="alice@example.com",
+            ),
+            _record(
+                now - timedelta(hours=1),
+                upstream_id="bob-1",
+                account_id=12,
+                account_name="bob@example.com",
+                request_id="req-bob-keep",
+            ),
+            _record(
+                now - timedelta(minutes=30),
+                upstream_id="needle-1",
+                account_id=13,
+                account_name="jtdfcqfhvab@example.com",
+            ),
+        ]
+    )
+    matched_rows = repository.records_for_range(
+        start, end, account="jtdfcqfhvab"
+    )
+    assert [row["account_name"] for row in matched_rows] == [
+        "jtdfcqfhvab@example.com"
+    ]
+    payload = _history(service, start, end, account="jtdfcqfhvab")
+    assert [item["accountName"] for item in payload["accounts"]] == [
+        "jtdfcqfhvab@example.com"
+    ]
+    assert payload["summary"]["accounts"] == 1

@@ -2,10 +2,12 @@ import {
   memo,
   useCallback,
   useDeferredValue,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   ChevronDown,
   History,
@@ -16,12 +18,14 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import {
+  api,
   type RequestAuditClientKeyOption,
   type RequestAuditHistoryAccount,
   type RequestAuditHistoryBucket,
   type RequestAuditHistoryEpisode,
   type RequestAuditHistoryResponse,
 } from '@/lib/api'
+import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { cn, formatDate, formatNumber } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -66,6 +70,7 @@ import {
   paintHistorySwimlane,
   resolveHistorySort,
   sortHistoryAccounts,
+  summarizeHistoryAccounts,
   type HistorySwimlanePaint,
   type HistoryAccountPatternFilter,
   type HistoryAccountSort,
@@ -75,6 +80,16 @@ import {
 const IDENTITY_COL = 'min-w-0 xl:w-[13.75rem] xl:shrink-0'
 const STATS_COL = 'min-w-0 xl:w-[10.25rem] xl:shrink-0'
 
+export type RequestAuditHistorySearchScope = {
+  window: string
+  startAt?: string
+  endAt?: string
+  clientKey: string
+  risk: string
+  node: string
+  pinnedAccountId: number | null
+}
+
 export type RequestAuditAccountHistoryBoardProps = {
   data?: RequestAuditHistoryResponse
   loading: boolean
@@ -83,6 +98,7 @@ export type RequestAuditAccountHistoryBoardProps = {
   pinnedAccountId: number | null
   search: string
   onSearchChange: (value: string) => void
+  searchScope: RequestAuditHistorySearchScope
   clientKey: string
   clientKeys: RequestAuditClientKeyOption[]
   onClientKeyChange: (value: string) => void
@@ -107,6 +123,7 @@ export function RequestAuditAccountHistoryBoard({
   pinnedAccountId,
   search,
   onSearchChange,
+  searchScope,
   clientKey,
   clientKeys,
   onClientKeyChange,
@@ -150,7 +167,68 @@ export function RequestAuditAccountHistoryBoard({
   const activeClientKey = optimisticClientKey ?? clientKey
   const activeNode = optimisticNode ?? node
   const activeRisk = optimisticRisk ?? risk
-  const switchPending = localPending || pending
+  const searchFocusedRef = useRef(false)
+  const [draftSearch, setDraftSearch] = useState(search)
+  const [debouncedSearch] = useDebouncedValue(draftSearch, 350)
+  const committedSearch = debouncedSearch.trim()
+  const searchSettled = draftSearch === debouncedSearch
+
+  useEffect(() => {
+    if (debouncedSearch === search) return
+    onSearchChange(debouncedSearch)
+  }, [debouncedSearch, onSearchChange, search])
+
+  useEffect(() => {
+    if (searchFocusedRef.current) return
+    setDraftSearch((current) => (current === search ? current : search))
+  }, [search])
+
+  const searchQuery = useQuery({
+    queryKey: [
+      'request-audits',
+      'account-history-search',
+      {
+        window: searchScope.window,
+        startAt: searchScope.startAt,
+        endAt: searchScope.endAt,
+      },
+      committedSearch,
+      searchScope.clientKey,
+      searchScope.risk,
+      searchScope.node,
+      searchScope.pinnedAccountId,
+    ],
+    queryFn: () =>
+      api.requestAuditAccountHistory({
+        window: searchScope.window,
+        startAt: searchScope.startAt,
+        endAt: searchScope.endAt,
+        account: searchScope.pinnedAccountId ? '' : committedSearch,
+        accountId: searchScope.pinnedAccountId ?? undefined,
+        clientKey:
+          searchScope.clientKey === 'all' ? '' : searchScope.clientKey.trim(),
+        risk: searchScope.risk === 'all' ? '' : searchScope.risk,
+        egressNodeId:
+          searchScope.node === 'all' ? undefined : Number(searchScope.node),
+      }),
+    enabled:
+      committedSearch.length >= 2 && searchScope.pinnedAccountId == null,
+    staleTime: 15_000,
+    gcTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
+  const usingServerSearch = Boolean(
+    searchSettled &&
+      committedSearch.length >= 2 &&
+      searchScope.pinnedAccountId == null &&
+      searchQuery.data
+  )
+  const searchFetching = Boolean(
+    searchSettled &&
+      committedSearch.length >= 2 &&
+      searchQuery.isFetching
+  )
+  const overlayPending = localPending || (pending && !usingServerSearch)
 
   const applyAfterPaint = useCallback((task: () => void) => {
     setLocalPending(true)
@@ -195,21 +273,33 @@ export function RequestAuditAccountHistoryBoard({
   }
 
   const errorMessage = error?.trim() ?? ''
-  const showSkeletons = loading && !data
-  const summary = data?.summary
+  const sourceData = usingServerSearch ? searchQuery.data : data
+  const showSkeletons = loading && !sourceData
+  const sourceAccounts = sourceData?.accounts
   const paintedAccounts = useMemo(
     () =>
-      (data?.accounts ?? []).map((account) => ({
+      (sourceAccounts ?? []).map((account) => ({
         account,
         key: historyAccountKey(account),
         paint: paintHistorySwimlane(account),
       })),
-    [data?.accounts]
+    [sourceAccounts]
   )
+  const searchedAccounts = useMemo(() => {
+    const accounts = sourceAccounts ?? []
+    if (usingServerSearch || !draftSearch.trim()) return accounts
+    return filterHistoryAccounts(accounts, { query: draftSearch })
+  }, [draftSearch, sourceAccounts, usingServerSearch])
+  const summary = draftSearch.trim()
+    ? summarizeHistoryAccounts(searchedAccounts)
+    : sourceData?.summary
   const visibleAccounts = useMemo(() => {
     const filtered = filterHistoryAccounts(
       paintedAccounts.map((item) => item.account),
-      { pattern: deferredPatternFilter }
+      {
+        pattern: deferredPatternFilter,
+        query: usingServerSearch ? '' : draftSearch,
+      }
     )
     const ordered = sortHistoryAccounts(filtered, deferredSort)
     const paintByKey = new Map(
@@ -222,17 +312,23 @@ export function RequestAuditAccountHistoryBoard({
         paintByKey.get(historyAccountKey(account)) ??
         paintHistorySwimlane(account),
     }))
-  }, [deferredPatternFilter, deferredSort, paintedAccounts])
+  }, [
+    deferredPatternFilter,
+    deferredSort,
+    draftSearch,
+    paintedAccounts,
+    usingServerSearch,
+  ])
   const axisBuckets = useMemo(() => {
     const fromVisible = visibleAccounts.find(
       (item) => item.account.buckets.length > 0
     )
     if (fromVisible) return fromVisible.account.buckets
     return (
-      data?.accounts.find((account) => account.buckets.length > 0)?.buckets ??
+      sourceAccounts?.find((account) => account.buckets.length > 0)?.buckets ??
       []
     )
-  }, [data?.accounts, visibleAccounts])
+  }, [sourceAccounts, visibleAccounts])
 
   const selectedClientKey = clientKeys.find(
     (item) => item.id === activeClientKey
@@ -261,14 +357,19 @@ export function RequestAuditAccountHistoryBoard({
     HISTORY_RISK_FILTER_OPTIONS.find((item) => item.value === activeRisk)
       ?.label ?? '全部'
   const hasActiveFilters =
-    Boolean(search.trim()) ||
+    Boolean(draftSearch.trim()) ||
     activeClientKey !== 'all' ||
     activeNode !== 'all' ||
     (riskEnabled && activeRisk !== 'all') ||
     patternFilter != null
 
-  function clearFilters() {
+  function clearSearch() {
+    setDraftSearch('')
     onSearchChange('')
+  }
+
+  function clearFilters() {
+    clearSearch()
     selectClientKey('all')
     selectNode('all')
     selectRisk('all')
@@ -307,12 +408,21 @@ export function RequestAuditAccountHistoryBoard({
           <div className='relative min-w-0 flex-1'>
             <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
             <Input
-              className='h-8 pr-3 pl-8'
+              className='h-8 pr-9 pl-8'
               placeholder='搜索账号 / 请求'
               aria-label='搜索账号或请求'
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
+              value={draftSearch}
+              onFocus={() => {
+                searchFocusedRef.current = true
+              }}
+              onBlur={() => {
+                searchFocusedRef.current = false
+              }}
+              onChange={(event) => setDraftSearch(event.target.value)}
             />
+            {searchFetching ? (
+              <Loader2 className='absolute top-1/2 right-3 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground' />
+            ) : null}
           </div>
           <div className='grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[min(42rem,100%)]'>
             <Select value={activeClientKey} onValueChange={selectClientKey}>
@@ -383,10 +493,10 @@ export function RequestAuditAccountHistoryBoard({
         {hasActiveFilters ? (
           <div className='flex flex-wrap items-center gap-1.5'>
             <span className='mr-1 text-xs text-muted-foreground'>当前条件</span>
-            {search.trim() ? (
+            {draftSearch.trim() ? (
               <FilterChip
-                label={`搜索：${search.trim()}`}
-                onClear={() => onSearchChange('')}
+                label={`搜索：${draftSearch.trim()}`}
+                onClear={clearSearch}
               />
             ) : null}
             {activeClientKey !== 'all' ? (
@@ -428,25 +538,25 @@ export function RequestAuditAccountHistoryBoard({
 
       {showSkeletons ? (
         <HistoryBoardSkeleton />
-      ) : data ? (
+      ) : sourceData && summary ? (
         <>
           <HistorySummaryCards
-            summary={data.summary}
+            summary={summary}
             selected={patternFilter}
             onToggle={togglePattern}
           />
           <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
             <div className='flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground'>
               <span>
-                {patternFilter
+                {patternFilter || draftSearch.trim()
                   ? `筛选后 ${formatNumber(visibleAccounts.length, 0)} 个账号`
                   : `${formatNumber(visibleAccounts.length, 0)} 个账号`}
-                {summary && visibleAccounts.length !== summary.accounts
+                {visibleAccounts.length !== summary.accounts
                   ? ` / 共 ${formatNumber(summary.accounts, 0)} 个`
                   : null}
               </span>
-              <span>· 每格 {formatNumber(data.bucketMinutes, 0)} 分钟</span>
-              {data.truncated ? (
+              <span>· 每格 {formatNumber(sourceData.bucketMinutes, 0)} 分钟</span>
+              {sourceData.truncated && !draftSearch.trim() ? (
                 <span className='text-amber-700 dark:text-amber-300'>
                   仅列出排序最前的 200 个账号
                 </span>
@@ -470,11 +580,11 @@ export function RequestAuditAccountHistoryBoard({
               description='换一个时间窗口，或清除筛选后再看。'
             />
           ) : (
-            <div className='relative' aria-busy={switchPending || listPending}>
+            <div className='relative' aria-busy={overlayPending || listPending}>
               <div
                 className={cn(
                   'space-y-1.5',
-                  (switchPending || listPending) &&
+                  (overlayPending || listPending) &&
                     'pointer-events-none opacity-60'
                 )}
               >
@@ -501,10 +611,10 @@ export function RequestAuditAccountHistoryBoard({
                   />
                 ))}
               </div>
-              {switchPending || listPending ? (
+              {overlayPending || listPending ? (
                 <HistorySwitchOverlay
                   message={
-                    switchPending ? '正在加载账号历程' : '正在更新账号历程'
+                    overlayPending ? '正在加载账号历程' : '正在更新账号历程'
                   }
                 />
               ) : null}

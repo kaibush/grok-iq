@@ -5,6 +5,7 @@ import type {
 } from '@/lib/api'
 import {
   accountMatchesHistoryFilter,
+  filterHistoryAccounts,
   historyAccountKey,
   historyAxisTicks,
   historyEpisodeAt,
@@ -13,6 +14,7 @@ import {
   paintHistorySwimlane,
   resolveHistorySort,
   sortHistoryAccounts,
+  summarizeHistoryAccounts,
 } from './request-audit-account-history-model'
 
 function account(
@@ -77,6 +79,35 @@ describe('request audit account history helpers', () => {
     expect(
       historyAccountKey(account({ accountId: null, accountName: 'ghost' }))
     ).toBe('unknown:ghost')
+  })
+
+  it('filters accounts by name without touching other rows', () => {
+    const accounts = [
+      account({ accountId: 1, accountName: 'alice@example.com' }),
+      account({ accountId: 2, accountName: 'jtdfcqfhvab@example.com' }),
+    ]
+    expect(
+      filterHistoryAccounts(accounts, { query: 'jtdfcqfhvab' }).map(
+        (item) => item.accountName
+      )
+    ).toEqual(['jtdfcqfhvab@example.com'])
+  })
+
+  it('summarizes the currently visible account set', () => {
+    const summary = summarizeHistoryAccounts([
+      account({ accountId: 1, pattern: 'always_normal', alwaysNormal: true }),
+      account({
+        accountId: 2,
+        pattern: 'never_normal',
+        alwaysNormal: false,
+        neverNormal: true,
+        stillAbnormal: true,
+      }),
+    ])
+    expect(summary.accounts).toBe(2)
+    expect(summary.alwaysNormal).toBe(1)
+    expect(summary.neverNormal).toBe(1)
+    expect(summary.stillAbnormal).toBe(1)
   })
 
   it('filters recovered and failing independently of pattern', () => {

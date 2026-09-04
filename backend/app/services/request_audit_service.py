@@ -3458,10 +3458,15 @@ class RequestAuditService:
         )
         start = window["start"]
         end = window["end"]
-        records = self.repository.records_for_range(start, end)
+        pinned_account_id = _positive_int(account_id)
+        records = self.repository.records_for_range(
+            start,
+            end,
+            account=account,
+            account_id=pinned_account_id,
+        )
         evaluations = self._audit_risk_evaluations(records)
         client_keys = self._client_key_options(records)
-        pinned_account_id = _positive_int(account_id)
         filtered = self._apply_ledger_row_filters(
             records,
             account=account,

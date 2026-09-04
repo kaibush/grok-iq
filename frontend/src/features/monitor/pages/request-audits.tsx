@@ -1601,7 +1601,6 @@ export function RequestAuditsPage() {
       'request-audits',
       'account-history',
       windowParams,
-      deferredAuditSearch,
       auditClientKey,
       effectiveAuditRisk,
       auditNode,
@@ -1612,7 +1611,7 @@ export function RequestAuditsPage() {
         window: windowParams.window,
         startAt: windowParams.startAt,
         endAt: windowParams.endAt,
-        account: pinnedAccountId ? '' : deferredAuditSearch.trim(),
+        account: '',
         accountId: pinnedAccountId ?? undefined,
         clientKey: auditClientKey === 'all' ? '' : auditClientKey.trim(),
         risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
@@ -1741,7 +1740,6 @@ export function RequestAuditsPage() {
           'request-audits',
           'account-history',
           windowParams,
-          deferredAuditSearch,
           clientKey,
           effectiveAuditRisk,
           auditNode,
@@ -1752,7 +1750,7 @@ export function RequestAuditsPage() {
             window: windowParams.window,
             startAt: windowParams.startAt,
             endAt: windowParams.endAt,
-            account: pinnedAccountId ? '' : deferredAuditSearch.trim(),
+            account: '',
             accountId: pinnedAccountId ?? undefined,
             clientKey: clientKey === 'all' ? '' : clientKey.trim(),
             risk: effectiveAuditRisk === 'all' ? '' : effectiveAuditRisk,
@@ -1763,7 +1761,6 @@ export function RequestAuditsPage() {
     },
     [
       auditNode,
-      deferredAuditSearch,
       effectiveAuditRisk,
       needsHistory,
       pinnedAccountId,
@@ -1809,7 +1806,6 @@ export function RequestAuditsPage() {
     windowParams.window,
     windowParams.startAt ?? '',
     windowParams.endAt ?? '',
-    deferredAuditSearch,
     auditClientKey,
     effectiveAuditRisk,
     auditNode,
@@ -3572,8 +3568,15 @@ export function RequestAuditsPage() {
             riskEnabled={config.riskEnabled}
             pinnedAccountId={pinnedAccountId}
             search={auditSearch}
-            onSearchChange={(value) => {
-              setAuditSearch(value)
+            onSearchChange={setAuditSearch}
+            searchScope={{
+              window: windowParams.window,
+              startAt: windowParams.startAt,
+              endAt: windowParams.endAt,
+              clientKey: auditClientKey,
+              risk: effectiveAuditRisk,
+              node: auditNode,
+              pinnedAccountId,
             }}
             clientKey={auditClientKey}
             clientKeys={historyQuery.data?.clientKeys ?? EMPTY_CLIENT_KEYS}

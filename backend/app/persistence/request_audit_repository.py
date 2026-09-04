@@ -718,11 +718,21 @@ class RequestAuditRepository:
         end: datetime,
         *,
         account_ids: Iterable[int] | None = None,
+        account: str = "",
+        account_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        stmt = _audit_record_query().where(
-            RequestAuditRecord.created_at >= start,
-            RequestAuditRecord.created_at < end,
-        )
+        if account.strip() or account_id is not None:
+            stmt = _filtered_audit_record_query(
+                start,
+                end,
+                account=account,
+                account_id=account_id,
+            )
+        else:
+            stmt = _audit_record_query().where(
+                RequestAuditRecord.created_at >= start,
+                RequestAuditRecord.created_at < end,
+            )
         id_values = _positive_account_ids(account_ids)
         if id_values:
             stmt = stmt.where(RequestAuditRecord.account_id.in_(id_values))

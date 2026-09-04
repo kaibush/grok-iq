@@ -390,6 +390,45 @@ export function filterHistoryAccounts(
   })
 }
 
+export function summarizeHistoryAccounts(
+  accounts: RequestAuditHistoryAccount[]
+): RequestAuditHistorySummary {
+  const patternCounts: Record<RequestAuditHistoryPattern, number> = {
+    sparse: 0,
+    always_normal: 0,
+    occasional: 0,
+    recurrent: 0,
+    never_normal: 0,
+    still_abnormal: 0,
+  }
+  let requests = 0
+  let regular = 0
+  let stillAbnormal = 0
+  let recovered = 0
+  let failing = 0
+  for (const account of accounts) {
+    patternCounts[account.pattern] += 1
+    requests += account.requests
+    if (account.regular) regular += 1
+    if (account.stillAbnormal) stillAbnormal += 1
+    if (account.recovered) recovered += 1
+    if (account.failing) failing += 1
+  }
+  return {
+    accounts: accounts.length,
+    requests,
+    sparse: patternCounts.sparse,
+    alwaysNormal: patternCounts.always_normal,
+    occasional: patternCounts.occasional,
+    recurrent: patternCounts.recurrent,
+    regular,
+    neverNormal: patternCounts.never_normal,
+    stillAbnormal,
+    recovered,
+    failing,
+  }
+}
+
 export function sortHistoryAccounts(
   accounts: RequestAuditHistoryAccount[],
   sort: HistoryAccountSort
