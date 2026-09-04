@@ -2,7 +2,6 @@ import {
   memo,
   useCallback,
   useDeferredValue,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -25,7 +24,6 @@ import {
   type RequestAuditHistoryEpisode,
   type RequestAuditHistoryResponse,
 } from '@/lib/api'
-import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { cn, formatDate, formatNumber } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -167,21 +165,22 @@ export function RequestAuditAccountHistoryBoard({
   const activeClientKey = optimisticClientKey ?? clientKey
   const activeNode = optimisticNode ?? node
   const activeRisk = optimisticRisk ?? risk
-  const searchFocusedRef = useRef(false)
-  const [draftSearch, setDraftSearch] = useState(search)
-  const [debouncedSearch] = useDebouncedValue(draftSearch, 350)
-  const committedSearch = debouncedSearch.trim()
-  const searchSettled = draftSearch === debouncedSearch
-
-  useEffect(() => {
-    if (debouncedSearch === search) return
-    onSearchChange(debouncedSearch)
-  }, [debouncedSearch, onSearchChange, search])
-
-  useEffect(() => {
-    if (searchFocusedRef.current) return
-    setDraftSearch((current) => (current === search ? current : search))
-  }, [search])
+  const [appliedSearch, setAppliedSearch] = useState(search)
+  const [seenSearch, setSeenSearch] = useState(search)
+  if (search !== seenSearch) {
+    setSeenSearch(search)
+    setAppliedSearch(search)
+  }
+  const committedSearch = appliedSearch.trim()
+  const applySearch = useCallback(
+    (value: string) => {
+      const next = value.trim()
+      setAppliedSearch(next)
+      setSeenSearch(next)
+      onSearchChange(next)
+    },
+    [onSearchChange]
+  )
 
   const searchQuery = useQuery({
     queryKey: [
@@ -211,23 +210,17 @@ export function RequestAuditAccountHistoryBoard({
         egressNodeId:
           searchScope.node === 'all' ? undefined : Number(searchScope.node),
       }),
-    enabled:
-      committedSearch.length >= 2 && searchScope.pinnedAccountId == null,
+    enabled: Boolean(committedSearch) && searchScope.pinnedAccountId == null,
     staleTime: 15_000,
     gcTime: 60_000,
     refetchOnWindowFocus: false,
   })
   const usingServerSearch = Boolean(
-    searchSettled &&
-      committedSearch.length >= 2 &&
+    committedSearch &&
       searchScope.pinnedAccountId == null &&
       searchQuery.data
   )
-  const searchFetching = Boolean(
-    searchSettled &&
-      committedSearch.length >= 2 &&
-      searchQuery.isFetching
-  )
+  const searchFetching = Boolean(committedSearch && searchQuery.isFetching)
   const overlayPending = localPending || (pending && !usingServerSearch)
 
   const applyAfterPaint = useCallback((task: () => void) => {
@@ -287,10 +280,10 @@ export function RequestAuditAccountHistoryBoard({
   )
   const searchedAccounts = useMemo(() => {
     const accounts = sourceAccounts ?? []
-    if (usingServerSearch || !draftSearch.trim()) return accounts
-    return filterHistoryAccounts(accounts, { query: draftSearch })
-  }, [draftSearch, sourceAccounts, usingServerSearch])
-  const summary = draftSearch.trim()
+    if (usingServerSearch || !committedSearch) return accounts
+    return filterHistoryAccounts(accounts, { query: committedSearch })
+  }, [committedSearch, sourceAccounts, usingServerSearch])
+  const summary = committedSearch
     ? summarizeHistoryAccounts(searchedAccounts)
     : sourceData?.summary
   const visibleAccounts = useMemo(() => {
@@ -298,7 +291,7 @@ export function RequestAuditAccountHistoryBoard({
       paintedAccounts.map((item) => item.account),
       {
         pattern: deferredPatternFilter,
-        query: usingServerSearch ? '' : draftSearch,
+        query: usingServerSearch ? '' : committedSearch,
       }
     )
     const ordered = sortHistoryAccounts(filtered, deferredSort)
@@ -315,7 +308,7 @@ export function RequestAuditAccountHistoryBoard({
   }, [
     deferredPatternFilter,
     deferredSort,
-    draftSearch,
+    committedSearch,
     paintedAccounts,
     usingServerSearch,
   ])
@@ -357,15 +350,14 @@ export function RequestAuditAccountHistoryBoard({
     HISTORY_RISK_FILTER_OPTIONS.find((item) => item.value === activeRisk)
       ?.label ?? '全部'
   const hasActiveFilters =
-    Boolean(draftSearch.trim()) ||
+    Boolean(committedSearch) ||
     activeClientKey !== 'all' ||
     activeNode !== 'all' ||
     (riskEnabled && activeRisk !== 'all') ||
     patternFilter != null
 
   function clearSearch() {
-    setDraftSearch('')
-    onSearchChange('')
+    applySearch('')
   }
 
   function clearFilters() {
@@ -405,25 +397,11 @@ export function RequestAuditAccountHistoryBoard({
 
       <div className='space-y-2'>
         <div className='flex flex-col gap-2 xl:flex-row xl:items-center'>
-          <div className='relative min-w-0 flex-1'>
-            <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
-            <Input
-              className='h-8 pr-9 pl-8'
-              placeholder='搜索账号 / 请求'
-              aria-label='搜索账号或请求'
-              value={draftSearch}
-              onFocus={() => {
-                searchFocusedRef.current = true
-              }}
-              onBlur={() => {
-                searchFocusedRef.current = false
-              }}
-              onChange={(event) => setDraftSearch(event.target.value)}
-            />
-            {searchFetching ? (
-              <Loader2 className='absolute top-1/2 right-3 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground' />
-            ) : null}
-          </div>
+          <HistorySearchField
+            appliedSearch={appliedSearch}
+            pending={searchFetching}
+            onSubmit={applySearch}
+          />
           <div className='grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 xl:w-[min(42rem,100%)]'>
             <Select value={activeClientKey} onValueChange={selectClientKey}>
               <SelectTrigger
@@ -493,9 +471,9 @@ export function RequestAuditAccountHistoryBoard({
         {hasActiveFilters ? (
           <div className='flex flex-wrap items-center gap-1.5'>
             <span className='mr-1 text-xs text-muted-foreground'>当前条件</span>
-            {draftSearch.trim() ? (
+            {committedSearch ? (
               <FilterChip
-                label={`搜索：${draftSearch.trim()}`}
+                label={`搜索：${committedSearch}`}
                 onClear={clearSearch}
               />
             ) : null}
@@ -548,7 +526,7 @@ export function RequestAuditAccountHistoryBoard({
           <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
             <div className='flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground'>
               <span>
-                {patternFilter || draftSearch.trim()
+                {patternFilter || committedSearch
                   ? `筛选后 ${formatNumber(visibleAccounts.length, 0)} 个账号`
                   : `${formatNumber(visibleAccounts.length, 0)} 个账号`}
                 {visibleAccounts.length !== summary.accounts
@@ -556,7 +534,7 @@ export function RequestAuditAccountHistoryBoard({
                   : null}
               </span>
               <span>· 每格 {formatNumber(sourceData.bucketMinutes, 0)} 分钟</span>
-              {sourceData.truncated && !draftSearch.trim() ? (
+              {sourceData.truncated && !committedSearch ? (
                 <span className='text-amber-700 dark:text-amber-300'>
                   仅列出排序最前的 200 个账号
                 </span>
@@ -632,6 +610,54 @@ export function RequestAuditAccountHistoryBoard({
     </TitledCard>
   )
 }
+
+const HistorySearchField = memo(function HistorySearchField({
+  appliedSearch,
+  pending,
+  onSubmit,
+}: {
+  appliedSearch: string
+  pending: boolean
+  onSubmit: (value: string) => void
+}) {
+  const [value, setValue] = useState(appliedSearch)
+  const [seenApplied, setSeenApplied] = useState(appliedSearch)
+  if (appliedSearch !== seenApplied) {
+    setSeenApplied(appliedSearch)
+    setValue(appliedSearch)
+  }
+  return (
+    <form
+      className='flex min-w-0 flex-1 items-center gap-2'
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit(value)
+      }}
+    >
+      <div className='relative min-w-0 flex-1'>
+        <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
+        <Input
+          className={cn('h-8 pl-8', pending ? 'pr-9' : 'pr-3')}
+          placeholder='输入账号或请求后回车搜索'
+          aria-label='搜索账号或请求'
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        {pending ? (
+          <Loader2 className='absolute top-1/2 right-3 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground' />
+        ) : null}
+      </div>
+      <Button
+        type='submit'
+        variant='outline'
+        size='sm'
+        className='h-8 shrink-0 px-3'
+      >
+        搜索
+      </Button>
+    </form>
+  )
+})
 
 function HistorySummaryCards({
   summary,
