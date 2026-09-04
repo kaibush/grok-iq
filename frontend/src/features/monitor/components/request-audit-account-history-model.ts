@@ -113,6 +113,43 @@ export const HISTORY_BUCKET_DOMINANT_CLASSES: Record<
   high: 'bg-rose-500',
 }
 
+export const HISTORY_BUCKET_DOMINANT_COLORS: Record<
+  RequestAuditHistoryBucketDominant,
+  string
+> = {
+  empty: 'transparent',
+  normal: 'rgb(16 185 129)',
+  watch: 'rgb(245 158 11)',
+  high: 'rgb(244 63 94)',
+}
+
+export const HISTORY_SWIMLANE_LEGEND: Array<{
+  key: RequestAuditHistoryBucketDominant
+  label: string
+  swatchClassName: string
+}> = [
+  {
+    key: 'empty',
+    label: HISTORY_BUCKET_DOMINANT_LABELS.empty,
+    swatchClassName: 'bg-muted-foreground/20 ring-1 ring-border',
+  },
+  {
+    key: 'normal',
+    label: HISTORY_BUCKET_DOMINANT_LABELS.normal,
+    swatchClassName: HISTORY_BUCKET_DOMINANT_CLASSES.normal,
+  },
+  {
+    key: 'watch',
+    label: HISTORY_BUCKET_DOMINANT_LABELS.watch,
+    swatchClassName: HISTORY_BUCKET_DOMINANT_CLASSES.watch,
+  },
+  {
+    key: 'high',
+    label: HISTORY_BUCKET_DOMINANT_LABELS.high,
+    swatchClassName: HISTORY_BUCKET_DOMINANT_CLASSES.high,
+  },
+]
+
 export const HISTORY_RISK_LEVEL_LABELS: Record<RequestAuditRiskLevel, string> =
   {
     normal: '正常',
@@ -454,14 +491,6 @@ export type HistoryAxisTick = {
   percent: number
 }
 
-export function historyWindowRange(buckets: RequestAuditHistoryBucket[]) {
-  if (buckets.length === 0) return null
-  return {
-    start: buckets[0].start,
-    end: buckets[buckets.length - 1].end,
-  }
-}
-
 export function historyTimePercent(value: string, start: string, end: string) {
   const point = new Date(value).getTime()
   const from = new Date(start).getTime()
@@ -520,23 +549,6 @@ export function historyEpisodeAt<T extends { start: string; end: string }>(
   )
 }
 
-export function historyActivityOpacity(
-  bucket: Pick<RequestAuditHistoryBucket, 'requests'>,
-  rowMaxRequests: number
-) {
-  if (bucket.requests <= 0) return 0
-  if (rowMaxRequests <= 0) return 0.5
-  const ratio = Math.min(1, bucket.requests / rowMaxRequests)
-  return 0.28 + ratio * 0.5
-}
-
-export function historyFailOpacity(
-  bucket: Pick<RequestAuditHistoryBucket, 'requests' | 'failedRequests'>
-) {
-  if (bucket.requests <= 0 || bucket.failedRequests <= 0) return 0
-  return 0.4 + Math.min(1, bucket.failedRequests / bucket.requests) * 0.6
-}
-
 export function historyAxisTicks(
   buckets: RequestAuditHistoryBucket[]
 ): HistoryAxisTick[] {
@@ -578,75 +590,40 @@ export function historyAxisTicks(
   return ticks
 }
 
-export type HistorySwimlaneEpisodePaint = {
-  key: string
-  left: number
-  width: number
-  severity: 'watch' | 'high'
-  recovered: boolean
+export type HistorySwimlanePaint = {
+  statusGradient?: string
   title: string
 }
 
-export type HistorySwimlanePaint = {
-  activityGradient?: string
-  failGradient?: string
-  episodes: HistorySwimlaneEpisodePaint[]
-}
-
 export function paintHistorySwimlane(
-  account: Pick<RequestAuditHistoryAccount, 'buckets' | 'episodes'>
+  account: Pick<RequestAuditHistoryAccount, 'buckets'>
 ): HistorySwimlanePaint {
-  const buckets = account.buckets
-  const range = historyWindowRange(buckets)
-  const rowMaxRequests = buckets.reduce(
-    (maximum, bucket) => Math.max(maximum, bucket.requests),
-    0
-  )
-  const minPercent =
-    buckets.length > 0 ? Math.max(0.8, 100 / buckets.length) : 2
   return {
-    activityGradient: historyLayerGradient(buckets, (bucket) => {
-      const alpha = quantizeAlpha(
-        historyActivityOpacity(bucket, rowMaxRequests)
-      )
-      return bucket.requests > 0 && alpha > 0
-        ? `rgb(16 185 129 / ${alpha})`
-        : 'transparent'
-    }),
-    failGradient: historyLayerGradient(buckets, (bucket) => {
-      const alpha = quantizeAlpha(historyFailOpacity(bucket))
-      return alpha > 0 ? `rgb(244 63 94 / ${alpha})` : 'transparent'
-    }),
-    episodes:
-      range == null
-        ? []
-        : account.episodes.map((episode) => {
-            const place = historyEpisodePlacement(
-              episode,
-              range.start,
-              range.end,
-              minPercent
-            )
-            return {
-              key: `${episode.start}-${episode.end}-${episode.severity}`,
-              left: place.left,
-              width: place.width,
-              severity: episode.severity,
-              recovered: episode.recovered,
-              title: [
-                HISTORY_RISK_LEVEL_LABELS[episode.severity],
-                formatHistoryTimeRange(episode.start, episode.end),
-                formatHistoryMinutes(episode.durationMinutes),
-                episode.recovered ? '已恢复' : '未恢复',
-              ].join(' · '),
-            }
-          }),
+    statusGradient: historyLayerGradient(
+      account.buckets,
+      (bucket) => HISTORY_BUCKET_DOMINANT_COLORS[bucket.dominant]
+    ),
+    title: historySwimlaneTitle(account.buckets),
   }
 }
 
-function quantizeAlpha(value: number) {
-  if (value <= 0) return 0
-  return Math.round(value * 10) / 10
+export function historySwimlaneTitle(buckets: RequestAuditHistoryBucket[]) {
+  if (buckets.length === 0) return '当前窗口没有时间格'
+  const counts: Record<RequestAuditHistoryBucketDominant, number> = {
+    empty: 0,
+    normal: 0,
+    watch: 0,
+    high: 0,
+  }
+  buckets.forEach((bucket) => {
+    counts[bucket.dominant] += 1
+  })
+  return (
+    ['normal', 'watch', 'high', 'empty'] as RequestAuditHistoryBucketDominant[]
+  )
+    .filter((key) => counts[key] > 0)
+    .map((key) => `${HISTORY_BUCKET_DOMINANT_LABELS[key]} ${counts[key]} 格`)
+    .join(' · ')
 }
 
 function historyLayerGradient(

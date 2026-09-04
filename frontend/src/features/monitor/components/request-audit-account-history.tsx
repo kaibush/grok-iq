@@ -51,6 +51,7 @@ import {
   HISTORY_RISK_LEVEL_BADGE_VARIANTS,
   HISTORY_RISK_LEVEL_LABELS,
   HISTORY_SUMMARY_CARDS,
+  HISTORY_SWIMLANE_LEGEND,
   filterHistoryAccounts,
   formatHistoryMinutes,
   formatHistoryMinutesCompact,
@@ -289,7 +290,7 @@ export function RequestAuditAccountHistoryBoard({
       iconTone='sky'
       title='账号历程'
       description='把每个账号的正常 / 观察 / 高风险过程摊成时间轴，用来区分偶发异常、反复异常、从未正常和已经恢复。'
-      hint='色带是异常段，底轨绿色是这段有请求，底边红线是 HTTP 失败，灰色空档是没请求。'
+      hint='灰是没请求，绿是正常，黄是观察，红是高风险。和左侧徽章同一套颜色。'
       contentClassName='relative space-y-4'
     >
       {errorMessage ? (
@@ -476,10 +477,11 @@ export function RequestAuditAccountHistoryBoard({
                     'pointer-events-none opacity-60'
                 )}
               >
-                <div className='flex flex-col gap-2 xl:flex-row xl:items-end'>
+                <div className='flex flex-col gap-1.5 xl:flex-row xl:items-end'>
                   <div className={cn('hidden xl:block', IDENTITY_COL)} />
-                  <div className='min-w-0 flex-1'>
+                  <div className='min-w-0 flex-1 space-y-1'>
                     <HistoryTimeAxis buckets={axisBuckets} />
+                    <HistoryLegend />
                   </div>
                   <div className={cn('hidden xl:block', STATS_COL)} />
                 </div>
@@ -507,7 +509,6 @@ export function RequestAuditAccountHistoryBoard({
               ) : null}
             </div>
           )}
-          <HistoryLegend />
         </>
       ) : errorMessage ? null : (
         <EmptyState
@@ -781,7 +782,9 @@ const HistoryAccountRow = memo(function HistoryAccountRow({
           {account.episodes.length === 0 ? (
             <p className='text-xs text-muted-foreground'>
               当前窗口没有观察 / 高风险段。
-              {account.failing ? ' 底边红线是 HTTP 失败，不是风险颜色。' : ''}
+              {account.failing
+                ? ' HTTP 失败会记在「请求失败多」标签上，不会把时间轴涂成红色。'
+                : ''}
             </p>
           ) : (
             <ul className='space-y-2'>
@@ -867,37 +870,17 @@ function areHistoryAccountRowsEqual(
 
 function HistorySwimlane({ paint }: { paint: HistorySwimlanePaint }) {
   return (
-    <div className='relative h-9'>
+    <div className='relative h-9' title={paint.title}>
       <div className='absolute inset-0 overflow-hidden rounded-md bg-muted/30'>
         <div
           className='absolute inset-0'
-          style={{ backgroundImage: paint.activityGradient }}
-        />
-        <div
-          className='absolute inset-x-0 bottom-0 h-[3px]'
-          style={{ backgroundImage: paint.failGradient }}
+          style={{ backgroundImage: paint.statusGradient }}
         />
         {[25, 50, 75].map((percent) => (
           <span
             key={percent}
             className='pointer-events-none absolute inset-y-0 w-px bg-border/70'
             style={{ left: `${percent}%` }}
-          />
-        ))}
-        {paint.episodes.map((episode) => (
-          <span
-            key={episode.key}
-            title={episode.title}
-            className={cn(
-              'absolute top-[5px] h-[18px] rounded-sm shadow-sm',
-              episode.severity === 'high' ? 'bg-rose-500' : 'bg-amber-500',
-              !episode.recovered && 'ring-1 ring-foreground/15'
-            )}
-            style={{
-              left: `${episode.left}%`,
-              width: `${episode.width}%`,
-              opacity: episode.recovered ? 0.82 : 0.95,
-            }}
           />
         ))}
       </div>
@@ -913,7 +896,7 @@ function HistoryTimeAxis({
   const ticks = historyAxisTicks(buckets)
   if (ticks.length === 0) return null
   return (
-    <div className='relative mb-1 h-4'>
+    <div className='relative h-4'>
       {ticks.map((tick) => (
         <span
           key={tick.key}
@@ -936,33 +919,15 @@ function HistoryTimeAxis({
 
 function HistoryLegend() {
   return (
-    <div className='space-y-1 text-[11px] text-muted-foreground'>
-      <div className='flex flex-wrap items-center gap-x-2.5 gap-y-1'>
-        <span className='inline-flex items-center gap-1'>
-          <span className='h-2 w-4 rounded-[2px] bg-emerald-500/80' />
-          有请求
+    <div className='flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground'>
+      {HISTORY_SWIMLANE_LEGEND.map((item) => (
+        <span key={item.key} className='inline-flex items-center gap-1'>
+          <span
+            className={cn('h-2 w-3 rounded-[2px]', item.swatchClassName)}
+          />
+          {item.label}
         </span>
-        <span className='inline-flex items-center gap-1'>
-          <span className='h-2 w-4 rounded-[2px] bg-muted/80' />
-          空档
-        </span>
-        <span className='inline-flex items-center gap-1'>
-          <span className='h-2 w-4 rounded-[2px] bg-amber-500' />
-          观察段
-        </span>
-        <span className='inline-flex items-center gap-1'>
-          <span className='h-2 w-4 rounded-[2px] bg-rose-500' />
-          高风险段
-        </span>
-        <span className='inline-flex items-center gap-1'>
-          <span className='h-1.5 w-4 rounded-[2px] bg-rose-500' />
-          HTTP 失败
-        </span>
-      </div>
-      <p>
-        色带是连续异常过程；绿色底轨只表示这段有请求。HTTP
-        失败不会把账号涂成观察 / 高风险。
-      </p>
+      ))}
     </div>
   )
 }

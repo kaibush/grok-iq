@@ -171,14 +171,7 @@ describe('request audit account history helpers', () => {
   })
 
   it('compresses empty swimlane color stops', () => {
-    const buckets = Array.from({ length: 24 }, (_, index) => {
-      const startHour = String(index).padStart(2, '0')
-      const end =
-        index === 23
-          ? '2026-09-05T00:00:00+08:00'
-          : `2026-09-04T${String(index + 1).padStart(2, '0')}:00:00+08:00`
-      return bucket(`2026-09-04T${startHour}:00:00+08:00`, end)
-    })
+    const buckets = hourBuckets()
     buckets[4] = {
       ...buckets[4],
       requests: 6,
@@ -186,10 +179,43 @@ describe('request audit account history helpers', () => {
       successfulRequests: 6,
       dominant: 'normal',
     }
-    const paint = paintHistorySwimlane({ buckets, episodes: [] })
-    expect(paint.activityGradient).toBeTruthy()
-    expect((paint.activityGradient?.match(/rgb\(/g) ?? []).length).toBeLessThan(
-      6
-    )
+    const paint = paintHistorySwimlane({ buckets })
+    expect(paint.statusGradient).toBeTruthy()
+    expect((paint.statusGradient?.match(/rgb\(/g) ?? []).length).toBeLessThan(6)
+    expect(paint.title).toContain('正常 1 格')
+  })
+
+  it('paints never-normal swimlanes without green', () => {
+    const buckets = hourBuckets()
+    buckets[4] = {
+      ...buckets[4],
+      requests: 4,
+      watchRequests: 4,
+      failedRequests: 4,
+      dominant: 'watch',
+    }
+    buckets[12] = {
+      ...buckets[12],
+      requests: 3,
+      highRiskRequests: 3,
+      failedRequests: 3,
+      dominant: 'high',
+    }
+    const paint = paintHistorySwimlane({ buckets })
+    expect(paint.statusGradient).toContain('245 158 11')
+    expect(paint.statusGradient).toContain('244 63 94')
+    expect(paint.statusGradient).not.toContain('16 185 129')
+    expect(paint.title).toBe('观察 1 格 · 高风险 1 格 · 空档 22 格')
   })
 })
+
+function hourBuckets() {
+  return Array.from({ length: 24 }, (_, index) => {
+    const startHour = String(index).padStart(2, '0')
+    const end =
+      index === 23
+        ? '2026-09-05T00:00:00+08:00'
+        : `2026-09-04T${String(index + 1).padStart(2, '0')}:00:00+08:00`
+    return bucket(`2026-09-04T${startHour}:00:00+08:00`, end)
+  })
+}
