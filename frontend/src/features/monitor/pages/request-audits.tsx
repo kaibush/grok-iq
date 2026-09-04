@@ -143,6 +143,7 @@ import {
 } from '@/features/monitor/components/audit-status'
 import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-node-names'
 import { FilterChip } from '@/features/monitor/components/filter-chip'
+import { AccountRequestLedgerDialog } from '@/features/monitor/components/account-request-ledger-dialog'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import { RequestAuditClientBoard } from '@/features/monitor/components/request-audit-client-board'
 import { RequestAuditQualityBoard } from '@/features/monitor/components/request-audit-quality-board'
@@ -1364,6 +1365,10 @@ export function RequestAuditsPage() {
   const [auditDetailOpen, setAuditDetailOpen] = useState(false)
   const [selectedAuditRecord, setSelectedAuditRecord] =
     useState<RequestAuditRecord | null>(null)
+  const [ledgerAccount, setLedgerAccount] = useState<{
+    id: number
+    name: string
+  } | null>(null)
 
   if (isActive && cachedTab !== routeTab) {
     setCachedTab(routeTab)
@@ -1790,20 +1795,15 @@ export function RequestAuditsPage() {
   const openHistoryLedger = useCallback(
     (account: { accountId: number | null; accountName: string }) => {
       if (!account.accountId) {
-        setAuditSearch(account.accountName)
-        setAuditClientKey('all')
-        setAuditNode('all')
-        setPage(1)
-        goToTab('ledger')
+        toast.warning('该账号没有账号 ID，无法在弹框中查看流水')
         return
       }
-      setAuditSearch('')
-      setAuditClientKey('all')
-      setAuditNode('all')
-      setPage(1)
-      goToTab('ledger', { account: String(account.accountId) })
+      setLedgerAccount({
+        id: account.accountId,
+        name: account.accountName,
+      })
     },
-    [goToTab]
+    []
   )
   const historyInteractionKey = [
     windowParams.window,
@@ -4400,6 +4400,16 @@ export function RequestAuditsPage() {
           void queryClient.invalidateQueries({ queryKey: ['runs'] })
           void queryClient.invalidateQueries({ queryKey: ['request-audits'] })
           void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+        }}
+      />
+
+      <AccountRequestLedgerDialog
+        key={ledgerAccount ? ledgerAccount.id : 'closed'}
+        open={ledgerAccount != null}
+        account={ledgerAccount}
+        initialWindow={selectedWindow}
+        onOpenChange={(open) => {
+          if (!open) setLedgerAccount(null)
         }}
       />
 

@@ -11,6 +11,7 @@ import {
   type RequestAuditRecord,
   type RequestAuditRiskLevel,
   type RequestAuditThresholds,
+  type RequestAuditWindowInput,
   type RequestAuditWindowPreset,
 } from '@/lib/api'
 import { slimRequestAuditRecord } from '@/lib/preview-payload'
@@ -64,6 +65,9 @@ const WINDOW_OPTIONS: Array<{
   label: string
 }> = [
   { value: 'today', label: '当天' },
+  { value: '1h', label: '最近 1 小时' },
+  { value: '3h', label: '最近 3 小时' },
+  { value: '6h', label: '最近 6 小时' },
   { value: '24h', label: '最近 24 小时' },
   { value: '7d', label: '最近 7 天' },
   { value: '30d', label: '最近 30 天' },
@@ -177,17 +181,27 @@ export function AccountRequestLedgerDialog({
   open,
   account,
   onOpenChange,
+  initialWindow,
 }: {
   open: boolean
   account: AccountIdentity | null
   onOpenChange: (open: boolean) => void
+  initialWindow?: RequestAuditWindowInput
 }) {
   const accountId = account ? Number(account.id) : 0
   const accountLabel =
     account?.name || account?.email || (accountId ? `账号 ${accountId}` : '账号')
-  const [windowPreset, setWindowPreset] = useState<
-    Exclude<RequestAuditWindowPreset, 'custom'>
-  >('today')
+  const [windowPreset, setWindowPreset] = useState<RequestAuditWindowPreset>(
+    initialWindow?.window ?? 'today'
+  )
+  const [customRange, setCustomRange] = useState<{
+    startAt?: string
+    endAt?: string
+  }>(() =>
+    initialWindow?.window === 'custom'
+      ? { startAt: initialWindow.startAt, endAt: initialWindow.endAt }
+      : {}
+  )
   const [risk, setRisk] = useState<(typeof RISK_OPTIONS)[number]['value']>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -195,12 +209,23 @@ export function AccountRequestLedgerDialog({
 
   useEffect(() => {
     if (!open) return
-    setWindowPreset('today')
+    const nextWindow = initialWindow?.window ?? 'today'
+    setWindowPreset(nextWindow)
+    setCustomRange(
+      nextWindow === 'custom'
+        ? { startAt: initialWindow?.startAt, endAt: initialWindow?.endAt }
+        : {}
+    )
     setRisk('all')
     setPage(1)
     setPageSize(25)
     setSelected(null)
-  }, [open, accountId])
+  }, [accountId, open])
+
+  const windowOptions =
+    windowPreset === 'custom'
+      ? [...WINDOW_OPTIONS, { value: 'custom' as const, label: '当前窗口' }]
+      : WINDOW_OPTIONS
 
   const query = useQuery({
     queryKey: [
@@ -208,6 +233,8 @@ export function AccountRequestLedgerDialog({
       'account-ledger',
       accountId,
       windowPreset,
+      customRange.startAt ?? '',
+      customRange.endAt ?? '',
       risk,
       page,
       pageSize,
@@ -215,6 +242,8 @@ export function AccountRequestLedgerDialog({
     queryFn: async () => {
       const pageData = await api.requestAudits({
         window: windowPreset,
+        startAt: windowPreset === 'custom' ? customRange.startAt : undefined,
+        endAt: windowPreset === 'custom' ? customRange.endAt : undefined,
         accountId,
         risk: risk === 'all' ? '' : risk,
         page,
@@ -230,9 +259,12 @@ export function AccountRequestLedgerDialog({
   })
   const thresholds = query.data?.thresholds ?? FALLBACK_THRESHOLDS
   const items = query.data?.items ?? []
-  const windowLabel = query.data?.window.label ?? (
-    WINDOW_OPTIONS.find((option) => option.value === windowPreset)?.label ?? '当前窗口'
-  )
+  const windowLabel =
+    query.data?.window.label ??
+    (windowPreset === 'custom'
+      ? '当前窗口'
+      : (WINDOW_OPTIONS.find((option) => option.value === windowPreset)
+          ?.label ?? '当前窗口'))
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -272,7 +304,9 @@ export function AccountRequestLedgerDialog({
               <Select
                 value={windowPreset}
                 onValueChange={(value) => {
-                  setWindowPreset(value as Exclude<RequestAuditWindowPreset, 'custom'>)
+                  const next = value as RequestAuditWindowPreset
+                  setWindowPreset(next)
+                  if (next !== 'custom') setCustomRange({})
                   setPage(1)
                 }}
               >
@@ -280,7 +314,7 @@ export function AccountRequestLedgerDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {WINDOW_OPTIONS.map((option) => (
+                  {windowOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
