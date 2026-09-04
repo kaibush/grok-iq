@@ -826,7 +826,7 @@ export function QuarantinePage() {
     (accountId?: number, required = false) => {
       const items = previewItemsFromAccounts(accounts)
       if (!items.length && !(query.data?.total ?? 0)) {
-        toast.error('当前筛选没有可预览的账号样本')
+        toast.error('当前筛选没有可预览的账号')
         return
       }
       const matchedIndex =

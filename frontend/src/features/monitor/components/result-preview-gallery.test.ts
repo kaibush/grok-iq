@@ -3,6 +3,7 @@ import type { ProbeRun, UpstreamAccount } from '@/lib/api'
 import type { AccountPreviewPayload } from '@/lib/preview-payload'
 import {
   previewItemsFromAccountPreview,
+  previewItemsFromAccounts,
   previewItemsFromRuns,
 } from './result-preview-gallery'
 
@@ -73,5 +74,24 @@ describe('previewItemsFromAccountPreview', () => {
     expect(items).toHaveLength(1)
     expect(items[0]?.status).toBe('running')
     expect(items[0]?.profileName).toBe('鹈鹕骑自行车')
+  })
+})
+
+describe('previewItemsFromAccounts', () => {
+  it('keeps listed accounts even when the risk window has no samples', () => {
+    const items = previewItemsFromAccounts([
+      {
+        id: '7111',
+        name: 'acu@example.com',
+        email: 'acu@example.com',
+        provider: 'grok',
+        enabled: false,
+        ssoAvailable: false,
+        assessment: { sample_count: 0, latest_sample_at: null },
+      } as UpstreamAccount,
+    ])
+    expect(items).toHaveLength(1)
+    expect(items[0]?.accountId).toBe(7111)
+    expect(items[0]?.source).toBe('account')
   })
 })

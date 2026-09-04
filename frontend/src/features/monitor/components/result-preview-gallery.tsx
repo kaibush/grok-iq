@@ -192,9 +192,7 @@ export function previewItemFromAccount(
 export function previewItemsFromAccounts(
   accounts: UpstreamAccount[]
 ): ResultPreviewItem[] {
-  return accounts
-    .filter((account) => (account.assessment.sample_count ?? 0) > 0)
-    .map((account) => previewItemFromAccount(account))
+  return accounts.map((account) => previewItemFromAccount(account))
 }
 
 export function previewItemsFromAccountPreview(
