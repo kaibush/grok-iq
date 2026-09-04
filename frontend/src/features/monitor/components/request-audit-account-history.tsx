@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ChevronDown,
   History,
@@ -114,14 +114,15 @@ export function RequestAuditAccountHistoryBoard({
   const [sort, setSort] = useState<HistoryAccountSort>(
     DEFAULT_HISTORY_ACCOUNT_SORT
   )
+  const pinnedKey = pinnedAccountId == null ? null : String(pinnedAccountId)
   const [expandedAccountKey, setExpandedAccountKey] = useState<string | null>(
-    null
+    pinnedKey
   )
-
-  useEffect(() => {
-    if (pinnedAccountId == null) return
-    setExpandedAccountKey(String(pinnedAccountId))
-  }, [pinnedAccountId])
+  const [seenPinnedKey, setSeenPinnedKey] = useState(pinnedKey)
+  if (pinnedKey !== seenPinnedKey) {
+    setSeenPinnedKey(pinnedKey)
+    if (pinnedKey != null) setExpandedAccountKey(pinnedKey)
+  }
 
   const errorMessage = error?.trim() ?? ''
   const showSkeletons = loading && !data

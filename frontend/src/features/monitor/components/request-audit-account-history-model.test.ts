@@ -129,8 +129,8 @@ describe('request audit account history helpers', () => {
     const ticks = historyAxisTicks(buckets)
     expect(ticks.length).toBeGreaterThanOrEqual(4)
     expect(ticks[0]?.align).toBe('start')
-    expect(ticks.at(-1)?.align).toBe('end')
-    expect(ticks.at(-1)?.percent).toBe(100)
+    expect(ticks[ticks.length - 1]?.align).toBe('end')
+    expect(ticks[ticks.length - 1]?.percent).toBe(100)
   })
 
   it('finds the episode covering a hovered bucket', () => {

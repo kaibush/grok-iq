@@ -298,12 +298,48 @@ def test_account_history_sorts_still_abnormal_first(tmp_path: Path):
     end = now + timedelta(minutes=1)
     repository.upsert_records(
         [
-            _record(start + timedelta(minutes=10), upstream_id="ok1", account_id=1, account_name="ok", tps=80),
-            _record(start + timedelta(minutes=11), upstream_id="ok2", account_id=1, account_name="ok", tps=80),
-            _record(start + timedelta(minutes=12), upstream_id="ok3", account_id=1, account_name="ok", tps=80),
-            _record(start + timedelta(minutes=13), upstream_id="bad1", account_id=2, account_name="bad", tps=600),
-            _record(start + timedelta(minutes=14), upstream_id="bad2", account_id=2, account_name="bad", tps=600),
-            _record(start + timedelta(minutes=15), upstream_id="bad3", account_id=2, account_name="bad", tps=600),
+            _record(
+                start + timedelta(minutes=10),
+                upstream_id="ok1",
+                account_id=1,
+                account_name="ok",
+                tps=80,
+            ),
+            _record(
+                start + timedelta(minutes=11),
+                upstream_id="ok2",
+                account_id=1,
+                account_name="ok",
+                tps=80,
+            ),
+            _record(
+                start + timedelta(minutes=12),
+                upstream_id="ok3",
+                account_id=1,
+                account_name="ok",
+                tps=80,
+            ),
+            _record(
+                start + timedelta(minutes=13),
+                upstream_id="bad1",
+                account_id=2,
+                account_name="bad",
+                tps=600,
+            ),
+            _record(
+                start + timedelta(minutes=14),
+                upstream_id="bad2",
+                account_id=2,
+                account_name="bad",
+                tps=600,
+            ),
+            _record(
+                start + timedelta(minutes=15),
+                upstream_id="bad3",
+                account_id=2,
+                account_name="bad",
+                tps=600,
+            ),
         ]
     )
     payload = _history(service, start, end)

@@ -46,6 +46,7 @@ export const WORKSPACE_TAB_SHORT_TITLES: Record<WorkspaceTabId, string> = {
 export type WorkspaceTabTo =
   | (typeof WORKSPACE_TAB_PATHS)[WorkspaceTabId]
   | '/request-audits/workspace'
+  | '/request-audits/history'
   | '/request-audits/ledger'
   | '/request-audits/schedule'
 

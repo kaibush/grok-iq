@@ -24,6 +24,9 @@ describe('workspace tabs', () => {
     expect(matchWorkspaceTabId('/request-audits/workspace')).toBe(
       'request-audits'
     )
+    expect(matchWorkspaceTabId('/request-audits/history')).toBe(
+      'request-audits'
+    )
     expect(matchWorkspaceTabId('/settings/risk')).toBeNull()
   })
 

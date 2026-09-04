@@ -729,6 +729,7 @@ export type TimelineItemHref =
   | '/request-audits'
   | '/request-audits/ledger'
   | '/request-audits/workspace'
+  | '/request-audits/history'
   | '/request-audits/schedule'
   | '/quarantine'
 
