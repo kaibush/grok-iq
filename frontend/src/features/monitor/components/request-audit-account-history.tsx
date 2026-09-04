@@ -791,6 +791,7 @@ const HistoryAccountRow = memo(function HistoryAccountRow({
             <ul className='space-y-2'>
               {account.episodes.map((episode) => {
                 const longest = Math.max(account.longestAbnormalMinutes, 1)
+                const instant = episode.durationMinutes < 0.5
                 const width = Math.max(
                   8,
                   Math.min(100, (episode.durationMinutes / longest) * 100)
@@ -812,23 +813,41 @@ const HistoryAccountRow = memo(function HistoryAccountRow({
                       <span className='text-muted-foreground tabular-nums'>
                         {formatHistoryTimeRange(episode.start, episode.end)}
                         {' · '}
-                        {formatHistoryMinutes(episode.durationMinutes)}
+                        {instant
+                          ? '瞬时'
+                          : formatHistoryMinutes(episode.durationMinutes)}
                         {' · '}
                         {episodeRecoveryText(episode)}
                       </span>
                     </div>
                     <div className='flex items-center gap-2'>
-                      <div className='h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/60'>
-                        <div
-                          className={cn(
-                            'h-full rounded-full',
-                            episode.severity === 'high'
-                              ? 'bg-rose-500'
-                              : 'bg-amber-500'
-                          )}
-                          style={{ width: `${width}%` }}
-                        />
-                      </div>
+                      {instant ? (
+                        <div className='flex h-1.5 min-w-0 flex-1 items-center gap-1'>
+                          <span
+                            className={cn(
+                              'h-1.5 w-2.5 rounded-full',
+                              episode.severity === 'high'
+                                ? 'bg-rose-500'
+                                : 'bg-amber-500'
+                            )}
+                          />
+                          {episode.recovered ? (
+                            <span className='h-1.5 w-2.5 rounded-full bg-emerald-500' />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className='h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/60'>
+                          <div
+                            className={cn(
+                              'h-full rounded-full',
+                              episode.severity === 'high'
+                                ? 'bg-rose-500'
+                                : 'bg-amber-500'
+                            )}
+                            style={{ width: `${width}%` }}
+                          />
+                        </div>
+                      )}
                       <span className='shrink-0 text-[11px] text-muted-foreground tabular-nums'>
                         {formatNumber(episode.requests, 0)} 次
                         {episode.highRiskRequests
