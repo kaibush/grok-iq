@@ -634,7 +634,7 @@ class RegisterCallbackDelivery(Base):
 
 
 class PageVisit(Base):
-    """Status-page visit events without raw IP addresses."""
+    """Status-page visit events for public totals and admin inspection."""
 
     __tablename__ = "page_visits"
     __table_args__ = (
@@ -642,6 +642,7 @@ class PageVisit(Base):
         Index("ix_page_visits_visitor_path_visited", "visitor_id", "path", "visited_at"),
         Index("ix_page_visits_day_key_visitor_id", "day_key", "visitor_id"),
         Index("ix_page_visits_day_key_path", "day_key", "path"),
+        Index("ix_page_visits_client_ip", "client_ip"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -650,8 +651,13 @@ class PageVisit(Base):
     day_key: Mapped[str] = mapped_column(String(16), nullable=False)
     path: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     referrer_host: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    referrer: Mapped[str] = mapped_column(String(400), default="", nullable=False)
     device: Mapped[str] = mapped_column(String(16), default="other", nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    client_ip: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    user_agent: Mapped[str] = mapped_column(String(400), default="", nullable=False)
+    country: Mapped[str] = mapped_column(String(8), default="", nullable=False)
+    language: Mapped[str] = mapped_column(String(32), default="", nullable=False)
 
 
 def model_dict(value: Any) -> dict[str, Any]:

@@ -280,6 +280,28 @@ COMPATIBILITY_COLUMNS = {
             "VARCHAR(16) NOT NULL DEFAULT ''",
         ),
     ],
+    "page_visits": [
+        (
+            "client_ip",
+            "ALTER TABLE page_visits ADD COLUMN client_ip VARCHAR(64) NOT NULL DEFAULT ''",
+        ),
+        (
+            "user_agent",
+            "ALTER TABLE page_visits ADD COLUMN user_agent VARCHAR(400) NOT NULL DEFAULT ''",
+        ),
+        (
+            "referrer",
+            "ALTER TABLE page_visits ADD COLUMN referrer VARCHAR(400) NOT NULL DEFAULT ''",
+        ),
+        (
+            "country",
+            "ALTER TABLE page_visits ADD COLUMN country VARCHAR(8) NOT NULL DEFAULT ''",
+        ),
+        (
+            "language",
+            "ALTER TABLE page_visits ADD COLUMN language VARCHAR(32) NOT NULL DEFAULT ''",
+        ),
+    ],
     "request_audit_account_verifications": [
         (
             "egress_recommendation",
@@ -326,6 +348,12 @@ COMPATIBILITY_INDEXES = {
             "CREATE INDEX IF NOT EXISTS ix_probe_samples_risk_rule_id "
             "ON probe_samples (risk_rule_id)",
         )
+    ],
+    "page_visits": [
+        (
+            "ix_page_visits_client_ip",
+            "CREATE INDEX IF NOT EXISTS ix_page_visits_client_ip ON page_visits (client_ip)",
+        ),
     ],
     "register_webhook_events": [
         (

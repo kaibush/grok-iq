@@ -268,14 +268,37 @@ export type PublicVisitRecent = {
   visitedAt: string
   path: string
   referrerHost: string
+  referrer?: string
   device: PublicVisitDevice['id']
   isAdmin: boolean
+  clientIp?: string
+  visitorId?: string
+  userAgent?: string
+  browser?: string
+  os?: string
+  country?: string
+  language?: string
+}
+
+export type PublicVisitIpStat = {
+  ip: string
+  label: string
+  pv: number
+  uv: number
+}
+
+export type PublicVisitBrowserStat = {
+  label: string
+  pv: number
+  uv: number
 }
 
 export type AdminVisitDetails = PublicVisitOverview & {
   audience?: PublicVisitAudience
   paths: PublicVisitPathStat[]
   referrers: PublicVisitReferrerStat[]
+  ips?: PublicVisitIpStat[]
+  browsers?: PublicVisitBrowserStat[]
   recent: PublicVisitRecent[]
 }
 

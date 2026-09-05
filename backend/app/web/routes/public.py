@@ -108,6 +108,8 @@ def build_public_router(
                 authorization=request.headers.get("authorization") or "",
                 visitor_cookie=request.cookies.get(VISITOR_COOKIE_NAME) or "",
                 request_host=request.headers.get("host") or (request.base_url.hostname or ""),
+                country=request.headers.get("cf-ipcountry") or "",
+                language=request.headers.get("accept-language") or "",
             )
             if result.get("set_cookie") and result.get("visitor_id"):
                 response.set_cookie(
@@ -141,12 +143,13 @@ def _cookie_secure(request: Request) -> bool:
 
 
 def _client_ip(request: Request) -> str:
+    for header in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
+        value = (request.headers.get(header) or "").strip()
+        if value:
+            return value
     forwarded = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
     if forwarded:
         return forwarded
-    real_ip = (request.headers.get("x-real-ip") or "").strip()
-    if real_ip:
-        return real_ip
     host = request.client.host if request.client else ""
     return host or "unknown"
 

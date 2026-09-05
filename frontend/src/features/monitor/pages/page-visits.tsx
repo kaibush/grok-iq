@@ -35,6 +35,7 @@ import { ServerPagination } from '@/components/server-pagination'
 import { StatCard } from '@/components/stat-card'
 import { TablePanel } from '@/components/table-panel'
 import { TitledCard } from '@/components/titled-card'
+import { CopyableText } from '@/components/copy-button'
 import { visitDeviceLabel } from '@/features/monitor/components/status-visit-details-dialog'
 import { VisitTrendChart } from '@/features/monitor/components/status-visit-stats'
 
@@ -109,6 +110,8 @@ export function PageVisitsPage() {
   const chartData = useMemo(() => stats?.series ?? [], [stats?.series])
   const referrers = stats?.referrers ?? []
   const paths = stats?.paths ?? []
+  const ips = stats?.ips ?? []
+  const browsers = stats?.browsers ?? []
   const devices = (stats?.devices ?? []).filter((item) => item.pv > 0)
   const ledger = ledgerQuery.data
   const rows = ledger?.items ?? []
@@ -127,11 +130,18 @@ export function PageVisitsPage() {
     setPage(1)
   }
 
+  function applyFilter(value: string) {
+    const next = value.trim()
+    setDraftQuery(next)
+    setAppliedQuery(next)
+    setPage(1)
+  }
+
   return (
     <Page>
       <PageHeader
         title='页面访问'
-        description='状态页浏览量、独立访客和访问流水。不记录 IP，管理员刷新不计入公开统计。'
+        description='状态页浏览量、独立访客和访问流水。IP / UA / 访客编号仅管理员可见，公开看板不展示。'
         actions={
           <div className='flex flex-wrap items-center justify-end gap-2'>
             <SegmentedControl
@@ -253,7 +263,7 @@ export function PageVisitsPage() {
         )}
       </TitledCard>
 
-      <div className='grid gap-4 xl:grid-cols-2'>
+      <div className='grid gap-4 xl:grid-cols-3'>
         <TitledCard title='来源' description='按来源域名聚合'>
           <VisitStatTable
             nameHeader='来源'
@@ -264,7 +274,24 @@ export function PageVisitsPage() {
               name: item.label || item.host || '直接访问',
               pv: item.pv,
               uv: item.uv,
+              filterValue: item.host,
             }))}
+            onSelect={applyFilter}
+          />
+        </TitledCard>
+        <TitledCard title='IP' description='同一 IP 可能对应多个访客'>
+          <VisitStatTable
+            nameHeader='IP'
+            empty='暂无 IP 数据'
+            loading={statsLoading}
+            rows={ips.map((item) => ({
+              key: item.ip || 'unknown',
+              name: item.label || item.ip || '未知 IP',
+              pv: item.pv,
+              uv: item.uv,
+              filterValue: item.ip,
+            }))}
+            onSelect={applyFilter}
           />
         </TitledCard>
         <TitledCard title='路径' description='状态页及相关路径'>
@@ -277,12 +304,14 @@ export function PageVisitsPage() {
               name: item.path || '/',
               pv: item.pv,
               uv: item.uv,
+              filterValue: item.path,
             }))}
+            onSelect={applyFilter}
           />
         </TitledCard>
       </div>
 
-      {devices.length > 0 ? (
+      {devices.length > 0 || browsers.length > 0 ? (
         <div className='flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
           {devices.map((item) => (
             <span
@@ -290,6 +319,14 @@ export function PageVisitsPage() {
               className='rounded-full bg-muted/70 px-2 py-0.5 tabular-nums'
             >
               {visitDeviceLabel(item)} {formatNumber(item.pv, 0)}
+            </span>
+          ))}
+          {browsers.map((item) => (
+            <span
+              key={item.label}
+              className='rounded-full bg-muted/70 px-2 py-0.5 tabular-nums'
+            >
+              {item.label} {formatNumber(item.pv, 0)}
             </span>
           ))}
         </div>
@@ -330,8 +367,8 @@ export function PageVisitsPage() {
                 <Input
                   value={draftQuery}
                   onChange={(event) => setDraftQuery(event.target.value)}
-                  placeholder='路径或来源，回车搜索'
-                  aria-label='搜索路径或来源'
+                  placeholder='IP、访客、路径、来源或 UA，回车搜索'
+                  aria-label='搜索 IP、访客、路径、来源或 UA'
                   className='ps-9'
                 />
               </div>
@@ -373,50 +410,103 @@ export function PageVisitsPage() {
             className='border-0 bg-transparent'
           />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className='hover:bg-transparent'>
-                <TableHead>时间</TableHead>
-                <TableHead>路径</TableHead>
-                <TableHead>来源</TableHead>
-                <TableHead>设备</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row, index) => {
-                const referrer = row.referrerHost || '直接访问'
-                return (
-                  <TableRow
-                    key={`${row.visitedAt}:${row.path}:${index}`}
-                    className='hover:bg-transparent'
-                  >
-                    <TableCell className='whitespace-nowrap text-muted-foreground'>
-                      {formatDate(row.visitedAt)}
-                    </TableCell>
-                    <TableCell className='max-w-[18rem] truncate' title={row.path}>
-                      {row.path || '/'}
-                    </TableCell>
-                    <TableCell className='max-w-[14rem] truncate' title={referrer}>
-                      {referrer}
-                    </TableCell>
-                    <TableCell>
-                      <span className='inline-flex items-center gap-1.5'>
-                        {visitDeviceLabel(row.device)}
-                        {row.isAdmin ? (
-                          <Badge
-                            variant='outline'
-                            className='h-5 px-1.5 text-[10px]'
-                          >
-                            管理员
-                          </Badge>
+          <div className='overflow-x-auto'>
+            <Table>
+              <TableHeader>
+                <TableRow className='hover:bg-transparent'>
+                  <TableHead>时间</TableHead>
+                  <TableHead>IP</TableHead>
+                  <TableHead>地区</TableHead>
+                  <TableHead>访客</TableHead>
+                  <TableHead>浏览器</TableHead>
+                  <TableHead>路径</TableHead>
+                  <TableHead>来源</TableHead>
+                  <TableHead>设备</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row, index) => {
+                  const referrer = row.referrer || row.referrerHost || '直接访问'
+                  const browser = [row.browser, row.os].filter(Boolean).join(' · ')
+                  return (
+                    <TableRow
+                      key={`${row.visitedAt}:${row.visitorId}:${index}`}
+                      className='hover:bg-transparent'
+                    >
+                      <TableCell className='whitespace-nowrap text-muted-foreground'>
+                        {formatDate(row.visitedAt)}
+                      </TableCell>
+                      <TableCell className='font-mono text-xs'>
+                        {row.clientIp ? (
+                          <CopyableText value={row.clientIp}>
+                            <button
+                              type='button'
+                              className='max-w-[10rem] truncate text-left hover:underline'
+                              title={row.clientIp}
+                              onClick={() => applyFilter(row.clientIp || '')}
+                            >
+                              {row.clientIp}
+                            </button>
+                          </CopyableText>
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell className='whitespace-nowrap'>
+                        {countryLabel(row.country)}
+                      </TableCell>
+                      <TableCell className='font-mono text-xs'>
+                        {row.visitorId ? (
+                          <CopyableText value={row.visitorId}>
+                            <button
+                              type='button'
+                              className='hover:underline'
+                              title={row.visitorId}
+                              onClick={() => applyFilter(row.visitorId || '')}
+                            >
+                              {row.visitorId.slice(0, 8)}
+                            </button>
+                          </CopyableText>
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className='max-w-[12rem] truncate'
+                        title={row.userAgent || browser || undefined}
+                      >
+                        {browser || '—'}
+                        {row.language ? (
+                          <span className='mt-0.5 block text-[10px] text-muted-foreground'>
+                            {row.language}
+                          </span>
                         ) : null}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                      <TableCell className='max-w-[14rem] truncate' title={row.path}>
+                        {row.path || '/'}
+                      </TableCell>
+                      <TableCell className='max-w-[14rem] truncate' title={referrer}>
+                        {row.referrerHost || (row.referrer ? referrer : '直接访问')}
+                      </TableCell>
+                      <TableCell>
+                        <span className='inline-flex items-center gap-1.5'>
+                          {visitDeviceLabel(row.device)}
+                          {row.isAdmin ? (
+                            <Badge
+                              variant='outline'
+                              className='h-5 px-1.5 text-[10px]'
+                            >
+                              管理员
+                            </Badge>
+                          ) : null}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </TablePanel>
     </Page>
@@ -428,11 +518,19 @@ function VisitStatTable({
   empty,
   loading,
   rows,
+  onSelect,
 }: {
   nameHeader: string
   empty: string
   loading: boolean
-  rows: Array<{ key: string; name: string; pv: number; uv: number }>
+  rows: Array<{
+    key: string
+    name: string
+    pv: number
+    uv: number
+    filterValue?: string
+  }>
+  onSelect?: (value: string) => void
 }) {
   if (loading) return <LoadingState label={`正在加载${nameHeader}`} />
   if (rows.length === 0) {
@@ -451,7 +549,17 @@ function VisitStatTable({
         {rows.map((row) => (
           <TableRow key={row.key} className='hover:bg-transparent'>
             <TableCell className='max-w-[18rem] truncate' title={row.name}>
-              {row.name}
+              {onSelect && row.filterValue ? (
+                <button
+                  type='button'
+                  className='max-w-full truncate hover:underline'
+                  onClick={() => onSelect(row.filterValue || '')}
+                >
+                  {row.name}
+                </button>
+              ) : (
+                row.name
+              )}
             </TableCell>
             <TableCell className='text-right text-xs tabular-nums text-sky-600 dark:text-sky-400'>
               {formatNumber(row.pv, 0)}
@@ -464,6 +572,34 @@ function VisitStatTable({
       </TableBody>
     </Table>
   )
+}
+
+const COUNTRY_LABELS: Record<string, string> = {
+  CN: '中国',
+  HK: '香港',
+  MO: '澳门',
+  TW: '台湾',
+  US: '美国',
+  JP: '日本',
+  KR: '韩国',
+  SG: '新加坡',
+  DE: '德国',
+  GB: '英国',
+  FR: '法国',
+  RU: '俄罗斯',
+  IN: '印度',
+  AU: '澳大利亚',
+  CA: '加拿大',
+  NL: '荷兰',
+  BR: '巴西',
+  T1: 'Tor',
+  XX: '未知',
+}
+
+function countryLabel(value?: string) {
+  const code = (value || '').trim().toUpperCase()
+  if (!code) return '—'
+  return COUNTRY_LABELS[code] ? `${COUNTRY_LABELS[code]} ${code}` : code
 }
 
 function deltaLabel(delta: number | undefined, fallback: string) {

@@ -66,7 +66,7 @@ export function StatusVisitStats({
         iconTone='sky'
         title='页面访问'
         description='状态页浏览量与独立访客'
-        hint='PV 是打开次数，UV 是同一浏览器去重后的访客。不记录 IP，管理员刷新不计入公开统计。'
+        hint='PV 是打开次数，UV 是同一浏览器去重后的访客。管理员刷新不计入公开统计；IP 等明细只在后台可见。'
         action={
           <SegmentedControl
             ariaLabel='页面访问时间范围'

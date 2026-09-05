@@ -69,6 +69,11 @@ class PageVisitRepository:
                 or_(
                     PageVisit.path.contains(needle),
                     PageVisit.referrer_host.contains(needle),
+                    PageVisit.referrer.contains(needle),
+                    PageVisit.client_ip.contains(needle),
+                    PageVisit.user_agent.contains(needle),
+                    PageVisit.visitor_id.contains(needle),
+                    PageVisit.country.contains(needle),
                 )
             )
         with self.database.session() as session:

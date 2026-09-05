@@ -30,6 +30,11 @@ RETENTION_DAYS = 90
 PRUNE_EVERY = 50
 PATH_MAX_LENGTH = 200
 HOST_MAX_LENGTH = 200
+REFERRER_MAX_LENGTH = 400
+IP_MAX_LENGTH = 64
+UA_MAX_LENGTH = 400
+COUNTRY_MAX_LENGTH = 8
+LANGUAGE_MAX_LENGTH = 32
 RECENT_LIMIT = 50
 TOP_LIMIT = 20
 _VISITOR_ID_RE = re.compile(
@@ -57,6 +62,8 @@ class PageVisitService:
         authorization: str = "",
         visitor_cookie: str = "",
         request_host: str = "",
+        country: str = "",
+        language: str = "",
     ) -> dict[str, Any]:
         now = utc_now()
         day_key = (to_app_timezone(now) or app_now()).date().isoformat()
@@ -86,8 +93,13 @@ class PageVisitService:
                 "day_key": day_key,
                 "path": normalized_path,
                 "referrer_host": _referrer_host(referrer, request_host),
+                "referrer": _referrer_url(referrer),
                 "device": device,
                 "is_admin": self._is_admin(authorization),
+                "client_ip": _client_ip(client_ip),
+                "user_agent": (user_agent or "").strip()[:UA_MAX_LENGTH],
+                "country": _country(country),
+                "language": _language(language),
             }
         )
         if random.randrange(PRUNE_EVERY) == 0:
@@ -217,6 +229,8 @@ class PageVisitService:
             }
             payload["paths"] = _paths(all_rows)
             payload["referrers"] = _referrers(all_rows)
+            payload["ips"] = _ips(all_rows)
+            payload["browsers"] = _browsers(all_rows)
             payload["recent"] = _recent(all_rows, zone)
         return payload
 
@@ -283,6 +297,59 @@ def _normalize_path(path: str) -> str:
     if not value.startswith("/"):
         return DEFAULT_PATH
     return value[:PATH_MAX_LENGTH] or DEFAULT_PATH
+
+
+def _referrer_url(referrer: str) -> str:
+    text = (referrer or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if lowered.startswith(("javascript:", "data:", "vbscript:")):
+        return ""
+    return text[:REFERRER_MAX_LENGTH]
+
+
+def _client_ip(value: str) -> str:
+    return (value or "").strip()[:IP_MAX_LENGTH]
+
+
+def _country(value: str) -> str:
+    text = (value or "").strip().upper().replace("_", "-")
+    if not text or text in {"XX", "T1"}:
+        return text[:COUNTRY_MAX_LENGTH] if text in {"XX", "T1"} else ""
+    return text[:COUNTRY_MAX_LENGTH]
+
+
+def _language(value: str) -> str:
+    first = (value or "").split(",", 1)[0].split(";", 1)[0].strip()
+    return first[:LANGUAGE_MAX_LENGTH]
+
+
+def _client_summary(user_agent: str) -> tuple[str, str]:
+    text = (user_agent or "").lower()
+    os_name = "其他"
+    if "windows" in text:
+        os_name = "Windows"
+    elif "iphone" in text or "ipad" in text or "ios" in text:
+        os_name = "iOS"
+    elif "android" in text:
+        os_name = "Android"
+    elif "mac os" in text or "macintosh" in text:
+        os_name = "macOS"
+    elif "linux" in text:
+        os_name = "Linux"
+    browser = "其他"
+    if "edg/" in text or "edgios/" in text:
+        browser = "Edge"
+    elif "opr/" in text or "opera" in text:
+        browser = "Opera"
+    elif "firefox/" in text or "fxios/" in text:
+        browser = "Firefox"
+    elif "crios/" in text or "chrome/" in text:
+        browser = "Chrome"
+    elif "safari/" in text:
+        browser = "Safari"
+    return browser, os_name
 
 
 def _referrer_host(referrer: str, request_host: str) -> str:
@@ -453,6 +520,31 @@ def _paths(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return items[:TOP_LIMIT]
 
 
+def _ips(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[str(row.get("client_ip") or "")].append(row)
+    items = []
+    for ip, group in grouped.items():
+        pv, uv = _pv_uv(group)
+        items.append({"ip": ip, "label": ip or "未知 IP", "pv": pv, "uv": uv})
+    items.sort(key=lambda item: (-item["pv"], item["ip"]))
+    return items[:TOP_LIMIT]
+
+
+def _browsers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        browser, os_name = _client_summary(str(row.get("user_agent") or ""))
+        grouped[f"{browser} · {os_name}"].append(row)
+    items = []
+    for label, group in grouped.items():
+        pv, uv = _pv_uv(group)
+        items.append({"label": label, "pv": pv, "uv": uv})
+    items.sort(key=lambda item: (-item["pv"], item["label"]))
+    return items[:TOP_LIMIT]
+
+
 def _referrers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -481,13 +573,23 @@ def _visit_items(rows: list[dict[str, Any]], zone: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for row in rows:
         instant = _as_local(row.get("visited_at"), zone)
+        user_agent = str(row.get("user_agent") or "")
+        browser, os_name = _client_summary(user_agent)
         items.append(
             {
                 "visitedAt": instant.isoformat() if instant else "",
                 "path": str(row.get("path") or ""),
                 "referrerHost": str(row.get("referrer_host") or ""),
+                "referrer": str(row.get("referrer") or ""),
                 "device": str(row.get("device") or "other"),
                 "isAdmin": bool(row.get("is_admin")),
+                "clientIp": str(row.get("client_ip") or ""),
+                "visitorId": str(row.get("visitor_id") or ""),
+                "userAgent": user_agent,
+                "browser": browser,
+                "os": os_name,
+                "country": str(row.get("country") or ""),
+                "language": str(row.get("language") or ""),
             }
         )
     return items

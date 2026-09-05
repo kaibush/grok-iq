@@ -60,6 +60,8 @@ def test_same_visitor_two_visits_count_as_one_uv(tmp_path: Path, monkeypatch):
     assert "visitor_id" not in payload
     assert "paths" not in payload
     assert "audience" not in payload
+    assert "ips" not in payload
+    assert "clientIp" not in str(payload)
     assert payload["comparison"]["previousPv"] == 0
     assert payload["comparison"]["pvDelta"] == 2
 
@@ -121,7 +123,13 @@ def test_details_empty_referrer_is_labeled_direct(tmp_path: Path):
     assert payload["recent"][0]["path"] == "/status"
     assert payload["recent"][0]["referrerHost"] == ""
     assert payload["recent"][0]["isAdmin"] is False
+    assert payload["recent"][0]["clientIp"] == "203.0.113.10"
+    assert payload["recent"][0]["visitorId"] == VISITOR_A
+    assert payload["recent"][0]["browser"] == "Chrome"
+    assert payload["recent"][0]["os"] == "Windows"
     assert "visitor_id" not in payload["recent"][0]
+    assert "ips" in payload
+    assert payload["ips"][0]["ip"] == "203.0.113.10"
     assert payload["audience"]["public"]["pv"] == 1
     assert payload["audience"]["admin"]["pv"] == 0
 
@@ -297,3 +305,45 @@ def test_visit_ledger_filters_admin_and_query(tmp_path: Path, monkeypatch):
     queried = service.visit_ledger(q="github")
     assert queried["total"] == 1
     assert queried["items"][0]["referrerHost"] == "github.com"
+
+
+
+def test_visit_ledger_includes_client_ip_and_search(tmp_path: Path, monkeypatch):
+    _repository, service = _build(tmp_path)
+    current = utc_now()
+    clock = {"value": current}
+
+    def fake_now():
+        return clock["value"]
+
+    monkeypatch.setattr("app.services.page_visit_service.utc_now", fake_now)
+    assert _record(
+        service,
+        client_ip="198.51.100.24",
+        country="US",
+        language="en-US,en;q=0.9",
+        user_agent=DESKTOP_UA,
+    )["recorded"] is True
+    clock["value"] = current + timedelta(seconds=10)
+    assert _record(
+        service,
+        visitor_cookie=VISITOR_B,
+        client_ip="203.0.113.10",
+        country="CN",
+        language="zh-CN",
+        user_agent=MOBILE_UA,
+    )["recorded"] is True
+
+    overview = service.overview("24h")
+    assert "198.51.100.24" not in str(overview)
+    details = service.details("24h")
+    assert {item["ip"] for item in details["ips"]} == {"198.51.100.24", "203.0.113.10"}
+
+    matched = service.visit_ledger(q="198.51.100.24")
+    assert matched["total"] == 1
+    item = matched["items"][0]
+    assert item["clientIp"] == "198.51.100.24"
+    assert item["country"] == "US"
+    assert item["language"] == "en-US"
+    assert item["browser"] == "Chrome"
+    assert item["os"] == "Windows"
