@@ -79,7 +79,15 @@ const PREVIEW_ISOLATE_NOTE = 'HTML 预览人工判定降智'
 const THUMB_FRAME_WIDTH = HTML_THUMB_FRAME_WIDTH
 const THUMB_FRAME_HEIGHT = HTML_THUMB_FRAME_HEIGHT
 const THUMB_GRID_CLASSNAME =
-  'grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
+  'grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
+
+function previewThumbColumns(width: number) {
+  if (width >= 1536) return 5
+  if (width >= 1280) return 4
+  if (width >= 768) return 3
+  if (width >= 640) return 2
+  return 1
+}
 const PREVIEW_VIEW_STORAGE_KEY = 'grokiq.monitor.result-preview.v1'
 const defaultPreviewView: {
   view: 'split' | 'grid'
@@ -531,7 +539,7 @@ export function ResultPreviewGallery({
     previewPrefs.setValue((current) => ({ ...current, roundLayout: next }))
   }
   const [sampleOverrideId, setSampleOverrideId] = useState<string>()
-  const [gridCols, setGridCols] = useState(4)
+  const [gridCols, setGridCols] = useState(1)
   const [accountDetailId, setAccountDetailId] = useState<number | null>(null)
   const [runDetailId, setRunDetailId] = useState<string>()
   const [pageDraft, setPageDraft] = useState(String(Math.max(1, page)))
@@ -985,7 +993,7 @@ export function ResultPreviewGallery({
     if (!node || view !== 'grid') return
     const measure = () => {
       const width = node.clientWidth
-      setGridCols(width >= 1536 ? 5 : width >= 1280 ? 4 : width >= 768 ? 3 : 2)
+      setGridCols(previewThumbColumns(width))
     }
     measure()
     const observer = new ResizeObserver(measure)
