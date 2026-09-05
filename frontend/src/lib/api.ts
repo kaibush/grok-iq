@@ -201,6 +201,84 @@ export type PublicUpstreamHealth = {
   errors: PublicUpstreamHealthError[]
 }
 
+export type PublicVisitPeriod = '24h' | '7d' | '30d' | '90d'
+
+export type PublicVisitTotals = {
+  pv: number
+  uv: number
+  todayPv: number
+  todayUv: number
+  yesterdayUv: number
+  avgDailyPv: number
+}
+
+export type PublicVisitComparison = {
+  previousPv: number
+  previousUv: number
+  pvDelta: number
+  uvDelta: number
+}
+
+export type PublicVisitPeak = {
+  label: string
+  pv: number
+  uv: number
+}
+
+export type PublicVisitAudience = {
+  public: { pv: number; uv: number }
+  admin: { pv: number; uv: number }
+}
+
+export type PublicVisitSeriesPoint = {
+  start: string
+  end: string
+  label: string
+  pv: number
+  uv: number
+}
+
+export type PublicVisitDevice = {
+  id: 'desktop' | 'mobile' | 'tablet' | 'bot' | 'other'
+  label: string
+  pv: number
+  uv: number
+}
+
+export type PublicVisitOverview = {
+  period: PublicVisitPeriod
+  timezone: string
+  generatedAt: string | null
+  range: { start: string | null; end: string | null }
+  totals: PublicVisitTotals
+  comparison?: PublicVisitComparison
+  peak?: PublicVisitPeak | null
+  series: PublicVisitSeriesPoint[]
+  devices: PublicVisitDevice[]
+}
+
+export type PublicVisitPathStat = { path: string; pv: number; uv: number }
+export type PublicVisitReferrerStat = {
+  host: string
+  label: string
+  pv: number
+  uv: number
+}
+export type PublicVisitRecent = {
+  visitedAt: string
+  path: string
+  referrerHost: string
+  device: PublicVisitDevice['id']
+  isAdmin: boolean
+}
+
+export type AdminVisitDetails = PublicVisitOverview & {
+  audience?: PublicVisitAudience
+  paths: PublicVisitPathStat[]
+  referrers: PublicVisitReferrerStat[]
+  recent: PublicVisitRecent[]
+}
+
 export type PublicClientKeyUsage = {
   found: true
   period: string
@@ -3203,6 +3281,31 @@ export const api = {
     request<PublicUpstreamHealth>('/public/upstream-health', {
       skipAuth: true,
     }),
+  recordPublicPageVisit: (body: { path?: string; referrer?: string } = {}) =>
+    request<{ recorded: boolean }>('/public/page-visits', {
+      method: 'POST',
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
+      body: JSON.stringify({
+        path: body.path || '/status',
+        referrer: body.referrer || '',
+      }),
+    }),
+  publicPageStats: (params?: { period?: PublicVisitPeriod; timezone?: string }) =>
+    request<PublicVisitOverview>(
+      `/public/page-stats${query({
+        period: params?.period,
+        timezone: params?.timezone || 'Asia/Shanghai',
+      })}`,
+      { skipAuth: true }
+    ),
+  adminPageStats: (params?: { period?: PublicVisitPeriod; timezone?: string }) =>
+    request<AdminVisitDetails>(
+      `/page-stats${query({
+        period: params?.period,
+        timezone: params?.timezone || 'Asia/Shanghai',
+      })}`
+    ),
   lookupPublicClientKeyQuota: (apiKey: string) =>
     request<PublicClientKeyQuotaLookup>('/public/client-key-quota', {
       method: 'POST',

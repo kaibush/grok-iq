@@ -11,6 +11,7 @@ from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.egress_service import EgressService
 from app.services.export_service import ExportService
+from app.services.page_visit_service import PageVisitService
 from app.services.probe_manager import ProbeManager
 from app.services.register_integration import RegisterIntegrationService
 from app.services.request_audit_service import RequestAuditService
@@ -31,6 +32,7 @@ from .routes.integrations import (
     build_integrations_router,
     build_register_events_router,
 )
+from .routes.page_stats import build_page_stats_router
 from .routes.probes import build_probes_router
 from .routes.public import build_public_router
 from .routes.request_audits import build_request_audits_router
@@ -57,6 +59,7 @@ def build_router(
     wechat_notifications: WeChatAccountNotificationService,
     updates: UpdateCheckService,
     request_audits: RequestAuditService | None = None,
+    page_visits: PageVisitService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     require_admin = build_admin_auth_dependency(auth_service)
@@ -78,6 +81,7 @@ def build_router(
             client,
             auth_service,
             request_audits=request_audits,
+            page_visits=page_visits,
         )
     )
     router.include_router(
@@ -120,6 +124,8 @@ def build_router(
     protected.include_router(build_chat_router(chat_service))
     if request_audits is not None:
         protected.include_router(build_request_audits_router(request_audits))
+    if page_visits is not None:
+        protected.include_router(build_page_stats_router(page_visits))
     protected.include_router(build_sso_reports_router(sso_reports))
     protected.include_router(build_register_events_router(register_integration))
     protected.include_router(build_system_router(updates))

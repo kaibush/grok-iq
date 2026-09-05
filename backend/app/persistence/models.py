@@ -633,6 +633,27 @@ class RegisterCallbackDelivery(Base):
     completed_at: Mapped[datetime | None] = mapped_column(AppDateTime())
 
 
+class PageVisit(Base):
+    """Status-page visit events without raw IP addresses."""
+
+    __tablename__ = "page_visits"
+    __table_args__ = (
+        Index("ix_page_visits_visited_at", "visited_at"),
+        Index("ix_page_visits_visitor_path_visited", "visitor_id", "path", "visited_at"),
+        Index("ix_page_visits_day_key_visitor_id", "day_key", "visitor_id"),
+        Index("ix_page_visits_day_key_path", "day_key", "path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    visitor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    visited_at: Mapped[datetime] = mapped_column(AppDateTime(), nullable=False)
+    day_key: Mapped[str] = mapped_column(String(16), nullable=False)
+    path: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    referrer_host: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    device: Mapped[str] = mapped_column(String(16), default="other", nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
 def model_dict(value: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:

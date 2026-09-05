@@ -1,5 +1,5 @@
-import { useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   type PublicUpstreamAccountSummary,
   type PublicUpstreamProvider,
   type PublicUpstreamUsagePeriod,
+  type PublicVisitPeriod,
 } from '@/lib/api'
 import { formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
@@ -36,10 +37,13 @@ import { StatCard } from '@/components/stat-card'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { ClientKeyQuotaDialog } from '@/features/monitor/components/client-key-quota-dialog'
 import { PublicUsageDashboard } from '@/features/monitor/components/public-usage-dashboard'
+import { StatusVisitStats } from '@/features/monitor/components/status-visit-stats'
 import { UpstreamRequestHealth } from '@/features/monitor/components/upstream-request-health'
 
 const USAGE_PERIOD_KEY = 'grokiq.public.upstream-usage-period.v1'
 const USAGE_PERIODS: PublicUpstreamUsagePeriod[] = ['24h', '7d', '30d', '90d']
+const VISIT_PERIOD_KEY = 'grokiq.public.page-visit-period.v1'
+const VISIT_PERIODS: PublicVisitPeriod[] = ['24h', '7d', '30d', '90d']
 
 const providerMeta: Record<
   PublicUpstreamProvider,
@@ -62,6 +66,8 @@ const providerMeta: Record<
   },
 }
 
+let statusVisitRecorded = false
+
 const emptySummary: PublicUpstreamAccountSummary = {
   reachable: false,
   updatedAt: null,
@@ -80,10 +86,15 @@ const emptySummary: PublicUpstreamAccountSummary = {
 }
 
 export function PublicUpstreamStatusPage() {
+  const queryClient = useQueryClient()
   const isAdmin = Boolean(useAuthStore((state) => state.auth.accessToken))
   const periodView = usePersistedViewState(USAGE_PERIOD_KEY, { period: '24h' })
   const period = isUsagePeriod(periodView.value.period)
     ? periodView.value.period
+    : '24h'
+  const visitPeriodView = usePersistedViewState(VISIT_PERIOD_KEY, { period: '24h' })
+  const visitPeriod = isVisitPeriod(visitPeriodView.value.period)
+    ? visitPeriodView.value.period
     : '24h'
   const usageRefresh = useRef(false)
   const query = useQuery({
@@ -116,6 +127,35 @@ export function PublicUpstreamStatusPage() {
     retry: 1,
     placeholderData: (previous) => previous,
   })
+  const visitQuery = useQuery({
+    queryKey: ['public', 'page-stats', visitPeriod],
+    queryFn: () =>
+      api.publicPageStats({
+        period: visitPeriod,
+        timezone: 'Asia/Shanghai',
+      }),
+    refetchInterval: 30_000,
+    retry: 1,
+    placeholderData: (previous) => previous,
+  })
+  useEffect(() => {
+    if (statusVisitRecorded) return
+    statusVisitRecorded = true
+    let cancelled = false
+    void api
+      .recordPublicPageVisit({ path: '/status', referrer: document.referrer })
+      .then((result) => {
+        if (!cancelled && result.recorded) {
+          void queryClient.invalidateQueries({ queryKey: ['public', 'page-stats'] })
+        }
+      })
+      .catch(() => {
+        statusVisitRecorded = false
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [queryClient])
   const data = query.data ?? emptySummary
   const usageErrorMessage = usageQuery.isError
     ? getErrorMessage(usageQuery.error)
@@ -123,6 +163,9 @@ export function PublicUpstreamStatusPage() {
   const errorMessage = query.isError ? getErrorMessage(query.error) : ''
   const healthErrorMessage = healthQuery.isError
     ? getErrorMessage(healthQuery.error)
+    : ''
+  const visitErrorMessage = visitQuery.isError
+    ? getErrorMessage(visitQuery.error)
     : ''
   const hasData = query.data != null
   const ready = hasData && data.reachable && !query.isError
@@ -199,16 +242,19 @@ export function PublicUpstreamStatusPage() {
                 void query.refetch()
                 void usageQuery.refetch()
                 void healthQuery.refetch()
+                void visitQuery.refetch()
               }}
               disabled={
                 query.isFetching ||
                 usageQuery.isFetching ||
-                healthQuery.isFetching
+                healthQuery.isFetching ||
+                visitQuery.isFetching
               }
             >
               {query.isFetching ||
               usageQuery.isFetching ||
-              healthQuery.isFetching ? (
+              healthQuery.isFetching ||
+              visitQuery.isFetching ? (
                 <Loader2 className='animate-spin' />
               ) : (
                 <RefreshCw />
@@ -323,6 +369,18 @@ export function PublicUpstreamStatusPage() {
             !usageQuery.isError
           }
           error={usageErrorMessage}
+        />
+
+        <StatusVisitStats
+          period={visitPeriod}
+          onPeriodChange={(next) => visitPeriodView.setValue({ period: next })}
+          data={visitQuery.data}
+          loading={
+            (visitQuery.isPending || visitQuery.isPlaceholderData) &&
+            !visitQuery.isError
+          }
+          error={visitErrorMessage}
+          isAdmin={isAdmin}
         />
 
         {isAdmin ? (
@@ -477,4 +535,8 @@ function percent(part?: number, total?: number) {
 
 function isUsagePeriod(value: string): value is PublicUpstreamUsagePeriod {
   return USAGE_PERIODS.includes(value as PublicUpstreamUsagePeriod)
+}
+
+function isVisitPeriod(value: string): value is PublicVisitPeriod {
+  return VISIT_PERIODS.includes(value as PublicVisitPeriod)
 }

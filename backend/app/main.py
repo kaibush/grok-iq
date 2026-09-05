@@ -15,6 +15,7 @@ from app.persistence.account_repository import AccountRepository
 from app.persistence.auth_repository import AuthRepository
 from app.persistence.chat_provider_repository import ChatProviderRepository
 from app.persistence.database import Database
+from app.persistence.page_visit_repository import PageVisitRepository
 from app.persistence.probe_repository import ProbeRepository
 from app.persistence.register_event_repository import RegisterEventRepository
 from app.persistence.request_audit_repository import RequestAuditRepository
@@ -24,6 +25,7 @@ from app.services.account_service import AccountService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.egress_service import EgressService
+from app.services.page_visit_service import PageVisitService
 from app.services.probe_manager import ProbeManager
 from app.services.quality_retry_isolation import QualityRetryIsolationService
 from app.services.register_integration import RegisterIntegrationService
@@ -46,6 +48,7 @@ auth_repository = AuthRepository(database)
 chat_provider_repository = ChatProviderRepository(database, settings)
 probe_repository = ProbeRepository(database)
 request_audit_repository = RequestAuditRepository(database)
+page_visit_repository = PageVisitRepository(database)
 settings_repository = SettingsRepository(database, settings)
 register_event_repository = RegisterEventRepository(database)
 sso_report_repository = SsoReportRepository(database)
@@ -100,6 +103,10 @@ request_audit_service = RequestAuditService(
     accounts=account_repository,
     probes=probe_repository,
     account_service=account_service,
+)
+page_visit_service = PageVisitService(
+    page_visit_repository,
+    auth_service=auth_service,
 )
 quality_retry_isolation_service = QualityRetryIsolationService(
     settings=settings,
@@ -193,6 +200,7 @@ app.include_router(
         egress_service=egress_service,
         probe_manager=probe_manager,
         request_audits=request_audit_service,
+        page_visits=page_visit_service,
         scheduler=scheduler_service,
         runtime_settings_service=runtime_settings_service,
         auth_service=auth_service,
