@@ -22,6 +22,7 @@ EXPECTED_ROUTES = {
     ("POST", "/api/public/page-visits"),
     ("GET", "/api/public/page-stats"),
     ("GET", "/api/page-stats"),
+    ("GET", "/api/page-stats/visits"),
     ("GET", "/api/system/version"),
     ("POST", "/api/system/update/check"),
     ("GET", "/api/dashboard"),

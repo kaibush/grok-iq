@@ -33,6 +33,7 @@ import { Route as AuthenticatedQuarantineIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedProbeProfilesIndexRouteImport } from './routes/_authenticated/probe-profiles/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
+import { Route as AuthenticatedPageVisitsIndexRouteImport } from './routes/_authenticated/page-visits/index'
 import { Route as AuthenticatedGuideIndexRouteImport } from './routes/_authenticated/guide/index'
 import { Route as AuthenticatedEgressNodesIndexRouteImport } from './routes/_authenticated/egress-nodes/index'
 import { Route as AuthenticatedCooldownIndexRouteImport } from './routes/_authenticated/cooldown/index'
@@ -178,6 +179,12 @@ const AuthenticatedPlansIndexRoute = AuthenticatedPlansIndexRouteImport.update({
   path: '/plans/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPageVisitsIndexRoute =
+  AuthenticatedPageVisitsIndexRouteImport.update({
+    id: '/page-visits/',
+    path: '/page-visits/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedGuideIndexRoute = AuthenticatedGuideIndexRouteImport.update({
   id: '/guide/',
   path: '/guide/',
@@ -312,6 +319,7 @@ export interface FileRoutesByFullPath {
   '/cooldown/': typeof AuthenticatedCooldownIndexRoute
   '/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/guide/': typeof AuthenticatedGuideIndexRoute
+  '/page-visits/': typeof AuthenticatedPageVisitsIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/probe-profiles/': typeof AuthenticatedProbeProfilesIndexRoute
@@ -353,6 +361,7 @@ export interface FileRoutesByTo {
   '/cooldown': typeof AuthenticatedCooldownIndexRoute
   '/egress-nodes': typeof AuthenticatedEgressNodesIndexRoute
   '/guide': typeof AuthenticatedGuideIndexRoute
+  '/page-visits': typeof AuthenticatedPageVisitsIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/probe-profiles': typeof AuthenticatedProbeProfilesIndexRoute
@@ -397,6 +406,7 @@ export interface FileRoutesById {
   '/_authenticated/cooldown/': typeof AuthenticatedCooldownIndexRoute
   '/_authenticated/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/_authenticated/guide/': typeof AuthenticatedGuideIndexRoute
+  '/_authenticated/page-visits/': typeof AuthenticatedPageVisitsIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/probe-profiles/': typeof AuthenticatedProbeProfilesIndexRoute
@@ -441,6 +451,7 @@ export interface FileRouteTypes {
     | '/cooldown/'
     | '/egress-nodes/'
     | '/guide/'
+    | '/page-visits/'
     | '/plans/'
     | '/playground/'
     | '/probe-profiles/'
@@ -482,6 +493,7 @@ export interface FileRouteTypes {
     | '/cooldown'
     | '/egress-nodes'
     | '/guide'
+    | '/page-visits'
     | '/plans'
     | '/playground'
     | '/probe-profiles'
@@ -525,6 +537,7 @@ export interface FileRouteTypes {
     | '/_authenticated/cooldown/'
     | '/_authenticated/egress-nodes/'
     | '/_authenticated/guide/'
+    | '/_authenticated/page-visits/'
     | '/_authenticated/plans/'
     | '/_authenticated/playground/'
     | '/_authenticated/probe-profiles/'
@@ -722,6 +735,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlansIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/page-visits/': {
+      id: '/_authenticated/page-visits/'
+      path: '/page-visits'
+      fullPath: '/page-visits/'
+      preLoaderRoute: typeof AuthenticatedPageVisitsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/guide/': {
       id: '/_authenticated/guide/'
       path: '/guide'
@@ -889,6 +909,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedCooldownIndexRoute: typeof AuthenticatedCooldownIndexRoute
   AuthenticatedEgressNodesIndexRoute: typeof AuthenticatedEgressNodesIndexRoute
   AuthenticatedGuideIndexRoute: typeof AuthenticatedGuideIndexRoute
+  AuthenticatedPageVisitsIndexRoute: typeof AuthenticatedPageVisitsIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProbeProfilesIndexRoute: typeof AuthenticatedProbeProfilesIndexRoute
@@ -914,6 +935,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCooldownIndexRoute: AuthenticatedCooldownIndexRoute,
   AuthenticatedEgressNodesIndexRoute: AuthenticatedEgressNodesIndexRoute,
   AuthenticatedGuideIndexRoute: AuthenticatedGuideIndexRoute,
+  AuthenticatedPageVisitsIndexRoute: AuthenticatedPageVisitsIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProbeProfilesIndexRoute: AuthenticatedProbeProfilesIndexRoute,

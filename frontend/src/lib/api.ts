@@ -279,6 +279,18 @@ export type AdminVisitDetails = PublicVisitOverview & {
   recent: PublicVisitRecent[]
 }
 
+export type AdminVisitAudienceFilter = 'all' | 'public' | 'admin'
+
+export type AdminVisitLedger = {
+  period: PublicVisitPeriod
+  timezone: string
+  range: { start: string | null; end: string | null }
+  page: number
+  pageSize: number
+  total: number
+  items: PublicVisitRecent[]
+}
+
 export type PublicClientKeyUsage = {
   found: true
   period: string
@@ -3304,6 +3316,26 @@ export const api = {
       `/page-stats${query({
         period: params?.period,
         timezone: params?.timezone || 'Asia/Shanghai',
+      })}`
+    ),
+  adminPageVisits: (params?: {
+    period?: PublicVisitPeriod
+    timezone?: string
+    page?: number
+    pageSize?: number
+    device?: string
+    audience?: AdminVisitAudienceFilter
+    q?: string
+  }) =>
+    request<AdminVisitLedger>(
+      `/page-stats/visits${query({
+        period: params?.period,
+        timezone: params?.timezone || 'Asia/Shanghai',
+        page: params?.page,
+        page_size: params?.pageSize,
+        device: params?.device,
+        audience: params?.audience === 'all' ? undefined : params?.audience,
+        q: params?.q,
       })}`
     ),
   lookupPublicClientKeyQuota: (apiKey: string) =>

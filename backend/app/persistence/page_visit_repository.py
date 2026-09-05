@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 
 from .database import Database
 from .models import PageVisit, model_dict
@@ -43,6 +43,46 @@ class PageVisitRepository:
                 .order_by(PageVisit.visited_at.asc(), PageVisit.id.asc())
             ).all()
             return [model_dict(value) for value in values]
+
+    def list_page(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        device: str = "",
+        is_admin: bool | None = None,
+        query: str = "",
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]:
+        filters = [
+            PageVisit.visited_at >= start,
+            PageVisit.visited_at < end,
+        ]
+        if device:
+            filters.append(PageVisit.device == device)
+        if is_admin is not None:
+            filters.append(PageVisit.is_admin.is_(is_admin))
+        needle = "".join(ch for ch in (query or "").strip() if ch not in "%_")[:80]
+        if needle:
+            filters.append(
+                or_(
+                    PageVisit.path.contains(needle),
+                    PageVisit.referrer_host.contains(needle),
+                )
+            )
+        with self.database.session() as session:
+            total = session.scalar(
+                select(func.count()).select_from(PageVisit).where(*filters)
+            )
+            values = session.scalars(
+                select(PageVisit)
+                .where(*filters)
+                .order_by(PageVisit.visited_at.desc(), PageVisit.id.desc())
+                .offset(max(0, offset))
+                .limit(max(1, limit))
+            ).all()
+            return [model_dict(value) for value in values], int(total or 0)
 
     def prune_before(self, cutoff: datetime) -> int:
         with self.database.transaction() as session:

@@ -112,6 +112,47 @@ class PageVisitService:
     ) -> dict[str, Any]:
         return self._payload(period, timezone, include_details=True)
 
+    def visit_ledger(
+        self,
+        *,
+        period: str = "24h",
+        timezone: str = APP_TIMEZONE_NAME,
+        page: int = 1,
+        page_size: int = 50,
+        device: str = "",
+        audience: str = "all",
+        q: str = "",
+    ) -> dict[str, Any]:
+        resolved_period = _resolve_period(period)
+        zone, timezone_name = _resolve_timezone(timezone)
+        now = utc_now().astimezone(zone)
+        start, end, _grain = _window(resolved_period, now)
+        resolved_page = max(1, int(page or 1))
+        resolved_size = min(100, max(1, int(page_size or 50)))
+        resolved_device = device if device in DEVICE_LABELS else ""
+        is_admin = _audience_flag(audience)
+        rows, total = self.repository.list_page(
+            start,
+            end + timedelta(microseconds=1),
+            device=resolved_device,
+            is_admin=is_admin,
+            query=q,
+            offset=(resolved_page - 1) * resolved_size,
+            limit=resolved_size,
+        )
+        return {
+            "period": resolved_period,
+            "timezone": timezone_name,
+            "range": {
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
+            "page": resolved_page,
+            "pageSize": resolved_size,
+            "total": total,
+            "items": _visit_items(rows, zone),
+        }
+
     def _payload(
         self,
         period: str,
@@ -281,6 +322,15 @@ def _resolve_visitor_id(visitor_cookie: str) -> tuple[str, bool]:
     return uuid.uuid4().hex, True
 
 
+def _audience_flag(value: str) -> bool | None:
+    audience = (value or "").strip().lower()
+    if audience == "public":
+        return False
+    if audience == "admin":
+        return True
+    return None
+
+
 def _rows_for_day(rows: list[dict[str, Any]], day_key: str) -> list[dict[str, Any]]:
     return [row for row in rows if str(row.get("day_key") or "") == day_key]
 
@@ -424,8 +474,12 @@ def _referrers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _recent(rows: list[dict[str, Any]], zone: Any) -> list[dict[str, Any]]:
     ordered = sorted(rows, key=_recent_sort_key, reverse=True)
+    return _visit_items(ordered[:RECENT_LIMIT], zone)
+
+
+def _visit_items(rows: list[dict[str, Any]], zone: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for row in ordered[:RECENT_LIMIT]:
+    for row in rows:
         instant = _as_local(row.get("visited_at"), zone)
         items.append(
             {

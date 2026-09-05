@@ -236,3 +236,64 @@ def test_invalid_period_falls_back_to_24h(tmp_path: Path):
     payload = service.overview("nope")
     assert payload["period"] == "24h"
     assert len(payload["series"]) >= 24
+
+
+
+def test_visit_ledger_paginates_newest_first(tmp_path: Path, monkeypatch):
+    _repository, service = _build(tmp_path)
+    current = utc_now()
+    clock = {"value": current}
+
+    def fake_now():
+        return clock["value"]
+
+    monkeypatch.setattr("app.services.page_visit_service.utc_now", fake_now)
+    assert _record(service, visitor_cookie=VISITOR_A, path="/status")["recorded"] is True
+    clock["value"] = current + timedelta(seconds=10)
+    assert _record(service, visitor_cookie=VISITOR_B, path="/status/usage")["recorded"] is True
+    clock["value"] = current + timedelta(seconds=20)
+    assert _record(service, visitor_cookie=VISITOR_C, path="/status")["recorded"] is True
+
+    first = service.visit_ledger(page=1, page_size=2)
+    assert first["total"] == 3
+    assert first["page"] == 1
+    assert first["pageSize"] == 2
+    assert [item["path"] for item in first["items"]] == ["/status", "/status/usage"]
+
+    second = service.visit_ledger(page=2, page_size=2)
+    assert [item["path"] for item in second["items"]] == ["/status"]
+
+
+def test_visit_ledger_filters_admin_and_query(tmp_path: Path, monkeypatch):
+    auth = MagicMock()
+    auth.authenticate_authorization.return_value = {"sub": "admin"}
+    _repository, service = _build(tmp_path, auth_service=auth)
+    current = utc_now()
+    clock = {"value": current}
+
+    def fake_now():
+        return clock["value"]
+
+    monkeypatch.setattr("app.services.page_visit_service.utc_now", fake_now)
+    assert _record(
+        service,
+        authorization="Bearer admin-token",
+        path="/status",
+        referrer="https://github.com/kaibush",
+    )["recorded"] is True
+    clock["value"] = current + timedelta(seconds=10)
+    assert _record(
+        service,
+        authorization="",
+        visitor_cookie=VISITOR_B,
+        path="/status/usage",
+        referrer="https://t.co/abc",
+    )["recorded"] is True
+
+    admin_only = service.visit_ledger(audience="admin")
+    assert admin_only["total"] == 1
+    assert admin_only["items"][0]["isAdmin"] is True
+
+    queried = service.visit_ledger(q="github")
+    assert queried["total"] == 1
+    assert queried["items"][0]["referrerHost"] == "github.com"

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { Link } from '@tanstack/react-router'
 import { BarChart3, CalendarDays, Eye, Users } from 'lucide-react'
 import {
   Area,
@@ -12,12 +12,11 @@ import {
   YAxis,
 } from 'recharts'
 import {
-  api,
   type PublicVisitOverview,
   type PublicVisitPeriod,
   type PublicVisitSeriesPoint,
 } from '@/lib/api'
-import { formatNumber, getErrorMessage } from '@/lib/utils'
+import { formatNumber } from '@/lib/utils'
 import { EmptyState } from '@/components/page'
 import { SegmentedControl } from '@/components/segmented-control'
 import { StatCard } from '@/components/stat-card'
@@ -25,10 +24,7 @@ import { TitledCard } from '@/components/titled-card'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  StatusVisitDetailsDialog,
-  visitDeviceLabel,
-} from '@/features/monitor/components/status-visit-details-dialog'
+import { visitDeviceLabel } from '@/features/monitor/components/status-visit-details-dialog'
 
 const PV_COLOR = 'rgb(14 165 233)'
 const UV_COLOR = 'rgb(16 185 129)'
@@ -54,13 +50,6 @@ export function StatusVisitStats({
   error?: string
   isAdmin: boolean
 }) {
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const detailsQuery = useQuery({
-    queryKey: ['page-stats', 'details', period],
-    queryFn: () => api.adminPageStats({ period }),
-    enabled: detailsOpen && isAdmin,
-    staleTime: 15_000,
-  })
   const totals = data?.totals
   const comparison = data?.comparison
   const isEmpty = !loading && !error && (totals?.pv ?? 0) === 0
@@ -178,14 +167,8 @@ export function StatusVisitStats({
                 </div>
               ) : null}
               {isAdmin ? (
-                <Button
-                  type='button'
-                  size='sm'
-                  variant='outline'
-                  className='ms-auto'
-                  onClick={() => setDetailsOpen(true)}
-                >
-                  访问明细
+                <Button asChild size='sm' variant='outline' className='ms-auto'>
+                  <Link to='/page-visits'>后台明细</Link>
                 </Button>
               ) : null}
             </div>
@@ -193,24 +176,11 @@ export function StatusVisitStats({
         </div>
       </TitledCard>
 
-      {isAdmin ? (
-        <StatusVisitDetailsDialog
-          open={detailsOpen}
-          onOpenChange={setDetailsOpen}
-          data={detailsQuery.data}
-          loading={detailsQuery.isLoading}
-          error={
-            detailsQuery.isError
-              ? getErrorMessage(detailsQuery.error)
-              : undefined
-          }
-        />
-      ) : null}
     </>
   )
 }
 
-function VisitTrendChart({
+export function VisitTrendChart({
   data,
   peakLabel,
 }: {
