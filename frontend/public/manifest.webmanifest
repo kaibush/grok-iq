@@ -1,0 +1,29 @@
+{
+  "name": "GrokIQ",
+  "short_name": "GrokIQ",
+  "description": "Grok 账号多轮、多出口质量探针与风险监控。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "zh-CN",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/images/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/images/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
