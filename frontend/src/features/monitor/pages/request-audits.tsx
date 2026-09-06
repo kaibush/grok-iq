@@ -149,6 +149,19 @@ import { RequestAuditClientBoard } from '@/features/monitor/components/request-a
 import { RequestAuditQualityBoard } from '@/features/monitor/components/request-audit-quality-board'
 import { RequestAuditAccountHistoryBoard } from '@/features/monitor/components/request-audit-account-history'
 import {
+  AuditAttemptsPanel,
+  AuditBillingPanel,
+  AuditGatewayFields,
+  AuditRequestPanel,
+  AuditUsageCell,
+  AttemptCountHint,
+  ClientIpHint,
+  GatewayHydrationNote,
+  SourcesHint,
+  reasoningEffortLabel,
+  useHydratedRequestAudit,
+} from '@/features/monitor/pages/request-audit-gateway-view'
+import {
   formatSampleWindow,
   streamSampleDiagnostics,
   streamSamplePreview,
@@ -700,41 +713,6 @@ function Tps({
       {value == null ? '—' : `${formatNumber(value)} Token/s`}
     </span>
   )
-}
-
-const reasoningEffortLabels: Record<string, string> = {
-  auto: '自动',
-  none: '关闭',
-  low: '低',
-  medium: '中',
-  high: '高',
-  xhigh: '极高',
-  fixed: '固定',
-}
-
-function reasoningEffortLabel(value?: string | null) {
-  return reasoningEffortLabels[value?.trim().toLowerCase() || ''] || ''
-}
-
-function reasoningEffortClass(value?: string | null) {
-  switch (value?.trim().toLowerCase()) {
-    case 'none':
-      return 'text-muted-foreground'
-    case 'low':
-      return 'text-sky-700 dark:text-sky-300'
-    case 'medium':
-      return 'text-amber-700 dark:text-amber-300'
-    case 'high':
-      return 'text-orange-700 dark:text-orange-300'
-    case 'xhigh':
-      return 'text-rose-700 dark:text-rose-300'
-    case 'auto':
-      return 'text-violet-700 dark:text-violet-300'
-    case 'fixed':
-      return 'text-indigo-700 dark:text-indigo-300'
-    default:
-      return 'text-muted-foreground'
-  }
 }
 
 function accountHasRiskEvidence(account: RequestAuditAccountRisk) {
@@ -3992,7 +3970,7 @@ export function RequestAuditsPage() {
               </div>
               <div className='overflow-x-auto'>
                 <Table
-                  className='min-w-[1380px] text-xs leading-4 [&_td]:py-1.5 [&_th]:h-9'
+                  className='min-w-[1560px] text-xs leading-4 [&_td]:py-1.5 [&_th]:h-9'
                   rememberRowKey='request-audit-ledger'
                 >
                   <TableHeader>
@@ -4016,7 +3994,7 @@ export function RequestAuditsPage() {
                       <TableHead>客户端 Key</TableHead>
                       <TableHead>代理节点</TableHead>
                       <TableHead>模型</TableHead>
-                      <TableHead>输出 Token</TableHead>
+                      <TableHead>用量 / 计费</TableHead>
                       <TableHead>速度</TableHead>
                       <TableHead>状态</TableHead>
                       <TableHead>
@@ -4434,7 +4412,7 @@ export function RequestAuditsPage() {
 
 function AuditRecordDetailDialog({
   open,
-  record,
+  record: source,
   thresholds,
   probeSamples,
   probeLoading,
@@ -4451,6 +4429,12 @@ function AuditRecordDetailDialog({
   onProbeRetry: () => void
   onOpenChange: (open: boolean) => void
 }) {
+  const {
+    view,
+    loading: gatewayLoading,
+    error: gatewayError,
+  } = useHydratedRequestAudit(source, open)
+  const record = view ?? source
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size='wide' className='overflow-hidden'>
@@ -4468,6 +4452,11 @@ function AuditRecordDetailDialog({
 
         {record && (
           <div className='min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pe-1'>
+            <GatewayHydrationNote
+              loading={gatewayLoading}
+              error={gatewayError}
+              hydrated={record.gatewayHydrated}
+            />
             <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
               <div className='rounded-lg border bg-muted/15 p-3'>
                 <div className='text-[11px] text-muted-foreground'>速度</div>
@@ -4603,6 +4592,7 @@ function AuditRecordDetailDialog({
                 value={formatNumber(record.totalTokens, 0)}
                 mono
               />
+              <AuditGatewayFields record={record} />
             </dl>
 
             <div className='rounded-lg border border-primary/25 bg-primary/5 p-3'>
@@ -4701,7 +4691,10 @@ function AuditRecordDetailDialog({
               </p>
             </div>
 
+            <AuditBillingPanel record={record} />
             <StreamSamplePanel record={record} />
+            <AuditRequestPanel record={record} />
+            <AuditAttemptsPanel record={record} />
 
             <div className='space-y-3'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -5823,6 +5816,7 @@ const AuditRow = memo(function AuditRow({
             ID {row.clientKeyId}
           </div>
         ) : null}
+        <ClientIpHint row={row} />
       </TableCell>
       <TableCell className='align-middle !whitespace-normal'>
         <NodeText row={row} />
@@ -5840,26 +5834,10 @@ const AuditRow = memo(function AuditRow({
         >
           {row.modelUpstreamModel || row.operation || 'responses'}
         </div>
+        <SourcesHint row={row} />
       </TableCell>
-      <TableCell className='align-middle font-mono text-xs tabular-nums'>
-        {formatNumber(row.outputTokens, 0)}
-        {(row.reasoningTokens > 0 || reasoningEffortLabel(row.reasoningEffort)) && (
-          <div className='text-[10px] text-muted-foreground'>
-            {row.reasoningTokens > 0
-              ? `推理 ${formatNumber(row.reasoningTokens, 0)}`
-              : '推理 0'}
-            {reasoningEffortLabel(row.reasoningEffort) ? (
-              <span
-                className={cn(
-                  'ms-1 font-medium',
-                  reasoningEffortClass(row.reasoningEffort)
-                )}
-              >
-                · 思考 {reasoningEffortLabel(row.reasoningEffort)}
-              </span>
-            ) : null}
-          </div>
-        )}
+      <TableCell className='align-middle'>
+        <AuditUsageCell row={row} />
       </TableCell>
       <TableCell className='align-middle'>
         <AuditThroughputCell row={row} />
@@ -5883,6 +5861,7 @@ const AuditRow = memo(function AuditRow({
             {auditErrorLabel(auditErrorCode(row))}
           </div>
         ) : null}
+        <AttemptCountHint row={row} />
       </TableCell>
       <TableCell className='align-middle'>
         <div className='flex flex-wrap items-center gap-1.5'>

@@ -279,6 +279,16 @@ COMPATIBILITY_COLUMNS = {
             "ALTER TABLE request_audit_records ADD COLUMN reasoning_effort "
             "VARCHAR(16) NOT NULL DEFAULT ''",
         ),
+        (
+            "gateway",
+            "ALTER TABLE request_audit_records ADD COLUMN gateway "
+            "JSON NOT NULL DEFAULT '{}'",
+        ),
+        (
+            "request_headers",
+            "ALTER TABLE request_audit_records ADD COLUMN request_headers "
+            "JSON NOT NULL DEFAULT '{}'",
+        ),
     ],
     "page_visits": [
         (

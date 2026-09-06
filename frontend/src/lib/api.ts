@@ -966,6 +966,46 @@ export type RequestAuditStreamSample = {
   truncated?: boolean
 }
 
+export type RequestAuditBillingComponent = {
+  kind: string
+  unit: string
+  quantity: number
+  unitPriceInUsdTicks: number
+  subtotalInUsdTicks: number
+}
+
+export type RequestAuditBilling = {
+  source?: string
+  method?: string
+  model?: string
+  version?: string
+  tier?: string
+  components?: RequestAuditBillingComponent[]
+  totalInUsdTicks?: number
+}
+
+export type RequestAuditAttempt = {
+  id: string
+  number: number
+  source: string
+  stage: string
+  accountId?: number
+  accountName?: string
+  method?: string
+  requestPath?: string
+  upstreamUrl?: string
+  startedAt?: string
+  durationMs?: number
+  upstreamStatusCode?: number
+  upstreamStatus?: string
+  responseHeaders?: Record<string, string[]>
+  responseBody?: string
+  responseBodyEncoding?: string
+  responseBodyTruncated?: boolean
+  transportError?: string
+  errorChain?: Array<{ type: string; message: string }>
+}
+
 export type RequestAuditRecord = {
   id: string
   requestId: string
@@ -1009,6 +1049,28 @@ export type RequestAuditRecord = {
   probeSampleCount: number
   probeSamples: RequestAuditProbeContext[]
   streamSample?: RequestAuditStreamSample
+  clientIp?: string
+  modelRouteId?: string
+  usageSource?: string
+  cachedInputTokens?: number
+  mediaOutputImages?: number
+  mediaOutputSeconds?: number
+  costInUsdTicks?: number
+  estimatedCostInUsdTicks?: number
+  pricingModel?: string
+  pricingVersion?: string
+  billing?: RequestAuditBilling
+  numSourcesUsed?: number
+  numServerSideToolsUsed?: number
+  contextInputTokens?: number
+  contextOutputTokens?: number
+  requestMethod?: string
+  requestPath?: string
+  requestHeaders?: Record<string, string[]>
+  attemptCount?: number
+  attempts?: RequestAuditAttempt[]
+  gatewayHydrated?: boolean
+  gatewayError?: string
   createdAt: string | null
 }
 
@@ -3579,6 +3641,8 @@ export const api = {
     request<Page<EgressNode>>(`/egress-nodes${query(params)}`),
   requestAudits: (params: Record<string, string | number | undefined> = {}) =>
     request<RequestAuditPage>(`/request-audits${query(params)}`),
+  requestAudit: (id: string) =>
+    request<RequestAuditRecord>(`/request-audits/${encodeURIComponent(id)}`),
   requestAuditSummary: (
     params: Record<string, string | number | undefined> = {}
   ) =>

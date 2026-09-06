@@ -581,6 +581,18 @@ class Grok2APIClient:
             timeout=timeout,
         )
 
+    async def get_request_audit(self, audit_id: str, *, timeout: float = 30) -> dict[str, Any]:
+        """Read one grok2api request-audit detail, including failed attempts."""
+
+        key = str(audit_id or "").strip()
+        if not key:
+            raise IntegrationError("请求审计 ID 无效")
+        return await self.admin_request(
+            "GET",
+            f"/api/admin/v1/request-audits/{key}",
+            timeout=timeout,
+        )
+
     async def get_dashboard(
         self,
         *,

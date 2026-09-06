@@ -118,14 +118,18 @@ class RequestAuditRepository:
             "risk_level",
             "risk_reasons",
             "stream_sample",
+            "gateway",
+            "request_headers",
             "raw",
             "created_at",
             "fetched_at",
         }
-        payloads = [
-            {key: item for key, item in record.items() if key in columns}
-            for record in unique.values()
-        ]
+        payloads = []
+        for record in unique.values():
+            payload = {key: item for key, item in record.items() if key in columns}
+            payload.setdefault("gateway", {})
+            payload.setdefault("request_headers", {})
+            payloads.append(payload)
         with self.database.transaction() as session:
             result = session.execute(
                 sqlite_insert(RequestAuditRecord.__table__)
@@ -235,6 +239,67 @@ class RequestAuditRepository:
             if isinstance(sample, dict) and sample:
                 result[str(upstream_id)] = sample
         return result
+
+    def refresh_gateway_snapshots(self, items: Iterable[dict[str, Any]]) -> int:
+        values: dict[str, dict[str, Any]] = {}
+        for item in items:
+            upstream_id = str(
+                item.get("id") or item.get("upstream_id") or item.get("requestId") or ""
+            ).strip()
+            if not upstream_id:
+                continue
+            snapshot = item.get("gateway")
+            headers = item.get("request_headers")
+            if headers is None:
+                headers = item.get("requestHeaders")
+            if not isinstance(snapshot, dict):
+                snapshot = {}
+            if not isinstance(headers, dict):
+                headers = {}
+            if snapshot or headers:
+                values[upstream_id] = {
+                    "gateway": snapshot,
+                    "request_headers": headers,
+                }
+        if not values:
+            return 0
+        updated = 0
+        empty_gateway = _empty_json_clause(RequestAuditRecord.gateway)
+        empty_headers = _empty_json_clause(RequestAuditRecord.request_headers)
+        with self.database.transaction() as session:
+            for upstream_id, payload in values.items():
+                changed = False
+                if payload["gateway"]:
+                    result = session.execute(
+                        update(RequestAuditRecord)
+                        .where(
+                            RequestAuditRecord.upstream_id == upstream_id,
+                            empty_gateway,
+                        )
+                        .values(gateway=payload["gateway"])
+                    )
+                    changed = changed or int(result.rowcount or 0) > 0
+                if payload["request_headers"]:
+                    result = session.execute(
+                        update(RequestAuditRecord)
+                        .where(
+                            RequestAuditRecord.upstream_id == upstream_id,
+                            empty_headers,
+                        )
+                        .values(request_headers=payload["request_headers"])
+                    )
+                    changed = changed or int(result.rowcount or 0) > 0
+                if changed:
+                    updated += 1
+        return updated
+
+    def get_record(self, upstream_id: str) -> dict[str, Any] | None:
+        key = str(upstream_id or "").strip()
+        if not key:
+            return None
+        with self.database.session() as session:
+            value = session.get(RequestAuditRecord, key)
+            return model_dict(value) if value else None
 
     def refresh_reasoning_efforts(self, items: Iterable[dict[str, Any]]) -> int:
         values: dict[str, str] = {}
@@ -945,9 +1010,11 @@ class RequestAuditRepository:
         return utc_now() - timedelta(days=max(1, days))
 
 def _empty_stream_sample_clause():
-    stored = func.trim(
-        func.coalesce(cast(RequestAuditRecord.stream_sample, String), "")
-    )
+    return _empty_json_clause(RequestAuditRecord.stream_sample)
+
+
+def _empty_json_clause(column):
+    stored = func.trim(func.coalesce(cast(column, String), ""))
     return or_(stored == "", stored == "{}", stored == "null")
 
 
@@ -955,13 +1022,14 @@ def _audit_record_query():
     return select(RequestAuditRecord).options(
         defer(RequestAuditRecord.raw),
         defer(RequestAuditRecord.stream_sample),
+        defer(RequestAuditRecord.request_headers),
     )
 
 
 def _audit_record_dict(value: RequestAuditRecord) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:
-        if column.name in {"raw", "stream_sample"}:
+        if column.name in {"raw", "stream_sample", "request_headers"}:
             continue
         item = getattr(value, column.name)
         result[column.name] = (

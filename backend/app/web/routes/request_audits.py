@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.services.request_audit_service import RequestAuditService
 from app.web.schemas import RequestAuditScanInput
@@ -118,6 +118,17 @@ def build_request_audits_router(service: RequestAuditService) -> APIRouter:
     ) -> dict[str, Any]:
         disable_client_cache(response)
         return service.probe_context(request_id=request_id, audit_id=audit_id)
+
+    @router.get("/request-audits/{audit_id}")
+    async def request_audit_detail(
+        audit_id: str,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        try:
+            return await service.get_detail(audit_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc) or "请求审计不存在") from exc
 
     @router.post("/request-audits/scan")
     async def scan_request_audits(

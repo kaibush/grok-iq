@@ -374,6 +374,12 @@ class RequestAuditRecord(Base):
     risk_level: Mapped[str] = mapped_column(String(24), default="normal", nullable=False)
     risk_reasons: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     stream_sample: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    gateway: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default="{}", nullable=False
+    )
+    request_headers: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default="{}", nullable=False
+    )
     raw: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(AppDateTime(), nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(AppDateTime(), default=utc_now, nullable=False)

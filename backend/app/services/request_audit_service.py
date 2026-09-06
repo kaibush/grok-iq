@@ -31,6 +31,13 @@ from app.persistence.account_repository import AccountRepository
 from app.persistence.probe_repository import ProbeRepository
 from app.persistence.request_audit_repository import RequestAuditRepository
 from app.reasoning_policy import canonical_reasoning_model
+from app.services.request_audit_gateway import (
+    apply_gateway_to_payload,
+    gateway_snapshot_has_content,
+    normalize_attempts,
+    normalize_gateway_snapshot,
+    normalize_request_headers,
+)
 
 if TYPE_CHECKING:
     from app.services.account_service import AccountService
@@ -64,6 +71,8 @@ REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_KEY = "request_audit_stream_sample_projecti
 REQUEST_AUDIT_STREAM_SAMPLE_BACKFILL_MAX_PAGES = 10
 REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_KEY = "request_audit_reasoning_effort_projection_v1"
 REQUEST_AUDIT_REASONING_EFFORT_BACKFILL_MAX_PAGES = 10
+REQUEST_AUDIT_GATEWAY_BACKFILL_KEY = "request_audit_gateway_projection_v1"
+REQUEST_AUDIT_GATEWAY_BACKFILL_MAX_PAGES = 10
 REQUEST_HEALTH_WINDOWS = (("15m", 15), ("30m", 30), ("1h", 60))
 REQUEST_HEALTH_SERIES_BUCKET_MINUTES = 5
 REQUEST_HEALTH_SERIES_BUCKETS = 12
@@ -194,6 +203,29 @@ def _reasoning_effort_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]
         upstream_id = str(item.get("id") or item.get("requestId") or "").strip()
         if upstream_id:
             values.append({"id": upstream_id, "reasoningEffort": effort})
+    return values
+
+
+def _gateway_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider") or "") != "grok_build":
+            continue
+        snapshot = normalize_gateway_snapshot(item)
+        headers = normalize_request_headers(item.get("requestHeaders"))
+        if not snapshot and not headers:
+            continue
+        upstream_id = str(item.get("id") or item.get("requestId") or "").strip()
+        if upstream_id:
+            values.append(
+                {
+                    "id": upstream_id,
+                    "gateway": snapshot,
+                    "request_headers": headers,
+                }
+            )
     return values
 
 
@@ -1232,6 +1264,73 @@ class RequestAuditService:
             }
         return {"complete": False, "pages": pages, "updated": updated, "error": ""}
 
+    async def _backfill_gateway_projection(self) -> dict[str, Any]:
+        raw_state = self.repository.metadata_value(REQUEST_AUDIT_GATEWAY_BACKFILL_KEY)
+        if raw_state == "completed":
+            return {"complete": True, "pages": 0, "updated": 0, "error": ""}
+        try:
+            state = json.loads(raw_state) if raw_state else {}
+        except (TypeError, ValueError):
+            state = {}
+        cursor = str(state.get("cursor") or "") if isinstance(state, dict) else ""
+        pages = 0
+        updated = 0
+        try:
+            while pages < REQUEST_AUDIT_GATEWAY_BACKFILL_MAX_PAGES:
+                payload = await self.client.list_request_audits(
+                    cursor=cursor,
+                    page_size=REQUEST_AUDIT_PAGE_SIZE,
+                    period="90d",
+                )
+                items = payload.get("items", [])
+                if not isinstance(items, list) or not items:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_GATEWAY_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                pages += 1
+                updated += self.repository.refresh_gateway_snapshots(
+                    _gateway_refresh_items(items)
+                )
+                next_cursor = str(payload.get("nextCursor") or "")
+                has_more = bool(payload.get("hasMore")) and bool(next_cursor)
+                if not has_more:
+                    self.repository.set_metadata_value(
+                        REQUEST_AUDIT_GATEWAY_BACKFILL_KEY, "completed"
+                    )
+                    return {
+                        "complete": True,
+                        "pages": pages,
+                        "updated": updated,
+                        "error": "",
+                    }
+                if next_cursor == cursor:
+                    raise RuntimeError("网关审计回填游标未推进")
+                cursor = next_cursor
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_GATEWAY_BACKFILL_KEY,
+                    json.dumps({"cursor": cursor}),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if getattr(exc, "error_code", "") == "invalidCursor":
+                self.repository.set_metadata_value(
+                    REQUEST_AUDIT_GATEWAY_BACKFILL_KEY, ""
+                )
+            return {
+                "complete": False,
+                "pages": pages,
+                "updated": updated,
+                "error": str(exc),
+            }
+        return {"complete": False, "pages": pages, "updated": updated, "error": ""}
+
     def resolve_window(
         self,
         *,
@@ -1455,6 +1554,7 @@ class RequestAuditService:
             client_key_backfill = await self._backfill_client_key_projection()
             stream_sample_backfill = await self._backfill_stream_sample_projection()
             reasoning_effort_backfill = await self._backfill_reasoning_effort_projection()
+            gateway_backfill = await self._backfill_gateway_projection()
             try:
                 egress_map = await self._egress_map()
             except Exception as exc:  # node labels are supplemental
@@ -1515,6 +1615,9 @@ class RequestAuditService:
                 )
                 self.repository.refresh_reasoning_efforts(
                     _reasoning_effort_refresh_items(items)
+                )
+                self.repository.refresh_gateway_snapshots(
+                    _gateway_refresh_items(items)
                 )
                 page_has_overlap = False
                 page_records: list[dict[str, Any]] = []
@@ -1668,6 +1771,7 @@ class RequestAuditService:
                 "clientKeyBackfill": client_key_backfill,
                 "streamSampleBackfill": stream_sample_backfill,
                 "reasoningEffortBackfill": reasoning_effort_backfill,
+                "gatewayBackfill": gateway_backfill,
                 "preDisableChecks": pre_disable_checks,
                 "state": self._state_payload(saved_state, window=window),
                 "activity": activity,
@@ -2818,6 +2922,8 @@ class RequestAuditService:
             "risk_level": risk_level,
             "risk_reasons": reasons,
             "stream_sample": _normalize_stream_sample(item.get("streamSample")),
+            "gateway": normalize_gateway_snapshot(item),
+            "request_headers": normalize_request_headers(item.get("requestHeaders")),
             "raw": raw,
             "created_at": created_at,
             "fetched_at": utc_now(),
@@ -2901,6 +3007,86 @@ class RequestAuditService:
                 "idleIntervalSeconds": self.settings.request_audit_idle_scan_interval_seconds,
             },
         }
+
+    async def get_detail(self, audit_id: str) -> dict[str, Any]:
+        upstream_id = str(audit_id or "").strip()
+        if not upstream_id:
+            raise LookupError("请求审计不存在")
+        loader = getattr(self.repository, "get_record", None)
+        row = loader(upstream_id) if callable(loader) else None
+        if not row:
+            raise LookupError("请求审计不存在")
+        evaluations = self._audit_risk_evaluations([row])
+        probe_map = self._probe_sample_map([row])
+        verification_map = self.repository.verifications_for_audits([upstream_id])
+        account_ids = self._record_account_ids([row])
+        try:
+            upstream_accounts = await self._upstream_account_map(account_ids)
+        except Exception:
+            upstream_accounts = self._cached_account_map(account_ids)
+        local_sample = row.get("stream_sample") if isinstance(row.get("stream_sample"), dict) else None
+        local_headers = (
+            row.get("request_headers")
+            if isinstance(row.get("request_headers"), dict)
+            else None
+        )
+        attempts: list[dict[str, Any]] = []
+        gateway_error = ""
+        hydrated = False
+        getter = getattr(self.client, "get_request_audit", None)
+        if callable(getter):
+            try:
+                remote = await getter(upstream_id)
+            except Exception as exc:
+                remote = None
+                gateway_error = str(exc)
+            else:
+                remote_payload = remote if isinstance(remote, dict) else {}
+                audit = remote_payload.get("audit")
+                if not isinstance(audit, dict):
+                    audit = remote_payload
+                remote_attempts = normalize_attempts(remote_payload.get("attempts"))
+                attempts = remote_attempts
+                snapshot = normalize_gateway_snapshot(audit)
+                headers = normalize_request_headers(audit.get("requestHeaders"))
+                sample = _normalize_stream_sample(audit.get("streamSample"))
+                persist: dict[str, Any] = {"id": upstream_id}
+                if snapshot and not gateway_snapshot_has_content(row.get("gateway")):
+                    persist["gateway"] = snapshot
+                    row["gateway"] = snapshot
+                if headers and not (
+                    isinstance(local_headers, dict) and local_headers
+                ):
+                    persist["request_headers"] = headers
+                    local_headers = headers
+                if sample and not (isinstance(local_sample, dict) and local_sample):
+                    local_sample = sample
+                    sample_saver = getattr(self.repository, "refresh_stream_samples", None)
+                    if callable(sample_saver):
+                        sample_saver(
+                            [{"id": upstream_id, "streamSample": sample}]
+                        )
+                if persist.keys() - {"id"}:
+                    saver = getattr(self.repository, "refresh_gateway_snapshots", None)
+                    if callable(saver):
+                        saver([persist])
+                hydrated = True
+        return self._record_payload(
+            row,
+            probe_samples=self._probe_samples_for_record(row, probe_map),
+            upstream_account=(
+                upstream_accounts.get(int(row["account_id"]))
+                if row.get("account_id")
+                else None
+            ),
+            verification=verification_map.get(upstream_id),
+            evaluation=self._evaluation_for(row, evaluations),
+            stream_sample=local_sample,
+            request_headers=local_headers,
+            attempts=attempts,
+            gateway_hydrated=hydrated,
+            gateway_error=gateway_error,
+        )
 
     async def list_page(
         self,
@@ -4758,6 +4944,10 @@ class RequestAuditService:
         verification: dict[str, Any] | None = None,
         evaluation: AuditRiskEvaluation | None = None,
         stream_sample: dict[str, Any] | None = None,
+        request_headers: dict[str, Any] | None = None,
+        attempts: list[dict[str, Any]] | None = None,
+        gateway_hydrated: bool | None = None,
+        gateway_error: str = "",
     ) -> dict[str, Any]:
         evaluation = evaluation or self._evaluation_for(row)
         classification = evaluation.classification
@@ -4836,6 +5026,20 @@ class RequestAuditService:
             sample = raw_sample if isinstance(raw_sample, dict) else None
         if sample:
             payload["streamSample"] = sample
+        gateway = row.get("gateway") if isinstance(row.get("gateway"), dict) else {}
+        apply_gateway_to_payload(payload, gateway)
+        headers = request_headers if isinstance(request_headers, dict) else None
+        if headers is None:
+            raw_headers = row.get("request_headers")
+            headers = raw_headers if isinstance(raw_headers, dict) else None
+        if headers:
+            payload["requestHeaders"] = headers
+        if attempts:
+            payload["attempts"] = attempts
+        if gateway_hydrated is not None:
+            payload["gatewayHydrated"] = bool(gateway_hydrated)
+        if gateway_error:
+            payload["gatewayError"] = gateway_error
         return payload
 
     @classmethod

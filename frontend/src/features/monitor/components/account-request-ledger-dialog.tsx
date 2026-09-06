@@ -54,6 +54,17 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
+  AuditAttemptsPanel,
+  AuditBillingPanel,
+  AuditGatewayFields,
+  AuditRequestPanel,
+  AuditUsageCell,
+  AttemptCountHint,
+  GatewayHydrationNote,
+  reasoningEffortLabel,
+  useHydratedRequestAudit,
+} from '@/features/monitor/pages/request-audit-gateway-view'
+import {
   formatSampleWindow,
   streamSampleDiagnostics,
   streamSamplePreview,
@@ -86,41 +97,6 @@ const RISK_OPTIONS: Array<{
 ]
 
 const FALLBACK_THRESHOLDS: RequestAuditThresholds = { watch: 150, high: 500 }
-
-const REASONING_EFFORT_LABELS: Record<string, string> = {
-  auto: '自动',
-  none: '关闭',
-  low: '低',
-  medium: '中',
-  high: '高',
-  xhigh: '极高',
-  fixed: '固定',
-}
-
-function reasoningEffortLabel(value?: string | null) {
-  return REASONING_EFFORT_LABELS[value?.trim().toLowerCase() || ''] || ''
-}
-
-function reasoningEffortClass(value?: string | null) {
-  switch (value?.trim().toLowerCase()) {
-    case 'none':
-      return 'text-muted-foreground'
-    case 'low':
-      return 'text-sky-700 dark:text-sky-300'
-    case 'medium':
-      return 'text-amber-700 dark:text-amber-300'
-    case 'high':
-      return 'text-orange-700 dark:text-orange-300'
-    case 'xhigh':
-      return 'text-rose-700 dark:text-rose-300'
-    case 'auto':
-      return 'text-violet-700 dark:text-violet-300'
-    case 'fixed':
-      return 'text-indigo-700 dark:text-indigo-300'
-    default:
-      return 'text-muted-foreground'
-  }
-}
 
 function actionStatusLabel(record: RequestAuditRecord) {
   const check = record.preDisableCheck
@@ -379,14 +355,14 @@ export function AccountRequestLedgerDialog({
                   aria-busy={query.isFetching}
                 >
                   <Table
-                    className='min-w-[980px] text-xs leading-4 [&_td]:py-1.5 [&_th]:h-9'
+                    className='min-w-[1080px] text-xs leading-4 [&_td]:py-1.5 [&_th]:h-9'
                     rememberRowKey='quarantine-account-ledger'
                   >
                     <TableHeader>
                       <TableRow>
                         <TableHead>时间 / 请求</TableHead>
                         <TableHead>模型</TableHead>
-                        <TableHead>输出 Token</TableHead>
+                        <TableHead>用量 / 计费</TableHead>
                         <TableHead>速度</TableHead>
                         <TableHead>状态</TableHead>
                         <TableHead>风险</TableHead>
@@ -489,25 +465,8 @@ function LedgerRow({
           {row.modelUpstreamModel || row.operation || 'responses'}
         </div>
       </TableCell>
-      <TableCell className='align-middle font-mono text-xs tabular-nums'>
-        {formatNumber(row.outputTokens, 0)}
-        {(row.reasoningTokens > 0 || reasoningEffortLabel(row.reasoningEffort)) && (
-          <div className='text-[10px] text-muted-foreground'>
-            {row.reasoningTokens > 0
-              ? `推理 ${formatNumber(row.reasoningTokens, 0)}`
-              : '推理 0'}
-            {reasoningEffortLabel(row.reasoningEffort) ? (
-              <span
-                className={cn(
-                  'ms-1 font-medium',
-                  reasoningEffortClass(row.reasoningEffort)
-                )}
-              >
-                · 思考 {reasoningEffortLabel(row.reasoningEffort)}
-              </span>
-            ) : null}
-          </div>
-        )}
+      <TableCell className='align-middle'>
+        <AuditUsageCell row={row} />
       </TableCell>
       <TableCell className='align-middle'>
         <Tps
@@ -542,6 +501,7 @@ function LedgerRow({
             {auditErrorLabel(errorCode)}
           </div>
         ) : null}
+        <AttemptCountHint row={row} />
       </TableCell>
       <TableCell className='align-middle'>
         <div className='flex flex-wrap items-center gap-1.5'>
@@ -574,12 +534,15 @@ function LedgerRow({
 }
 
 function LedgerDetail({
-  record,
+  record: source,
   thresholds,
 }: {
   record: RequestAuditRecord
   thresholds: RequestAuditThresholds
 }) {
+  const { view, loading: gatewayLoading, error: gatewayError } =
+    useHydratedRequestAudit(source, true)
+  const record = view ?? source
   const errorCode = auditErrorCode(record)
   const actionLabel = actionStatusLabel(record)
   const sample = record.streamSample
@@ -587,6 +550,11 @@ function LedgerDetail({
   const warnings = streamSampleWarnings(diagnostics)
   return (
     <div className='min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pe-1'>
+      <GatewayHydrationNote
+        loading={gatewayLoading}
+        error={gatewayError}
+        hydrated={record.gatewayHydrated}
+      />
       <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
         <DetailStat label='速度'>
           <Tps value={record.tps} />
@@ -666,6 +634,7 @@ function LedgerDetail({
               : '无'
           }
         />
+        <AuditGatewayFields record={record} />
       </dl>
 
       {record.riskReasons.length > 0 ? (
@@ -685,7 +654,7 @@ function LedgerDetail({
         <div>
           <h3 className='text-sm font-semibold'>内容样本</h3>
           <p className='mt-1 text-xs text-muted-foreground'>
-            截取思考和输出的开头/结尾，用来核对高 Token/s 是否真有推理正文。
+            截取思考和输出的开头/结尾。流式来自实时分片；非流式来自内部完整结果，方便人工核对。
           </p>
         </div>
         {!diagnostics.hasSample || !sample ? (
@@ -734,6 +703,9 @@ function LedgerDetail({
           </>
         )}
       </div>
+      <AuditBillingPanel record={record} />
+      <AuditRequestPanel record={record} />
+      <AuditAttemptsPanel record={record} />
     </div>
   )
 }
