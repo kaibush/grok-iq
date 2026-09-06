@@ -1,8 +1,9 @@
 # GrokIQ frontend and API.
-# The production frontend runs on nginx at 8091; API requests bypass nginx and
-# connect directly to the backend at 8090.
+# Public pages are the production SPA in /var/www/grok-iq (see deploy/publish-frontend.sh).
+# API requests bypass the static files and connect directly to the backend at 8090.
 # SSE/chat streams must not pass through encode; gzip waits for EOF.
-monitor.lvyrix.com {
+monitor.lvyrix.com, monitor.agentra.com.cn {
+	import access_log
 	@api path /api /api/*
 	handle @api {
 		reverse_proxy 127.0.0.1:8090 {
@@ -18,6 +19,8 @@ monitor.lvyrix.com {
 
 	handle {
 		encode zstd gzip
-		reverse_proxy 127.0.0.1:8091
+		root * /var/www/grok-iq
+		try_files {path} /index.html
+		file_server
 	}
 }

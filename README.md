@@ -397,6 +397,14 @@ docker compose up -d
 
 数据刷新仍走页面内接口轮询；切到后台会被 iOS 挂起，再次打开时会重新拉数。未启用 Service Worker，避免 iOS 把旧前端钉死在主屏幕应用里。
 
+公网域名应提供生产构建，不要把 Vite 开发服务暴露给手机。本机发布：
+
+```bash
+./deploy/publish-frontend.sh
+```
+
+前端代码更新后需要重新发布，主屏幕应用才会拿到新资源。若图标或旧页面仍在，删除主屏幕图标后重新添加即可。
+
 ### 版本检查与更新
 
 GrokIQ 启动后会立即读取 `kaibush/grok-iq` 的最新 GitHub Release，之后每 1 小时检查一次。
