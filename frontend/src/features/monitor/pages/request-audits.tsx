@@ -5081,7 +5081,7 @@ function SampleSnippet({ title, value }: { title: string; value?: string }) {
         <span className='text-[11px] font-medium'>{title}</span>
         <CopyButton value={value} className='size-6' />
       </div>
-      <pre className='max-h-40 overflow-auto px-3 pb-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap'>
+      <pre className='max-h-64 overflow-auto px-3 pb-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap'>
         {value}
       </pre>
     </section>
