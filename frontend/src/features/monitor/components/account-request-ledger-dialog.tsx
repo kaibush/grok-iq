@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
@@ -56,6 +56,7 @@ import {
 import {
   formatSampleWindow,
   streamSampleDiagnostics,
+  streamSamplePreview,
   streamSampleWarnings,
 } from '@/features/monitor/pages/request-audit-stream-sample'
 import type { AccountIdentity } from '@/features/monitor/components/account-upstream-dialog'
@@ -206,9 +207,9 @@ export function AccountRequestLedgerDialog({
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [selected, setSelected] = useState<RequestAuditRecord | null>(null)
-
-  useEffect(() => {
-    if (!open) return
+  const [resetNonce, setResetNonce] = useState({ open, accountId })
+  if (open && (resetNonce.open !== open || resetNonce.accountId !== accountId)) {
+    setResetNonce({ open, accountId })
     const nextWindow = initialWindow?.window ?? 'today'
     setWindowPreset(nextWindow)
     setCustomRange(
@@ -220,7 +221,9 @@ export function AccountRequestLedgerDialog({
     setPage(1)
     setPageSize(25)
     setSelected(null)
-  }, [accountId, open])
+  } else if (!open && resetNonce.open) {
+    setResetNonce({ open, accountId })
+  }
 
   const windowOptions =
     windowPreset === 'custom'
@@ -452,6 +455,13 @@ function LedgerRow({
   const actionLabel = actionStatusLabel(row)
   const diagnostics = streamSampleDiagnostics(row)
   const warn = diagnostics.reasoningMismatch || diagnostics.thinkingBurst
+  const preview = streamSamplePreview(row.streamSample, 36)
+  const previewText = [
+    preview.thinking && `思 ${preview.thinking}`,
+    preview.output && `出 ${preview.output}`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <TableRow rowId={row.id}>
       <TableCell className='align-middle !whitespace-normal'>
@@ -506,7 +516,16 @@ function LedgerRow({
         />
         <div className='text-[10px] text-muted-foreground'>
           {row.durationMs ? `${formatNumber(row.durationMs, 0)} ms` : '未测量'}
+          {row.streaming ? '' : ' · 非流'}
         </div>
+        {previewText ? (
+          <div
+            className='mt-0.5 max-w-[12rem] truncate text-[10px] text-muted-foreground'
+            title={previewText}
+          >
+            {previewText}
+          </div>
+        ) : null}
       </TableCell>
       <TableCell className='align-middle'>
         <Badge

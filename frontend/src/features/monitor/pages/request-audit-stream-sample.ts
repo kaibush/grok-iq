@@ -11,9 +11,27 @@ export type StreamSampleDiagnostics = {
   thinkingBurst: boolean
 }
 
+export function streamSamplePreview(
+  sample?: Pick<RequestAuditStreamSample, 'thinkingHead' | 'outputHead'> | null,
+  max = 48
+): { thinking: string; output: string } {
+  return {
+    thinking: compactSampleSnippet(sample?.thinkingHead, max),
+    output: compactSampleSnippet(sample?.outputHead, max),
+  }
+}
+
+function compactSampleSnippet(value: string | undefined, max: number): string {
+  const text = value?.replace(/\s+/g, ' ').trim() ?? ''
+  if (!text) return ''
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(1, max - 1))}…`
+}
+
 export function streamSampleDiagnostics(audit: {
   reasoningTokens: number
   outputTokens: number
+  streaming?: boolean
   streamSample?: RequestAuditStreamSample | null
 }): StreamSampleDiagnostics {
   const sample = audit.streamSample
@@ -22,9 +40,14 @@ export function streamSampleDiagnostics(audit: {
   const hasEncryptedThinking = Boolean(sample?.hasEncryptedThinking)
   const hasOutput = Boolean(sample?.hasVisibleOutput || sample?.hasToolOutput)
   const thinkingThenOutput = Boolean(sample?.thinkingThenOutput)
-  const reasoningMismatch = hasSample && audit.reasoningTokens > 0 && !hasThinking
+  const reasoningMismatch =
+    audit.streaming !== false &&
+    hasSample &&
+    audit.reasoningTokens > 0 &&
+    !hasThinking
   const visibleTokens = Math.max(0, audit.outputTokens - audit.reasoningTokens)
-  const outputMismatch = hasSample && visibleTokens > 0 && !hasOutput
+  const outputMismatch =
+    audit.streaming !== false && hasSample && visibleTokens > 0 && !hasOutput
   const thinkingWindow =
     sample?.firstThinkingMs != null && sample?.lastThinkingMs != null
       ? Math.max(0, sample.lastThinkingMs - sample.firstThinkingMs)

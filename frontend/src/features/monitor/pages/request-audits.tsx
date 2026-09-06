@@ -151,6 +151,7 @@ import { RequestAuditAccountHistoryBoard } from '@/features/monitor/components/r
 import {
   formatSampleWindow,
   streamSampleDiagnostics,
+  streamSamplePreview,
   streamSampleWarnings,
 } from '@/features/monitor/pages/request-audit-stream-sample'
 import {
@@ -4930,6 +4931,13 @@ function AuditSampleEvidence({
 function AuditThroughputCell({ row }: { row: RequestAuditRecord }) {
   const diagnostics = streamSampleDiagnostics(row)
   const warn = diagnostics.reasoningMismatch || diagnostics.thinkingBurst
+  const preview = streamSamplePreview(row.streamSample, 36)
+  const previewText = [
+    preview.thinking && `思 ${preview.thinking}`,
+    preview.output && `出 ${preview.output}`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <>
       <Tps
@@ -4938,6 +4946,7 @@ function AuditThroughputCell({ row }: { row: RequestAuditRecord }) {
       />
       <div className='text-[10px] text-muted-foreground'>
         {row.durationMs ? `${formatNumber(row.durationMs, 0)} ms` : '未测量'}
+        {row.streaming ? '' : ' · 非流'}
       </div>
       {diagnostics.hasSample ? (
         <div className='mt-0.5 text-[10px] font-medium'>
@@ -4966,6 +4975,14 @@ function AuditThroughputCell({ row }: { row: RequestAuditRecord }) {
           </span>
         </div>
       ) : null}
+      {previewText ? (
+        <div
+          className='mt-0.5 max-w-[12rem] truncate text-[10px] font-normal text-muted-foreground'
+          title={previewText}
+        >
+          {previewText}
+        </div>
+      ) : null}
     </>
   )
 }
@@ -4979,7 +4996,7 @@ function StreamSamplePanel({ record }: { record: RequestAuditRecord }) {
       <div>
         <h3 className='text-sm font-semibold'>内容样本</h3>
         <p className='mt-1 text-xs text-muted-foreground'>
-          截取思考和输出的开头/结尾，用来核对高 Token/s 是否真有推理正文。
+          截取思考和输出的开头/结尾。流式来自实时分片；非流式来自内部完整结果，方便人工核对。
         </p>
       </div>
       {!diagnostics.hasSample || !sample ? (

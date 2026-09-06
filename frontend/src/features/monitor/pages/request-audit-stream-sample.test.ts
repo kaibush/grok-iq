@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatSampleWindow,
   streamSampleDiagnostics,
+  streamSamplePreview,
   streamSampleWarnings,
 } from './request-audit-stream-sample'
 
@@ -59,6 +60,32 @@ describe('streamSampleDiagnostics', () => {
     expect(result.reasoningMismatch).toBe(false)
     expect(result.outputMismatch).toBe(false)
     expect(streamSampleWarnings(result)).toEqual([])
+  })
+
+  it('does not treat non-stream missing thinking as a degrade mismatch', () => {
+    const result = streamSampleDiagnostics({
+      reasoningTokens: 900,
+      outputTokens: 1000,
+      streaming: false,
+      streamSample: { hasVisibleOutput: true, outputChars: 2, outputHead: "I'll" },
+    })
+    expect(result.reasoningMismatch).toBe(false)
+    expect(result.outputMismatch).toBe(false)
+    expect(streamSampleWarnings(result)).toEqual([])
+  })
+})
+
+describe('streamSamplePreview', () => {
+  it('returns compact thinking and output snippets', () => {
+    expect(
+      streamSamplePreview({
+        thinkingHead: 'plan the lookup then reply',
+        outputHead: "I'll look it up",
+      })
+    ).toEqual({
+      thinking: 'plan the lookup then reply',
+      output: "I'll look it up",
+    })
   })
 })
 
