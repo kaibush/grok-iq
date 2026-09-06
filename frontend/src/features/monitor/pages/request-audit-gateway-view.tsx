@@ -240,12 +240,13 @@ export function AuditBillingPanel({ record }: { record: RequestAuditRecord }) {
 export function AuditRequestPanel({ record }: { record: RequestAuditRecord }) {
   const path = compactRequestPath(record)
   const headers = headerEntries(record.requestHeaders)
+  const requestBody = formatRequestSample(record.requestSample)
   return (
     <div className='space-y-3'>
       <div>
         <h3 className='text-sm font-semibold'>请求快照</h3>
         <p className='mt-1 text-xs text-muted-foreground'>
-          网关记录的方法、路径和已脱敏请求头，方便核对客户端怎么打进来。
+          网关记录的方法、路径、已脱敏请求头和原始请求体样本，方便核对客户端怎么打进来。
         </p>
       </div>
       {path ? (
@@ -259,8 +260,38 @@ export function AuditRequestPanel({ record }: { record: RequestAuditRecord }) {
         </div>
       )}
       <AuditHeadersPanel headers={headers} empty='没有保存请求头。' />
+      {requestBody ? (
+        <div className='overflow-hidden rounded-lg border bg-muted/15'>
+          <div className='flex items-center justify-between gap-2 px-3 py-2'>
+            <span className='text-xs font-medium'>请求体</span>
+            <div className='flex items-center gap-2'>
+              {record.requestSampleTruncated ? (
+                <span className='text-[11px] text-muted-foreground'>已截断</span>
+              ) : null}
+              <CopyButton value={requestBody} className='size-6 shrink-0' />
+            </div>
+          </div>
+          <pre className='max-h-80 overflow-auto px-3 pb-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all'>
+            {requestBody}
+          </pre>
+        </div>
+      ) : (
+        <div className='rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground'>
+          这条记录还没有请求体样本。新流量才会保存；打开详情会尝试回源 grok2api。
+        </div>
+      )}
     </div>
   )
+}
+
+function formatRequestSample(value?: string) {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) return ''
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return trimmed
+  }
 }
 
 export function AuditAttemptsPanel({ record }: { record: RequestAuditRecord }) {

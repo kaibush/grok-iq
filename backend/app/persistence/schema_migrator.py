@@ -289,6 +289,11 @@ COMPATIBILITY_COLUMNS = {
             "ALTER TABLE request_audit_records ADD COLUMN request_headers "
             "JSON NOT NULL DEFAULT '{}'",
         ),
+        (
+            "request_sample",
+            "ALTER TABLE request_audit_records ADD COLUMN request_sample "
+            "JSON NOT NULL DEFAULT '{}'",
+        ),
     ],
     "page_visits": [
         (

@@ -69,6 +69,7 @@ def _record(now, **values):
         "stream_sample": {},
         "gateway": {},
         "request_headers": {},
+        "request_sample": {},
         "raw": {"id": index},
         "created_at": now,
         "fetched_at": now,
@@ -197,6 +198,8 @@ def test_normalize_record_stores_gateway_outside_raw():
             "requestMethod": "POST",
             "requestPath": "/v1/chat/completions",
             "requestHeaders": {"User-Agent": ["grok-iq"]},
+            "requestSample": '{"model":"grok-4"}',
+            "requestSampleTruncated": True,
             "attemptCount": 1,
             "durationMs": 200,
             "createdAt": created_at.isoformat(),
@@ -209,6 +212,8 @@ def test_normalize_record_stores_gateway_outside_raw():
     assert record["gateway"]["clientIp"] == "198.51.100.4"
     assert record["gateway"]["cachedInputTokens"] == 12
     assert record["request_headers"]["User-Agent"] == ["grok-iq"]
+    assert record["request_sample"]["text"] == '{"model":"grok-4"}'
+    assert record["request_sample"]["truncated"] is True
     assert "requestHeaders" not in record["raw"]
     assert "clientIp" not in record["raw"]
 
@@ -241,6 +246,7 @@ async def test_list_page_exposes_gateway_fields_without_headers(tmp_path: Path):
     assert item["cachedInputTokens"] == 22
     assert item["attemptCount"] == 1
     assert "requestHeaders" not in item
+    assert "requestSample" not in item
     assert "attempts" not in item
 
 
@@ -254,6 +260,7 @@ def test_refresh_gateway_snapshots_fills_empty_rows_only(tmp_path: Path):
                 now,
                 upstream_id="2",
                 gateway={"clientIp": "already", "attemptCount": 3},
+                request_sample={"text": "keep-me", "truncated": False},
             ),
         ]
     )
@@ -263,11 +270,13 @@ def test_refresh_gateway_snapshots_fills_empty_rows_only(tmp_path: Path):
                 "id": "1",
                 "gateway": {"clientIp": "new-ip", "cachedInputTokens": 5},
                 "request_headers": {"X-Trace": ["abc"]},
+                "request_sample": {"text": '{"ok":true}', "truncated": False},
             },
             {
                 "id": "2",
                 "gateway": {"clientIp": "should-not-overwrite"},
                 "request_headers": {"X-Trace": ["nope"]},
+                "request_sample": {"text": "nope", "truncated": True},
             },
         ]
     )
@@ -276,8 +285,10 @@ def test_refresh_gateway_snapshots_fills_empty_rows_only(tmp_path: Path):
     row2 = repository.get_record("2")
     assert row1["gateway"]["clientIp"] == "new-ip"
     assert row1["request_headers"]["X-Trace"] == ["abc"]
+    assert row1["request_sample"]["text"] == '{"ok":true}'
     assert row2["gateway"]["clientIp"] == "already"
     assert row2["request_headers"]["X-Trace"] == ["nope"]
+    assert row2["request_sample"]["text"] == "keep-me"
 
 
 def test_gateway_refresh_items_only_keep_grok_build():
@@ -314,6 +325,8 @@ async def test_get_detail_hydrates_attempts_from_grok2api(tmp_path: Path):
                 "requestMethod": "POST",
                 "requestPath": "/v1/messages",
                 "requestHeaders": {"X-Request-Id": ["abc"]},
+                "requestSample": '{"model":"grok-4","input":"hello"}',
+                "requestSampleTruncated": False,
                 "streamSample": {
                     "protocol": "chat",
                     "hasVisibleOutput": True,
@@ -337,12 +350,15 @@ async def test_get_detail_hydrates_attempts_from_grok2api(tmp_path: Path):
     assert detail["clientIp"] == "203.0.113.10"
     assert detail["cachedInputTokens"] == 9
     assert detail["requestHeaders"]["X-Request-Id"] == ["abc"]
+    assert detail["requestSample"] == '{"model":"grok-4","input":"hello"}'
+    assert "requestSampleTruncated" not in detail
     assert detail["attempts"][0]["transportError"] == "timeout"
     assert detail["streamSample"]["outputHead"] == "hello"
     assert detail["gatewayHydrated"] is True
     stored = repository.get_record("88")
     assert stored["gateway"]["clientIp"] == "203.0.113.10"
     assert stored["request_headers"]["X-Request-Id"] == ["abc"]
+    assert stored["request_sample"]["text"] == '{"model":"grok-4","input":"hello"}' 
 
 
 async def test_get_detail_keeps_local_row_when_grok2api_fails(tmp_path: Path):

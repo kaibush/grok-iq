@@ -185,6 +185,31 @@ _REASONING_EFFORTS = frozenset(
 )
 
 
+def _normalize_request_sample(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        text_value = value
+        truncated = False
+    elif isinstance(value, dict) and value:
+        text_value = str(value.get("text") or value.get("body") or "")
+        truncated = bool(value.get("truncated"))
+    else:
+        return {}
+    if not text_value.strip():
+        return {}
+    return {"text": text_value, "truncated": truncated}
+
+
+def _request_sample_from_audit(item: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    if "requestSample" in item or "requestSampleTruncated" in item:
+        text_value = str(item.get("requestSample") or "")
+        if not text_value.strip():
+            return {}
+        return {"text": text_value, "truncated": bool(item.get("requestSampleTruncated"))}
+    return _normalize_request_sample(item.get("request_sample") or item.get("requestSample"))
+
+
 def _normalize_reasoning_effort(value: Any) -> str:
     text_value = str(value or "").strip().lower()
     return text_value if text_value in _REASONING_EFFORTS else ""
@@ -215,7 +240,8 @@ def _gateway_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
             continue
         snapshot = normalize_gateway_snapshot(item)
         headers = normalize_request_headers(item.get("requestHeaders"))
-        if not snapshot and not headers:
+        sample = _request_sample_from_audit(item)
+        if not snapshot and not headers and not sample:
             continue
         upstream_id = str(item.get("id") or item.get("requestId") or "").strip()
         if upstream_id:
@@ -224,6 +250,7 @@ def _gateway_refresh_items(items: Iterable[Any]) -> list[dict[str, Any]]:
                     "id": upstream_id,
                     "gateway": snapshot,
                     "request_headers": headers,
+                    "request_sample": sample,
                 }
             )
     return values
@@ -2924,6 +2951,7 @@ class RequestAuditService:
             "stream_sample": _normalize_stream_sample(item.get("streamSample")),
             "gateway": normalize_gateway_snapshot(item),
             "request_headers": normalize_request_headers(item.get("requestHeaders")),
+            "request_sample": _request_sample_from_audit(item),
             "raw": raw,
             "created_at": created_at,
             "fetched_at": utc_now(),
@@ -3030,6 +3058,7 @@ class RequestAuditService:
             if isinstance(row.get("request_headers"), dict)
             else None
         )
+        local_request_sample = _normalize_request_sample(row.get("request_sample"))
         attempts: list[dict[str, Any]] = []
         gateway_error = ""
         hydrated = False
@@ -3050,6 +3079,7 @@ class RequestAuditService:
                 snapshot = normalize_gateway_snapshot(audit)
                 headers = normalize_request_headers(audit.get("requestHeaders"))
                 sample = _normalize_stream_sample(audit.get("streamSample"))
+                request_sample = _request_sample_from_audit(audit)
                 persist: dict[str, Any] = {"id": upstream_id}
                 if snapshot and not gateway_snapshot_has_content(row.get("gateway")):
                     persist["gateway"] = snapshot
@@ -3059,6 +3089,9 @@ class RequestAuditService:
                 ):
                     persist["request_headers"] = headers
                     local_headers = headers
+                if request_sample and not local_request_sample:
+                    persist["request_sample"] = request_sample
+                    local_request_sample = request_sample
                 if sample and not (isinstance(local_sample, dict) and local_sample):
                     local_sample = sample
                     sample_saver = getattr(self.repository, "refresh_stream_samples", None)
@@ -3083,6 +3116,7 @@ class RequestAuditService:
             evaluation=self._evaluation_for(row, evaluations),
             stream_sample=local_sample,
             request_headers=local_headers,
+            request_sample=local_request_sample,
             attempts=attempts,
             gateway_hydrated=hydrated,
             gateway_error=gateway_error,
@@ -4945,6 +4979,7 @@ class RequestAuditService:
         evaluation: AuditRiskEvaluation | None = None,
         stream_sample: dict[str, Any] | None = None,
         request_headers: dict[str, Any] | None = None,
+        request_sample: dict[str, Any] | None = None,
         attempts: list[dict[str, Any]] | None = None,
         gateway_hydrated: bool | None = None,
         gateway_error: str = "",
@@ -5034,6 +5069,13 @@ class RequestAuditService:
             headers = raw_headers if isinstance(raw_headers, dict) else None
         if headers:
             payload["requestHeaders"] = headers
+        sample_payload = request_sample if isinstance(request_sample, dict) else None
+        if sample_payload is None:
+            sample_payload = _normalize_request_sample(row.get("request_sample"))
+        if sample_payload and sample_payload.get("text"):
+            payload["requestSample"] = sample_payload["text"]
+            if sample_payload.get("truncated"):
+                payload["requestSampleTruncated"] = True
         if attempts:
             payload["attempts"] = attempts
         if gateway_hydrated is not None:

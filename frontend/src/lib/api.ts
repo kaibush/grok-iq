@@ -1067,6 +1067,8 @@ export type RequestAuditRecord = {
   requestMethod?: string
   requestPath?: string
   requestHeaders?: Record<string, string[]>
+  requestSample?: string
+  requestSampleTruncated?: boolean
   attemptCount?: number
   attempts?: RequestAuditAttempt[]
   gatewayHydrated?: boolean

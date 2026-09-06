@@ -380,6 +380,9 @@ class RequestAuditRecord(Base):
     request_headers: Mapped[dict[str, Any]] = mapped_column(
         JSON, default=dict, server_default="{}", nullable=False
     )
+    request_sample: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default="{}", nullable=False
+    )
     raw: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(AppDateTime(), nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(AppDateTime(), default=utc_now, nullable=False)

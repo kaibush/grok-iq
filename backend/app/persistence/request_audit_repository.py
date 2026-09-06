@@ -120,6 +120,7 @@ class RequestAuditRepository:
             "stream_sample",
             "gateway",
             "request_headers",
+            "request_sample",
             "raw",
             "created_at",
             "fetched_at",
@@ -129,6 +130,7 @@ class RequestAuditRepository:
             payload = {key: item for key, item in record.items() if key in columns}
             payload.setdefault("gateway", {})
             payload.setdefault("request_headers", {})
+            payload.setdefault("request_sample", {})
             payloads.append(payload)
         with self.database.transaction() as session:
             result = session.execute(
@@ -252,20 +254,27 @@ class RequestAuditRepository:
             headers = item.get("request_headers")
             if headers is None:
                 headers = item.get("requestHeaders")
+            sample = item.get("request_sample")
+            if sample is None:
+                sample = item.get("requestSample")
             if not isinstance(snapshot, dict):
                 snapshot = {}
             if not isinstance(headers, dict):
                 headers = {}
-            if snapshot or headers:
+            if not isinstance(sample, dict):
+                sample = {}
+            if snapshot or headers or sample:
                 values[upstream_id] = {
                     "gateway": snapshot,
                     "request_headers": headers,
+                    "request_sample": sample,
                 }
         if not values:
             return 0
         updated = 0
         empty_gateway = _empty_json_clause(RequestAuditRecord.gateway)
         empty_headers = _empty_json_clause(RequestAuditRecord.request_headers)
+        empty_sample = _empty_json_clause(RequestAuditRecord.request_sample)
         with self.database.transaction() as session:
             for upstream_id, payload in values.items():
                 changed = False
@@ -287,6 +296,16 @@ class RequestAuditRepository:
                             empty_headers,
                         )
                         .values(request_headers=payload["request_headers"])
+                    )
+                    changed = changed or int(result.rowcount or 0) > 0
+                if payload["request_sample"]:
+                    result = session.execute(
+                        update(RequestAuditRecord)
+                        .where(
+                            RequestAuditRecord.upstream_id == upstream_id,
+                            empty_sample,
+                        )
+                        .values(request_sample=payload["request_sample"])
                     )
                     changed = changed or int(result.rowcount or 0) > 0
                 if changed:
@@ -1023,13 +1042,14 @@ def _audit_record_query():
         defer(RequestAuditRecord.raw),
         defer(RequestAuditRecord.stream_sample),
         defer(RequestAuditRecord.request_headers),
+        defer(RequestAuditRecord.request_sample),
     )
 
 
 def _audit_record_dict(value: RequestAuditRecord) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:
-        if column.name in {"raw", "stream_sample", "request_headers"}:
+        if column.name in {"raw", "stream_sample", "request_headers", "request_sample"}:
             continue
         item = getattr(value, column.name)
         result[column.name] = (

@@ -171,6 +171,11 @@ export function mergeRequestAuditDetail(
     requestMethod: overlayGatewayValue(base.requestMethod, extra.requestMethod),
     requestPath: overlayGatewayValue(base.requestPath, extra.requestPath),
     requestHeaders: overlayGatewayValue(base.requestHeaders, extra.requestHeaders),
+    requestSample: overlayGatewayValue(base.requestSample, extra.requestSample),
+    requestSampleTruncated: overlayGatewayValue(
+      base.requestSampleTruncated,
+      extra.requestSampleTruncated
+    ),
     attemptCount: overlayGatewayValue(base.attemptCount, extra.attemptCount),
     attempts: overlayGatewayValue(base.attempts, extra.attempts),
     streamSample: overlayGatewayValue(base.streamSample, extra.streamSample),
