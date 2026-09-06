@@ -10,6 +10,7 @@ from app.persistence.account_repository import AccountRepository
 from app.services.probe_manager import ProbeManager
 from app.services.scheduler import SchedulerService
 from app.services.settings_service import RuntimeSettingsService
+from app.services.tps_fuse_sync import TpsFuseSyncService, should_sync_runtime_changes
 from app.services.wechat_notification import WeChatAccountNotificationService
 from app.web.schemas import OnboardingCompleteInput, RuntimeSettingsInput
 
@@ -25,12 +26,17 @@ def build_settings_router(
     probes: ProbeManager,
     scheduler: SchedulerService,
     wechat: WeChatAccountNotificationService,
+    tps_fuse_sync: TpsFuseSyncService | None = None,
 ) -> APIRouter:
     router = APIRouter()
+    tps_fuse = tps_fuse_sync or TpsFuseSyncService(client, settings)
+
+    def settings_payload(**extra: Any) -> dict[str, Any]:
+        return {**runtime_settings.public_view(), "tpsFuseSync": tps_fuse.public_view(), **extra}
 
     @router.get("/settings")
     def get_runtime_settings() -> dict[str, Any]:
-        return runtime_settings.public_view()
+        return settings_payload()
 
     @router.get("/onboarding")
     def get_onboarding() -> dict[str, Any]:
@@ -93,7 +99,21 @@ def build_settings_router(
             )
             probes.repository.refresh_all_run_summaries()
         await scheduler.reconfigure()
-        return {**runtime_settings.public_view(), "changed": changed}
+        if should_sync_runtime_changes(changed):
+            try:
+                tps_fuse_result = await tps_fuse.sync(trigger="settings")
+            except Exception as exc:
+                tps_fuse_result = {
+                    "ok": False,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            return {
+                **runtime_settings.public_view(),
+                "changed": changed,
+                "tpsFuseSync": tps_fuse_result,
+            }
+        return settings_payload(changed=changed)
 
     @router.post("/settings/test-grok2api")
     async def test_grok2api_settings() -> dict[str, Any]:

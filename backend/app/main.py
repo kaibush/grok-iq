@@ -33,6 +33,7 @@ from app.services.request_audit_service import RequestAuditService
 from app.services.scheduler import SchedulerService
 from app.services.settings_service import RuntimeSettingsService
 from app.services.sso_report_service import SsoReportService
+from app.services.tps_fuse_sync import TpsFuseSyncService
 from app.services.update_check import UpdateCheckService
 from app.services.wechat_notification import WeChatAccountNotificationService
 from app.web.exception_handlers import install_exception_handlers
@@ -61,6 +62,7 @@ sso_report_service = SsoReportService(
     settings=settings,
 )
 grok_client = Grok2APIClient(settings)
+tps_fuse_sync = TpsFuseSyncService(grok_client, settings)
 wechat_client = WeChatTestAccountClient(settings)
 wechat_notification_service = WeChatAccountNotificationService(
     settings, wechat_client
@@ -103,6 +105,7 @@ request_audit_service = RequestAuditService(
     accounts=account_repository,
     probes=probe_repository,
     account_service=account_service,
+    tps_fuse_sync=tps_fuse_sync,
 )
 page_visit_service = PageVisitService(
     page_visit_repository,
@@ -163,6 +166,7 @@ async def lifespan(_: FastAPI):
     await register_integration_service.start()
     await sso_report_service.start()
     await scheduler_service.start()
+    tps_fuse_sync.schedule_startup_sync()
     await update_check_service.start()
     try:
         yield
@@ -203,6 +207,7 @@ app.include_router(
         page_visits=page_visit_service,
         scheduler=scheduler_service,
         runtime_settings_service=runtime_settings_service,
+        tps_fuse_sync=tps_fuse_sync,
         auth_service=auth_service,
         chat_service=chat_service,
         sso_reports=sso_report_service,

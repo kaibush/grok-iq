@@ -43,13 +43,15 @@ export function SettingsRequestAuditPage() {
 }
 
 export function SettingsRiskPage() {
-  const { form, set, restoreRecommendedRiskScoring } = useSettingsWorkspace()
+  const { form, set, restoreRecommendedRiskScoring, settings } =
+    useSettingsWorkspace()
   return (
     <SettingsRouteContent>
       <SettingsRiskTab
         form={form}
         set={set}
         restoreRecommendedRiskScoring={restoreRecommendedRiskScoring}
+        tpsFuseSync={settings.tpsFuseSync}
       />
     </SettingsRouteContent>
   )

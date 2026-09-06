@@ -34,6 +34,7 @@ from app.reasoning_policy import canonical_reasoning_model
 
 if TYPE_CHECKING:
     from app.services.account_service import AccountService
+    from app.services.tps_fuse_sync import TpsFuseSyncService
 
 REQUEST_AUDIT_SCOPE = "grok_build_today"
 REQUEST_AUDIT_PAGE_SIZE = 500
@@ -879,6 +880,7 @@ class RequestAuditService:
         accounts: AccountRepository | None = None,
         probes: ProbeRepository | None = None,
         account_service: AccountService | None = None,
+        tps_fuse_sync: TpsFuseSyncService | None = None,
     ):
         self.settings = settings
         self.client = client
@@ -886,6 +888,7 @@ class RequestAuditService:
         self.accounts = accounts
         self.probes = probes
         self.account_service = account_service
+        self.tps_fuse_sync = tps_fuse_sync
         self._scan_lock = asyncio.Lock()
         self._egress_cache_lock = asyncio.Lock()
         self._account_cache_lock = asyncio.Lock()
@@ -1329,6 +1332,14 @@ class RequestAuditService:
             return "30d"
         return "90d"
 
+    async def _sync_tps_fuse(self, *, trigger: str) -> None:
+        if self.tps_fuse_sync is None:
+            return
+        try:
+            await self.tps_fuse_sync.sync(trigger=trigger)
+        except Exception as exc:
+            logger.warning("grok2api tpsFuse sync failed: %s", exc)
+
     def _skipped_scan(
         self,
         *,
@@ -1402,6 +1413,8 @@ class RequestAuditService:
                 {"last_scan_at": started_at, "last_error": result["error"]},
             )
             return result
+
+        await self._sync_tps_fuse(trigger=trigger)
 
         start = window["start"]
         end = window["end"]

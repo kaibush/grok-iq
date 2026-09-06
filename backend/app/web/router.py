@@ -18,6 +18,7 @@ from app.services.request_audit_service import RequestAuditService
 from app.services.scheduler import SchedulerService
 from app.services.settings_service import RuntimeSettingsService
 from app.services.sso_report_service import SsoReportService
+from app.services.tps_fuse_sync import TpsFuseSyncService
 from app.services.update_check import UpdateCheckService
 from app.services.wechat_notification import WeChatAccountNotificationService
 
@@ -60,6 +61,7 @@ def build_router(
     updates: UpdateCheckService,
     request_audits: RequestAuditService | None = None,
     page_visits: PageVisitService | None = None,
+    tps_fuse_sync: TpsFuseSyncService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     require_admin = build_admin_auth_dependency(auth_service)
@@ -119,6 +121,7 @@ def build_router(
             probes=probe_manager,
             scheduler=scheduler,
             wechat=wechat_notifications,
+            tps_fuse_sync=tps_fuse_sync,
         )
     )
     protected.include_router(build_chat_router(chat_service))

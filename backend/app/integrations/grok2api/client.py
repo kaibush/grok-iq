@@ -596,6 +596,30 @@ class Grok2APIClient:
         payload = await self.admin_request("GET", "/api/admin/v1/dashboard", params=query)
         return payload if isinstance(payload, dict) else {}
 
+    async def get_admin_settings(self) -> dict[str, Any]:
+        payload = await self.admin_request(
+            "GET",
+            "/api/admin/v1/settings",
+            timeout=30,
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def update_admin_settings(
+        self,
+        revision: str | int,
+        config_patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = await self.admin_request(
+            "PUT",
+            "/api/admin/v1/settings",
+            json={
+                "revision": revision if isinstance(revision, str) else str(revision),
+                "config": config_patch,
+            },
+            timeout=30,
+        )
+        return payload if isinstance(payload, dict) else {}
+
     async def set_egress_nodes_enabled(
         self,
         node_ids: list[int],

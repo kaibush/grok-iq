@@ -1808,6 +1808,12 @@ export type ProbeTpsOverrideMode =
   | 'generation_window'
   | 'missing_reasoning'
 
+export type TpsFuseSyncStatus = {
+  ok: boolean
+  status?: 'idle' | 'synced' | 'failed' | 'drift_pushed' | 'skipped' | 'unsupported'
+  error?: string
+}
+
 export type RuntimeSettings = {
   grok2apiBaseUrl: string
   grok2apiAdminUsername: string
@@ -1910,6 +1916,7 @@ export type RuntimeSettings = {
     corsOrigins: string[]
   }
   changed?: string[]
+  tpsFuseSync?: TpsFuseSyncStatus
 }
 
 export type EditableRuntimeSettings = RuntimeSettings & {
@@ -2186,6 +2193,29 @@ function normalizeProbeTpsOverrideMode(
   return 'missing_reasoning'
 }
 
+function normalizeTpsFuseSync(value: unknown): TpsFuseSyncStatus | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as {
+    ok?: unknown
+    status?: unknown
+    error?: unknown
+  }
+  const status =
+    record.status === 'idle' ||
+    record.status === 'synced' ||
+    record.status === 'failed' ||
+    record.status === 'drift_pushed' ||
+    record.status === 'skipped' ||
+    record.status === 'unsupported'
+      ? record.status
+      : undefined
+  return {
+    ok: Boolean(record.ok),
+    status,
+    error: typeof record.error === 'string' ? record.error : '',
+  }
+}
+
 function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
   const defaultReasoningModelPolicies: ReasoningModelPolicy[] = [
     {
@@ -2344,6 +2374,7 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     riskWatchFloor: value.riskWatchFloor ?? 15,
     riskSuspectFloor: value.riskSuspectFloor ?? 50,
     riskHighFloor: value.riskHighFloor ?? 75,
+    tpsFuseSync: normalizeTpsFuseSync(value.tpsFuseSync),
   }
 }
 

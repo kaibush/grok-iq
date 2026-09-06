@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   Timer,
 } from 'lucide-react'
-import type { AutoIsolationMinStatus } from '@/lib/api'
+import type { AutoIsolationMinStatus, TpsFuseSyncStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -54,10 +54,12 @@ export function SettingsRiskTab({
   form,
   set,
   restoreRecommendedRiskScoring,
+  tpsFuseSync,
 }: {
   form: SettingsForm
   set: SettingsSetter
   restoreRecommendedRiskScoring: () => void
+  tpsFuseSync?: TpsFuseSyncStatus
 }) {
   return (
     <Tabs defaultValue='probe' className='space-y-4'>
@@ -134,7 +136,13 @@ export function SettingsRiskTab({
               label: '自动隔离',
               description: '达次数后永久停用',
               icon: Power,
-              content: <AuditIsolationPanel form={form} set={set} />,
+              content: (
+                <AuditIsolationPanel
+                  form={form}
+                  set={set}
+                  tpsFuseSync={tpsFuseSync}
+                />
+              ),
             },
           ]}
         />
@@ -702,9 +710,11 @@ function AuditRulesPanel({
 function AuditIsolationPanel({
   form,
   set,
+  tpsFuseSync,
 }: {
   form: SettingsForm
   set: SettingsSetter
+  tpsFuseSync?: TpsFuseSyncStatus
 }) {
   return (
     <SettingsCard
@@ -769,6 +779,7 @@ function AuditIsolationPanel({
                 }
               />
             </div>
+            <TpsFuseSyncHint sync={tpsFuseSync} />
           </SettingListItem>
         </SettingList>
       </div>
@@ -905,4 +916,41 @@ function ProbeQuarantinePanel({
       </SettingList>
     </SettingsCard>
   )
+}
+
+function TpsFuseSyncHint({ sync }: { sync?: TpsFuseSyncStatus }) {
+  const message = tpsFuseSyncMessage(sync)
+  if (!message) return null
+  return (
+    <p className={cn('text-xs leading-5', message.className)}>{message.text}</p>
+  )
+}
+
+function tpsFuseSyncMessage(sync?: TpsFuseSyncStatus) {
+  if (!sync || sync.status === 'idle' || sync.status === 'skipped') return null
+  if (sync.status === 'failed' || sync.ok === false) {
+    return {
+      className: 'text-destructive',
+      text: `同步失败: ${sync.error || '未知错误'}`,
+    }
+  }
+  if (sync.status === 'unsupported') {
+    return {
+      className: 'text-muted-foreground',
+      text: 'grok2api 镜像还没有 TPS 熔断字段，更新后再同步',
+    }
+  }
+  if (sync.status === 'drift_pushed') {
+    return {
+      className: 'text-amber-700 dark:text-amber-300',
+      text: '与 grok2api 不一致，已重新推送',
+    }
+  }
+  if (sync.status === 'synced' || sync.ok) {
+    return {
+      className: 'text-emerald-700 dark:text-emerald-300',
+      text: '已同步到 grok2api 请求路径熔断',
+    }
+  }
+  return null
 }
