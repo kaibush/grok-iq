@@ -10,7 +10,6 @@ from app.persistence.account_repository import AccountRepository
 from app.persistence.database import Database
 from app.persistence.request_audit_repository import RequestAuditRepository
 from app.services.request_audit_service import RequestAuditService
-
 from tests.test_request_audit_sso_recheck import _seed_verification
 
 

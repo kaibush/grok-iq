@@ -946,17 +946,17 @@ export function ResultPreviewGallery({
     selectedRunId,
   ])
 
-  useEffect(() => {
-    if (!open || !accountPerspective) return
-    if (
+  if (
+    open &&
+    accountPerspective &&
+    !(
       selectedRunId &&
       selectedAccountRuns.some((entry) => entry.runId === selectedRunId)
-    ) {
-      return
-    }
+    )
+  ) {
     const nextRunId = selectedAccountRuns[0]?.runId
-    if (nextRunId) setSelectedRunId(nextRunId)
-  }, [accountPerspective, open, selectedAccountRuns, selectedRunId])
+    if (nextRunId && nextRunId !== selectedRunId) setSelectedRunId(nextRunId)
+  }
 
   if (!open) {
     if (sessionView !== undefined) setSessionView(undefined)

@@ -136,7 +136,7 @@ export function hasAccountPreviewSamples(
     } | null
     history?: {
       samples?: unknown[] | null
-      runs?: Array<{ completed_steps?: number | null }> | null
+      runs?: Array<{ completed_steps?: number | null; status?: string | null }> | null
     } | null
   },
   samplePage?: { total?: number | null; items?: unknown[] | null } | null

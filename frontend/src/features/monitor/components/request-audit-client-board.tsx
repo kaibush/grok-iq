@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -249,7 +250,9 @@ export function RequestAuditClientBoard({
   const [localPending, setLocalPending] = useState(false)
   const onSelectRef = useRef(onSelect)
   const cancelApplyRef = useRef<(() => void) | null>(null)
-  onSelectRef.current = onSelect
+  useLayoutEffect(() => {
+    onSelectRef.current = onSelect
+  }, [onSelect])
   const activeId = optimisticId ?? selectedId
   const switchPending = localPending || pending
   const selectClient = useCallback((id: string) => {
@@ -262,13 +265,14 @@ export function RequestAuditClientBoard({
     })
   }, [])
   useEffect(() => () => cancelApplyRef.current?.(), [])
-  useEffect(() => {
-    if (!localPending) return
-    if (optimisticId != null && selectedId !== optimisticId) return
-    if (pending) return
+  if (
+    localPending &&
+    (optimisticId == null || selectedId === optimisticId) &&
+    !pending
+  ) {
     setLocalPending(false)
     setOptimisticId(null)
-  }, [localPending, optimisticId, pending, selectedId])
+  }
   const totalRequests = useMemo(
     () => items.reduce((sum, item) => sum + (item.requestCount ?? 0), 0),
     [items]
@@ -326,7 +330,11 @@ export function RequestAuditClientBoard({
         }
       />
     ) : null
-  const overlayHost = overlayHostRef?.current
+  const [overlayHost, setOverlayHost] = useState<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const next = overlayHostRef?.current ?? null
+    setOverlayHost((current) => (current === next ? current : next))
+  }, [overlayHostRef])
 
   if (!loading && items.length === 0) return null
 

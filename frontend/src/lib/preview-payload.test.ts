@@ -135,7 +135,7 @@ describe('slimAccountPreview', () => {
             completed_steps: 3,
             created_at: '2026-08-31T00:00:00Z',
             summary: { bulky: 'x'.repeat(5000) },
-          } as ProbeRun,
+          } as unknown as ProbeRun,
         ],
         byTarget: [],
       },

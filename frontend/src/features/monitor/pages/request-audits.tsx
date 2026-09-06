@@ -1306,6 +1306,40 @@ function AuditSchedulePanel({
   )
 }
 
+
+type LedgerRecordsQuery = {
+  window: RequestAuditWindowPreset
+  startAt?: string
+  endAt?: string
+  page: number
+  pageSize: number
+  search: string
+  clientKey: string
+  risk: string
+  node: string
+  pinnedAccountId: number | null
+}
+
+function fetchLedgerRecords(query: LedgerRecordsQuery) {
+  return api
+    .requestAudits({
+      window: query.window,
+      startAt: query.startAt,
+      endAt: query.endAt,
+      page: query.page,
+      pageSize: query.pageSize,
+      account: query.search.trim(),
+      accountId: query.pinnedAccountId ?? undefined,
+      clientKey: query.clientKey === 'all' ? '' : query.clientKey.trim(),
+      risk: query.risk === 'all' ? '' : query.risk,
+      egressNodeId: query.node === 'all' ? undefined : Number(query.node),
+    })
+    .then((pageData) => ({
+      ...pageData,
+      items: pageData.items.map(slimRequestAuditRecord),
+    }))
+}
+
 export function RequestAuditsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -1549,45 +1583,8 @@ export function RequestAuditsPage() {
     ledgerQuery.risk !== committedLedgerQuery.risk ||
     ledgerQuery.node !== committedLedgerQuery.node ||
     ledgerQuery.pinnedAccountId !== committedLedgerQuery.pinnedAccountId
-  const ledgerWindowParams = useMemo(
-    () => ({
-      window: ledgerQuery.window,
-      startAt: ledgerQuery.startAt,
-      endAt: ledgerQuery.endAt,
-    }),
-    [ledgerQuery.endAt, ledgerQuery.startAt, ledgerQuery.window]
-  )
-  const fetchLedgerRecords = (query: typeof committedLedgerQuery) =>
-    api
-      .requestAudits({
-        window: query.window,
-        startAt: query.startAt,
-        endAt: query.endAt,
-        page: query.page,
-        pageSize: query.pageSize,
-        account: query.search.trim(),
-        accountId: query.pinnedAccountId ?? undefined,
-        clientKey: query.clientKey === 'all' ? '' : query.clientKey.trim(),
-        risk: query.risk === 'all' ? '' : query.risk,
-        egressNodeId: query.node === 'all' ? undefined : Number(query.node),
-      })
-      .then((pageData) => ({
-        ...pageData,
-        items: pageData.items.map(slimRequestAuditRecord),
-      }))
   const recordsQuery = useQuery({
-    queryKey: [
-      'request-audits',
-      'records',
-      ledgerWindowParams,
-      ledgerQuery.page,
-      ledgerQuery.pageSize,
-      ledgerQuery.search,
-      ledgerQuery.clientKey,
-      ledgerQuery.risk,
-      ledgerQuery.node,
-      ledgerQuery.pinnedAccountId,
-    ],
+    queryKey: ['request-audits', 'records', ledgerQuery],
     queryFn: () => fetchLedgerRecords(ledgerQuery),
     enabled: needsRecords,
     placeholderData: keepPreviousData,
@@ -1641,17 +1638,10 @@ export function RequestAuditsPage() {
           'request-audits',
           'records',
           {
-            window: committedLedgerQuery.window,
-            startAt: committedLedgerQuery.startAt,
-            endAt: committedLedgerQuery.endAt,
+            ...committedLedgerQuery,
+            clientKey,
+            page: 1,
           },
-          1,
-          committedLedgerQuery.pageSize,
-          committedLedgerQuery.search,
-          clientKey,
-          committedLedgerQuery.risk,
-          committedLedgerQuery.node,
-          committedLedgerQuery.pinnedAccountId,
         ],
         queryFn: () =>
           fetchLedgerRecords({
