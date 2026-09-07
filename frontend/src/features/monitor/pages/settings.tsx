@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, type SecretSettingName } from '@/lib/api'
+import { api, type SecretSettingName, type WechatTestScenario } from '@/lib/api'
 import { cn, getErrorMessage } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -125,7 +125,7 @@ export function SettingsLayout() {
   })
 
   const wechatTestMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (scenario: WechatTestScenario) => {
       if (!form || !settings.data) throw new Error('设置尚未加载')
       const submittedForm = form
       const submittedClearSecrets = [...clearSecrets]
@@ -137,7 +137,7 @@ export function SettingsLayout() {
           settings.data
         )
       )
-      const result = await api.testWechat()
+      const result = await api.testWechat(scenario)
       return { value, submittedForm, submittedClearSecrets, result }
     },
     onSuccess: ({ value, submittedForm, submittedClearSecrets, result }) => {
@@ -150,7 +150,15 @@ export function SettingsLayout() {
       queryClient.setQueryData(['settings', 'editor'], editableValue)
       setForm(toSettingsForm(editableValue))
       setClearSecrets([])
-      toast.success(`微信测试消息已发送给 ${result.sent} 个接收人`)
+      const scenarioLabel =
+        result.scenario === 'keyQuality'
+          ? '密钥正常率'
+          : result.scenario === 'upstreamHealth'
+            ? '上游成功率'
+            : '账号异常'
+      toast.success(
+        `${scenarioLabel}测试消息已发送给 ${result.sent} 个接收人`
+      )
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
@@ -253,7 +261,7 @@ export function SettingsLayout() {
     webhookUrl,
     busy,
     wechatTestPending: wechatTestMutation.isPending,
-    testWechat: () => wechatTestMutation.mutate(),
+    testWechat: (scenario) => wechatTestMutation.mutate(scenario),
     restoreRecommendedRiskScoring,
   }
 

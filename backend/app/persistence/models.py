@@ -565,6 +565,32 @@ class AppSetting(Base):
     )
 
 
+class WeChatAlertState(Base):
+    """Durable open/closed state for metric WeChat alerts."""
+
+    __tablename__ = "wechat_alert_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id",
+            "subject_id",
+            name="uq_wechat_alert_rule_subject",
+        ),
+        Index("ix_wechat_alert_states_rule", "rule_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rule_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="closed", nullable=False)
+    last_value: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    last_fired_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    last_recovered_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class RegisterWebhookEvent(Base):
     """Durable inbox for at-least-once grok-register notifications."""
 

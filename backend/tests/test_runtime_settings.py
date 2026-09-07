@@ -770,6 +770,74 @@ def test_wechat_notifications_require_the_four_test_account_values(tmp_path: Pat
 
 
 
+def test_wechat_metric_alert_settings_require_templates_and_reject_unlabeled_keys(
+    tmp_path: Path,
+):
+    _, _, service = build_service(tmp_path)
+    with pytest.raises(ValueError, match="密钥正常率模板"):
+        service.update(
+            {
+                "wechat_notification_enabled": True,
+                "wechat_app_id": "wx-test",
+                "wechat_app_secret": "wechat-secret",
+                "wechat_openid": "openid-test",
+                "wechat_template_id": "template-account",
+                "wechat_key_quality_enabled": True,
+            }
+        )
+
+    with pytest.raises(ValueError, match="上游成功率模板"):
+        service.update(
+            {
+                "wechat_notification_enabled": True,
+                "wechat_app_id": "wx-test",
+                "wechat_app_secret": "wechat-secret",
+                "wechat_openid": "openid-test",
+                "wechat_template_id": "template-account",
+                "wechat_upstream_health_15m_enabled": True,
+            }
+        )
+
+    with pytest.raises(ValueError, match="未记录 Key"):
+        service.update(
+            {
+                "wechat_notification_enabled": True,
+                "wechat_app_id": "wx-test",
+                "wechat_app_secret": "wechat-secret",
+                "wechat_openid": "openid-test",
+                "wechat_template_id": "template-account",
+                "wechat_key_quality_template_id": "template-key",
+                "wechat_key_quality_enabled": True,
+                "wechat_key_quality_keys": [{"id": "unlabeled", "name": "未记录 Key"}],
+            }
+        )
+
+    changed = service.update(
+        {
+            "wechat_notification_enabled": True,
+            "wechat_app_id": "wx-test",
+            "wechat_app_secret": "wechat-secret",
+            "wechat_openid": "openid-test",
+            "wechat_template_id": "template-account",
+            "wechat_key_quality_template_id": "template-key",
+            "wechat_upstream_health_template_id": "template-up",
+            "wechat_key_quality_enabled": True,
+            "wechat_key_quality_threshold": 88,
+            "wechat_key_quality_keys": [
+                {"id": "key-1", "name": "生产 Key", "threshold": 80},
+                {"id": "key-2", "name": "备用"},
+            ],
+        }
+    )
+    assert "wechat_key_quality_keys" in changed
+    public = service.public_view()
+    assert public["wechatKeyQualityTemplateId"] == "template-key"
+    assert public["wechatKeyQualityKeys"] == [
+        {"id": "key-1", "name": "生产 Key", "threshold": 80.0},
+        {"id": "key-2", "name": "备用"},
+    ]
+
+
 def test_sso_proxy_is_encrypted_masked_and_clearable(tmp_path: Path):
     database, settings, service = build_service(tmp_path)
     changed = service.update({"sso_proxy": "user:pass@127.0.0.1:8080"})

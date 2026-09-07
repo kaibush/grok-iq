@@ -386,6 +386,51 @@ class RuntimeSettingsInput(BaseModel):
     wechat_template_id: str | None = Field(
         default=None, alias="wechatTemplateId", max_length=256
     )
+    wechat_key_quality_template_id: str | None = Field(
+        default=None, alias="wechatKeyQualityTemplateId", max_length=256
+    )
+    wechat_upstream_health_template_id: str | None = Field(
+        default=None, alias="wechatUpstreamHealthTemplateId", max_length=256
+    )
+    wechat_key_quality_enabled: bool | None = Field(
+        default=None, alias="wechatKeyQualityEnabled"
+    )
+    wechat_key_quality_threshold: float | None = Field(
+        default=None, alias="wechatKeyQualityThreshold", ge=1, le=100
+    )
+    wechat_key_quality_min_requests: int | None = Field(
+        default=None, alias="wechatKeyQualityMinRequests", ge=1, le=10_000
+    )
+    wechat_key_quality_cooldown_minutes: int | None = Field(
+        default=None, alias="wechatKeyQualityCooldownMinutes", ge=1, le=24 * 60
+    )
+    wechat_key_quality_keys: list[dict[str, Any]] | None = Field(
+        default=None, alias="wechatKeyQualityKeys", max_length=100
+    )
+    wechat_upstream_health_15m_enabled: bool | None = Field(
+        default=None, alias="wechatUpstreamHealth15mEnabled"
+    )
+    wechat_upstream_health_15m_threshold: float | None = Field(
+        default=None, alias="wechatUpstreamHealth15mThreshold", ge=1, le=100
+    )
+    wechat_upstream_health_15m_min_requests: int | None = Field(
+        default=None, alias="wechatUpstreamHealth15mMinRequests", ge=1, le=10_000
+    )
+    wechat_upstream_health_30m_enabled: bool | None = Field(
+        default=None, alias="wechatUpstreamHealth30mEnabled"
+    )
+    wechat_upstream_health_30m_threshold: float | None = Field(
+        default=None, alias="wechatUpstreamHealth30mThreshold", ge=1, le=100
+    )
+    wechat_upstream_health_30m_min_requests: int | None = Field(
+        default=None, alias="wechatUpstreamHealth30mMinRequests", ge=1, le=10_000
+    )
+    wechat_upstream_health_cooldown_minutes: int | None = Field(
+        default=None,
+        alias="wechatUpstreamHealthCooldownMinutes",
+        ge=1,
+        le=24 * 60,
+    )
     scheduler_enabled: bool | None = Field(default=None, alias="schedulerEnabled")
     quarantine_recovery_enabled: bool | None = Field(
         default=None, alias="quarantineRecoveryEnabled"
@@ -608,6 +653,12 @@ class RuntimeSettingsInput(BaseModel):
         for alias in self.clear_secrets:
             result[clear_mapping[alias]] = ""
         return result
+
+
+class WechatTestInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    scenario: Literal["account", "keyQuality", "upstreamHealth"] = "account"
 
 
 class RequestAuditScanInput(BaseModel):

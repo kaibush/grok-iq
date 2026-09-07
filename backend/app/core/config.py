@@ -131,6 +131,20 @@ class Settings(BaseSettings):
     wechat_app_secret: str = ""
     wechat_openid: str = ""
     wechat_template_id: str = ""
+    wechat_key_quality_template_id: str = ""
+    wechat_upstream_health_template_id: str = ""
+    wechat_key_quality_enabled: bool = False
+    wechat_key_quality_threshold: float = Field(default=90.0, ge=1, le=100)
+    wechat_key_quality_min_requests: int = Field(default=20, ge=1, le=10_000)
+    wechat_key_quality_cooldown_minutes: int = Field(default=30, ge=1, le=24 * 60)
+    wechat_key_quality_keys: list[dict[str, Any]] = Field(default_factory=list)
+    wechat_upstream_health_15m_enabled: bool = False
+    wechat_upstream_health_15m_threshold: float = Field(default=80.0, ge=1, le=100)
+    wechat_upstream_health_15m_min_requests: int = Field(default=10, ge=1, le=10_000)
+    wechat_upstream_health_30m_enabled: bool = False
+    wechat_upstream_health_30m_threshold: float = Field(default=80.0, ge=1, le=100)
+    wechat_upstream_health_30m_min_requests: int = Field(default=20, ge=1, le=10_000)
+    wechat_upstream_health_cooldown_minutes: int = Field(default=15, ge=1, le=24 * 60)
 
     # User-created probe plans and GrokIQ-owned quarantine recovery are
     # independently configurable while sharing the same scheduler process.
@@ -269,6 +283,20 @@ class Settings(BaseSettings):
         "wechat_app_secret",
         "wechat_openid",
         "wechat_template_id",
+        "wechat_key_quality_template_id",
+        "wechat_upstream_health_template_id",
+        "wechat_key_quality_enabled",
+        "wechat_key_quality_threshold",
+        "wechat_key_quality_min_requests",
+        "wechat_key_quality_cooldown_minutes",
+        "wechat_key_quality_keys",
+        "wechat_upstream_health_15m_enabled",
+        "wechat_upstream_health_15m_threshold",
+        "wechat_upstream_health_15m_min_requests",
+        "wechat_upstream_health_30m_enabled",
+        "wechat_upstream_health_30m_threshold",
+        "wechat_upstream_health_30m_min_requests",
+        "wechat_upstream_health_cooldown_minutes",
         "scheduler_enabled",
         "quarantine_recovery_enabled",
         "scheduler_timezone",

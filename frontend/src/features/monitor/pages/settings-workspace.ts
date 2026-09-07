@@ -3,6 +3,7 @@ import type {
   EditableRuntimeSettings,
   ProbeProfile,
   SecretSettingName,
+  WechatTestScenario,
 } from '@/lib/api'
 import type {
   SettingsForm,
@@ -21,7 +22,7 @@ export type SettingsWorkspaceValue = {
   webhookUrl: string
   busy: boolean
   wechatTestPending: boolean
-  testWechat: () => void
+  testWechat: (scenario: WechatTestScenario) => void
   restoreRecommendedRiskScoring: () => void
 }
 

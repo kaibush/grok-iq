@@ -27,6 +27,7 @@ class RuntimeSettingsValidator:
         self._normalize_register_strategy(candidate)
         self._normalize_register_callback(candidate)
         self._normalize_wechat(candidate)
+        self._normalize_wechat_alerts(candidate)
         self._normalize_sso_proxy(candidate)
         return candidate
 
@@ -226,17 +227,38 @@ class RuntimeSettingsValidator:
         candidate.wechat_app_secret = candidate.wechat_app_secret.strip()
         candidate.wechat_openid = candidate.wechat_openid.strip()
         candidate.wechat_template_id = candidate.wechat_template_id.strip()
+        candidate.wechat_key_quality_template_id = (
+            candidate.wechat_key_quality_template_id.strip()
+        )
+        candidate.wechat_upstream_health_template_id = (
+            candidate.wechat_upstream_health_template_id.strip()
+        )
         if not candidate.wechat_notification_enabled:
             return
         required = {
             "AppID": candidate.wechat_app_id,
             "AppSecret": candidate.wechat_app_secret,
             "OpenID": candidate.wechat_openid,
-            "模板 ID": candidate.wechat_template_id,
+            "账号异常模板 ID": candidate.wechat_template_id,
         }
         missing = [label for label, value in required.items() if not value]
         if missing:
-            raise ValueError(f"开启微信异常推送前请填写：{'、'.join(missing)}")
+            raise ValueError(f"开启微信推送前请填写：{'、'.join(missing)}")
+
+    @staticmethod
+    def _normalize_wechat_alerts(candidate: Settings) -> None:
+        candidate.wechat_key_quality_keys = normalize_wechat_keys(
+            candidate.wechat_key_quality_keys
+        )
+        if not candidate.wechat_notification_enabled:
+            return
+        if candidate.wechat_key_quality_enabled and not candidate.wechat_key_quality_template_id:
+            raise ValueError("开启密钥正常率通知前请填写对应模板 ID")
+        if (
+            candidate.wechat_upstream_health_15m_enabled
+            or candidate.wechat_upstream_health_30m_enabled
+        ) and not candidate.wechat_upstream_health_template_id:
+            raise ValueError("开启上游成功率通知前请填写对应模板 ID")
 
     @staticmethod
     def _normalize_sso_proxy(candidate: Settings) -> None:
@@ -245,3 +267,37 @@ class RuntimeSettingsValidator:
             candidate.sso_proxy = ""
             return
         candidate.sso_proxy = normalize_proxy(raw)
+
+
+def normalize_wechat_keys(raw: list[object]) -> list[dict[str, object]]:
+    values: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("微信密钥通知项必须是对象")
+        key_id = str(item.get("id") or "").strip()
+        if not key_id:
+            raise ValueError("微信密钥通知项缺少 Key ID")
+        if len(key_id) > 160:
+            raise ValueError("微信密钥 ID 不能超过 160 个字符")
+        if key_id == "unlabeled":
+            raise ValueError("未记录 Key 不能用于正常率通知")
+        if key_id in seen:
+            raise ValueError(f"微信密钥通知项重复: {key_id}")
+        seen.add(key_id)
+        name = str(item.get("name") or "").strip()
+        if len(name) > 160:
+            raise ValueError("微信密钥名称不能超过 160 个字符")
+        normalized: dict[str, object] = {"id": key_id, "name": name}
+        if "threshold" in item and item.get("threshold") is not None:
+            try:
+                threshold = float(item.get("threshold"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"微信密钥阈值无效: {key_id}") from exc
+            if not 1 <= threshold <= 100:
+                raise ValueError(f"微信密钥阈值需在 1–100 之间: {key_id}")
+            normalized["threshold"] = round(threshold, 1)
+        values.append(normalized)
+    if len(values) > 100:
+        raise ValueError("密钥正常率通知最多选择 100 个 Key")
+    return values

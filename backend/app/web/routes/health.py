@@ -66,7 +66,6 @@ def build_health_router(
                     settings.wechat_app_id
                     and settings.wechat_app_secret
                     and settings.wechat_openid
-                    and settings.wechat_template_id
                 ),
             },
         }

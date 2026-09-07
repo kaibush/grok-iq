@@ -1394,6 +1394,14 @@ export type RequestAuditClientKeyOption = {
   lastSeenAt?: string | null
 }
 
+export type WechatAlertKey = {
+  id: string
+  name: string
+  threshold?: number
+}
+
+export type WechatTestScenario = 'account' | 'keyQuality' | 'upstreamHealth'
+
 export type RequestAuditPage = {
   day: string
   provider: string
@@ -1903,6 +1911,20 @@ export type RuntimeSettings = {
   wechatAppSecretConfigured: boolean
   wechatOpenid: string
   wechatTemplateId: string
+  wechatKeyQualityTemplateId: string
+  wechatUpstreamHealthTemplateId: string
+  wechatKeyQualityEnabled: boolean
+  wechatKeyQualityThreshold: number
+  wechatKeyQualityMinRequests: number
+  wechatKeyQualityCooldownMinutes: number
+  wechatKeyQualityKeys: WechatAlertKey[]
+  wechatUpstreamHealth15mEnabled: boolean
+  wechatUpstreamHealth15mThreshold: number
+  wechatUpstreamHealth15mMinRequests: number
+  wechatUpstreamHealth30mEnabled: boolean
+  wechatUpstreamHealth30mThreshold: number
+  wechatUpstreamHealth30mMinRequests: number
+  wechatUpstreamHealthCooldownMinutes: number
   schedulerEnabled: boolean
   quarantineRecoveryEnabled: boolean
   schedulerTimezone: string
@@ -2019,6 +2041,20 @@ export type RuntimeSettingsUpdate = Partial<
     | 'wechatAppId'
     | 'wechatOpenid'
     | 'wechatTemplateId'
+    | 'wechatKeyQualityTemplateId'
+    | 'wechatUpstreamHealthTemplateId'
+    | 'wechatKeyQualityEnabled'
+    | 'wechatKeyQualityThreshold'
+    | 'wechatKeyQualityMinRequests'
+    | 'wechatKeyQualityCooldownMinutes'
+    | 'wechatKeyQualityKeys'
+    | 'wechatUpstreamHealth15mEnabled'
+    | 'wechatUpstreamHealth15mThreshold'
+    | 'wechatUpstreamHealth15mMinRequests'
+    | 'wechatUpstreamHealth30mEnabled'
+    | 'wechatUpstreamHealth30mThreshold'
+    | 'wechatUpstreamHealth30mMinRequests'
+    | 'wechatUpstreamHealthCooldownMinutes'
     | 'schedulerEnabled'
     | 'quarantineRecoveryEnabled'
     | 'schedulerTimezone'
@@ -2408,6 +2444,27 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     ssoProxyConfigured: value.ssoProxyConfigured ?? false,
     wechatOpenid: value.wechatOpenid ?? '',
     wechatTemplateId: value.wechatTemplateId ?? '',
+    wechatKeyQualityTemplateId: value.wechatKeyQualityTemplateId ?? '',
+    wechatUpstreamHealthTemplateId: value.wechatUpstreamHealthTemplateId ?? '',
+    wechatKeyQualityEnabled: value.wechatKeyQualityEnabled ?? false,
+    wechatKeyQualityThreshold: value.wechatKeyQualityThreshold ?? 90,
+    wechatKeyQualityMinRequests: value.wechatKeyQualityMinRequests ?? 20,
+    wechatKeyQualityCooldownMinutes: value.wechatKeyQualityCooldownMinutes ?? 30,
+    wechatKeyQualityKeys: Array.isArray(value.wechatKeyQualityKeys)
+      ? value.wechatKeyQualityKeys
+      : [],
+    wechatUpstreamHealth15mEnabled: value.wechatUpstreamHealth15mEnabled ?? false,
+    wechatUpstreamHealth15mThreshold:
+      value.wechatUpstreamHealth15mThreshold ?? 80,
+    wechatUpstreamHealth15mMinRequests:
+      value.wechatUpstreamHealth15mMinRequests ?? 10,
+    wechatUpstreamHealth30mEnabled: value.wechatUpstreamHealth30mEnabled ?? false,
+    wechatUpstreamHealth30mThreshold:
+      value.wechatUpstreamHealth30mThreshold ?? 80,
+    wechatUpstreamHealth30mMinRequests:
+      value.wechatUpstreamHealth30mMinRequests ?? 20,
+    wechatUpstreamHealthCooldownMinutes:
+      value.wechatUpstreamHealthCooldownMinutes ?? 15,
     degradationTps: value.degradationTps ?? value.softTps ?? 150,
     strongDegradationTps: value.strongDegradationTps ?? value.hardTps ?? 500,
     probeTpsOverrideMode: normalizeProbeTpsOverrideMode(
@@ -3853,13 +3910,25 @@ export const api = {
       baseUrl: string
       grokBuild: Record<string, unknown>
     }>('/settings/test-grok2api', { method: 'POST' }),
-  testWechat: () =>
+  testWechat: (scenario: WechatTestScenario = 'account') =>
     request<{
       ok: boolean
       sent: number
       templateId: string
+      scenario: WechatTestScenario
       messages: { openId: string; messageId: string }[]
-    }>('/settings/test-wechat', { method: 'POST' }),
+    }>('/settings/test-wechat', {
+      method: 'POST',
+      body: JSON.stringify({ scenario }),
+    }),
+  requestAuditClientKeys: (
+    params: Record<string, string | number | undefined> = {}
+  ) =>
+    request<{
+      provider: string
+      window: RequestAuditWindow
+      clientKeys: RequestAuditClientKeyOption[]
+    }>(`/request-audits/client-keys${query(params)}`),
   chatProviders: () => request<ChatProvider[]>('/chat/providers'),
   revealChatProviderApiKey: (id: string) =>
     request<{ value: string }>(`/chat/providers/${id}/api-key`),

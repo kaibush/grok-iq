@@ -19,6 +19,7 @@ from app.persistence.page_visit_repository import PageVisitRepository
 from app.persistence.probe_repository import ProbeRepository
 from app.persistence.register_event_repository import RegisterEventRepository
 from app.persistence.request_audit_repository import RequestAuditRepository
+from app.persistence.wechat_alert_repository import WeChatAlertRepository
 from app.persistence.settings_repository import SettingsRepository
 from app.persistence.sso_report_repository import SsoReportRepository
 from app.services.account_service import AccountService
@@ -35,6 +36,7 @@ from app.services.settings_service import RuntimeSettingsService
 from app.services.sso_report_service import SsoReportService
 from app.services.tps_fuse_sync import TpsFuseSyncService
 from app.services.update_check import UpdateCheckService
+from app.services.wechat_metric_alerts import WeChatMetricAlertService
 from app.services.wechat_notification import WeChatAccountNotificationService
 from app.web.exception_handlers import install_exception_handlers
 from app.web.router import build_router
@@ -49,6 +51,7 @@ auth_repository = AuthRepository(database)
 chat_provider_repository = ChatProviderRepository(database, settings)
 probe_repository = ProbeRepository(database)
 request_audit_repository = RequestAuditRepository(database)
+wechat_alert_repository = WeChatAlertRepository(database)
 page_visit_repository = PageVisitRepository(database)
 settings_repository = SettingsRepository(database, settings)
 register_event_repository = RegisterEventRepository(database)
@@ -107,6 +110,13 @@ request_audit_service = RequestAuditService(
     account_service=account_service,
     tps_fuse_sync=tps_fuse_sync,
 )
+wechat_metric_alerts = WeChatMetricAlertService(
+    settings=settings,
+    notifications=wechat_notification_service,
+    request_audits=request_audit_service,
+    repository=wechat_alert_repository,
+)
+request_audit_service.metric_alert_callback = wechat_metric_alerts.evaluate_after_scan
 page_visit_service = PageVisitService(
     page_visit_repository,
     auth_service=auth_service,

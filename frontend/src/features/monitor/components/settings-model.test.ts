@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   mergeEnabledProfileIds,
   moveOrderedId,
+  normalizeWechatAlertKeys,
   syncRegisterProbeProfileRounds,
+  toggleWechatAlertKey,
 } from './settings-model'
 
 describe('moveOrderedId', () => {
@@ -33,5 +35,34 @@ describe('syncRegisterProbeProfileRounds', () => {
         3
       )
     ).toEqual({ b: 1, a: 4 })
+  })
+})
+
+describe('normalizeWechatAlertKeys', () => {
+  it('drops unlabeled, duplicate, and invalid keys', () => {
+    expect(
+      normalizeWechatAlertKeys([
+        { id: 'key-1', name: '生产' },
+        { id: 'unlabeled', name: '未记录 Key' },
+        { id: 'key-1', name: '重复' },
+        { id: ' key-2 ', name: ' 备用 ', threshold: 88.2 },
+        { id: '', name: 'empty' },
+        null,
+      ] as unknown)
+    ).toEqual([
+      { id: 'key-1', name: '生产' },
+      { id: 'key-2', name: '备用', threshold: 88.2 },
+    ])
+  })
+})
+
+describe('toggleWechatAlertKey', () => {
+  it('adds and removes a labeled key without touching unlabeled', () => {
+    const added = toggleWechatAlertKey([], { id: 'key-1', name: '生产' })
+    expect(added).toEqual([{ id: 'key-1', name: '生产' }])
+    expect(toggleWechatAlertKey(added, { id: 'key-1' })).toEqual([])
+    expect(
+      toggleWechatAlertKey(added, { id: 'unlabeled', name: '未记录 Key' })
+    ).toEqual(added)
   })
 })

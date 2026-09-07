@@ -37,6 +37,11 @@ SOURCE_LABELS = {
 }
 DEFAULT_NOTIFICATION_TITLE = "账号异常提醒"
 DEFAULT_NOTIFICATION_REMARK = "请登录监控后台查看样本证据并及时处理。"
+KEY_QUALITY_NOTIFICATION_TITLE = "密钥正常率告警"
+KEY_QUALITY_NOTIFICATION_REMARK = "请登录请求审计，按该 Key 过滤最近 1 小时流水。"
+UPSTREAM_HEALTH_NOTIFICATION_TITLE = "上游成功率告警"
+UPSTREAM_HEALTH_NOTIFICATION_REMARK = "请打开 /status 查看 15 / 30 分钟成功率。"
+WECHAT_TEST_SCENARIOS = ("account", "keyQuality", "upstreamHealth")
 logger = logging.getLogger(__name__)
 
 
@@ -165,7 +170,8 @@ class WeChatAccountNotificationService:
                 reason,
             )
             return {"sent": 0, "skipped": reason}
-        result = await self.client.send_to_recipient(
+        result = await self.send_template(
+            template_id=self.settings.wechat_template_id,
             template_data=self.build_template_data(
                 account=account,
                 current=current,
@@ -182,28 +188,137 @@ class WeChatAccountNotificationService:
         )
         return result
 
-    async def send_test(self) -> dict[str, Any]:
+    async def send_template(
+        self,
+        *,
+        template_id: str,
+        template_data: dict[str, dict[str, str]],
+    ) -> dict[str, Any]:
+        chosen = str(template_id or "").strip()
+        if not chosen:
+            return {"sent": 0, "skipped": "missing_template"}
+        return await self.client.send_to_recipient(
+            template_data=template_data,
+            template_id=chosen,
+        )
+
+    @staticmethod
+    def build_key_quality_template_data(
+        *,
+        key_id: str,
+        key_name: str,
+        window: str,
+        rate: float,
+        threshold: float,
+        requests: int,
+        watch_requests: int,
+        high_risk_requests: int,
+        occurred_at: datetime | None = None,
+    ) -> dict[str, dict[str, str]]:
+        label = _compact(key_name, 80) or _compact(key_id, 80) or "未命名 Key"
+        if key_name and key_id and key_name != key_id:
+            label = _compact(f"{key_name} · {key_id}", 150)
+        timestamp = to_app_timezone(occurred_at) if occurred_at else app_now()
+        if timestamp is None:
+            timestamp = app_now()
+        return {
+            "first": _field(KEY_QUALITY_NOTIFICATION_TITLE, "#DC2626"),
+            "key": _field(label),
+            "window": _field(window),
+            "rate": _field(f"{rate:.1f}%", "#DC2626"),
+            "threshold": _field(f"{threshold:.1f}%"),
+            "requests": _field(str(int(requests))),
+            "abnormal": _field(
+                f"观察 {int(watch_requests)} · 高风险 {int(high_risk_requests)}"
+            ),
+            "time": _field(timestamp.strftime("%Y-%m-%d %H:%M:%S")),
+            "remark": _field(KEY_QUALITY_NOTIFICATION_REMARK),
+        }
+
+    @staticmethod
+    def build_upstream_health_template_data(
+        *,
+        window: str,
+        rate: float,
+        threshold: float,
+        requests: int,
+        failed_requests: int,
+        occurred_at: datetime | None = None,
+    ) -> dict[str, dict[str, str]]:
+        timestamp = to_app_timezone(occurred_at) if occurred_at else app_now()
+        if timestamp is None:
+            timestamp = app_now()
+        return {
+            "first": _field(UPSTREAM_HEALTH_NOTIFICATION_TITLE, "#DC2626"),
+            "window": _field(window),
+            "rate": _field(f"{rate:.1f}%", "#DC2626"),
+            "threshold": _field(f"{threshold:.1f}%"),
+            "requests": _field(str(int(requests))),
+            "failed": _field(str(int(failed_requests))),
+            "time": _field(timestamp.strftime("%Y-%m-%d %H:%M:%S")),
+            "remark": _field(UPSTREAM_HEALTH_NOTIFICATION_REMARK),
+        }
+
+    async def send_test(self, scenario: str = "account") -> dict[str, Any]:
         if not self.settings.wechat_notification_enabled:
-            raise ValueError("请先开启微信异常账号推送并保存设置")
-        account = {
-            "id": 10001,
-            "name": "测试账号",
-            "email": "test@example.com",
-        }
-        current = {
-            "monitor_status": "high_risk",
-            "risk_score": 86.5,
-            "latest_tps": 628.4,
-            "avg_tps": 412.7,
-            "risk_reasons": ["风险周期连续异常达到阈值", "强降智信号达到 2 次"],
-            "updated_at": app_now(),
-        }
-        result = await self.client.send_to_recipient(
-            template_data=self.build_template_data(
+            raise ValueError("请先开启微信推送并保存设置")
+        chosen = str(scenario or "account").strip() or "account"
+        if chosen not in WECHAT_TEST_SCENARIOS:
+            raise ValueError("未知的微信测试场景")
+        if chosen == "keyQuality":
+            template_id = self.settings.wechat_key_quality_template_id
+            if not template_id:
+                raise ValueError("请先填写密钥正常率模板 ID 并保存")
+            template_data = self.build_key_quality_template_data(
+                key_id="key-demo",
+                key_name="测试密钥",
+                window="最近 1 小时",
+                rate=82.0,
+                threshold=90.0,
+                requests=50,
+                watch_requests=6,
+                high_risk_requests=3,
+            )
+        elif chosen == "upstreamHealth":
+            template_id = self.settings.wechat_upstream_health_template_id
+            if not template_id:
+                raise ValueError("请先填写上游成功率模板 ID 并保存")
+            template_data = self.build_upstream_health_template_data(
+                window="最近 15 分钟",
+                rate=72.0,
+                threshold=80.0,
+                requests=40,
+                failed_requests=11,
+            )
+        else:
+            template_id = self.settings.wechat_template_id
+            if not template_id:
+                raise ValueError("请先填写账号异常模板 ID 并保存")
+            account = {
+                "id": 10001,
+                "name": "测试账号",
+                "email": "test@example.com",
+            }
+            current = {
+                "monitor_status": "high_risk",
+                "risk_score": 86.5,
+                "latest_tps": 628.4,
+                "avg_tps": 412.7,
+                "risk_reasons": ["风险周期连续异常达到阈值", "强降智信号达到 2 次"],
+                "updated_at": app_now(),
+            }
+            template_data = self.build_template_data(
                 account=account,
                 current=current,
                 source="test",
-            ),
+            )
+        result = await self.send_template(
+            template_id=template_id,
+            template_data=template_data,
         )
-        logger.info("wechat test notification sent sent=%s", result.get("sent", 0))
-        return {**result, "templateId": self.settings.wechat_template_id}
+        logger.info(
+            "wechat test notification sent scenario=%s sent=%s",
+            chosen,
+            result.get("sent", 0),
+        )
+        return {**result, "templateId": template_id, "scenario": chosen}

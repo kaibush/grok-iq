@@ -52,6 +52,38 @@ def build_request_audits_router(service: RequestAuditService) -> APIRouter:
             end_at=end_at,
         )
 
+    @router.get("/request-audits/client-keys")
+    def request_audit_client_keys(
+        response: Response,
+        window_preset: str = Query(
+            default="7d",
+            alias="window",
+            pattern="^(today|1h|3h|6h|24h|7d|30d|custom)$",
+        ),
+        start_at: str | None = Query(default=None, alias="startAt"),
+        end_at: str | None = Query(default=None, alias="endAt"),
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        window = service.resolve_window(
+            window_preset=window_preset,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        keys = [
+            item
+            for item in service.client_key_options_for_window(
+                window_preset,
+                start_at=start_at,
+                end_at=end_at,
+            )
+            if str(item.get("id") or "") != "unlabeled"
+        ]
+        return {
+            "provider": "grok_build",
+            "window": service._window_payload(window),
+            "clientKeys": keys,
+        }
+
     @router.get("/request-audits/summary")
     async def request_audit_summary(
         response: Response,

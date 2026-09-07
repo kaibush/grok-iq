@@ -30,6 +30,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/exports/high-risk"),
     ("GET", "/api/exports/request-audits"),
     ("GET", "/api/request-audits"),
+    ("GET", "/api/request-audits/client-keys"),
     ("GET", "/api/request-audits/summary"),
     ("GET", "/api/request-audits/account-history"),
     ("GET", "/api/request-audits/status"),

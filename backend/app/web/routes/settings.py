@@ -12,7 +12,7 @@ from app.services.scheduler import SchedulerService
 from app.services.settings_service import RuntimeSettingsService
 from app.services.tps_fuse_sync import TpsFuseSyncService, should_sync_runtime_changes
 from app.services.wechat_notification import WeChatAccountNotificationService
-from app.web.schemas import OnboardingCompleteInput, RuntimeSettingsInput
+from app.web.schemas import OnboardingCompleteInput, RuntimeSettingsInput, WechatTestInput
 
 from ._shared import disable_client_cache
 
@@ -159,8 +159,11 @@ def build_settings_router(
         }
 
     @router.post("/settings/test-wechat")
-    async def test_wechat_settings() -> dict[str, Any]:
-        result = await wechat.send_test()
+    async def test_wechat_settings(
+        payload: WechatTestInput | None = None,
+    ) -> dict[str, Any]:
+        scenario = (payload or WechatTestInput()).scenario
+        result = await wechat.send_test(scenario)
         return {"ok": True, **result}
 
     return router

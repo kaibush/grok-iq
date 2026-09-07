@@ -67,7 +67,7 @@ export const settingsSections = [
     value: 'notifications',
     href: '/settings/notifications',
     title: '通知推送',
-    description: '微信通知凭据、接收目标和测试消息。',
+    description: '微信通道、三种模板，以及密钥正常率和上游成功率告警。',
     icon: Bell,
   },
   {

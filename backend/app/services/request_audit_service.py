@@ -6,7 +6,7 @@ import json
 import logging
 import math
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
@@ -42,6 +42,8 @@ from app.services.request_audit_gateway import (
 if TYPE_CHECKING:
     from app.services.account_service import AccountService
     from app.services.tps_fuse_sync import TpsFuseSyncService
+
+MetricAlertCallback = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
 REQUEST_AUDIT_SCOPE = "grok_build_today"
 REQUEST_AUDIT_PAGE_SIZE = 500
@@ -940,6 +942,7 @@ class RequestAuditService:
         probes: ProbeRepository | None = None,
         account_service: AccountService | None = None,
         tps_fuse_sync: TpsFuseSyncService | None = None,
+        metric_alert_callback: MetricAlertCallback | None = None,
     ):
         self.settings = settings
         self.client = client
@@ -948,6 +951,7 @@ class RequestAuditService:
         self.probes = probes
         self.account_service = account_service
         self.tps_fuse_sync = tps_fuse_sync
+        self.metric_alert_callback = metric_alert_callback
         self._scan_lock = asyncio.Lock()
         self._egress_cache_lock = asyncio.Lock()
         self._account_cache_lock = asyncio.Lock()
@@ -1434,7 +1438,9 @@ class RequestAuditService:
             end_at=end_at,
         )
         async with self._scan_lock:
-            return await self._scan_locked(trigger=trigger, window=window)
+            result = await self._scan_locked(trigger=trigger, window=window)
+        await self._run_metric_alerts(result)
+        return result
 
     @staticmethod
     def _window_scope(window: dict[str, Any]) -> tuple[str, str]:
@@ -1465,6 +1471,32 @@ class RequestAuditService:
             await self.tps_fuse_sync.sync(trigger=trigger)
         except Exception as exc:
             logger.warning("grok2api tpsFuse sync failed: %s", exc)
+
+    async def _run_metric_alerts(self, result: dict[str, Any]) -> None:
+        if self.metric_alert_callback is None:
+            return
+        if not result.get("ok") or result.get("skipped"):
+            return
+        try:
+            result["wechatAlerts"] = await self.metric_alert_callback(result)
+        except Exception:
+            logger.exception("wechat metric alerts failed after request audit scan")
+
+    def client_key_options_for_window(
+        self,
+        window_preset: str = "1h",
+        *,
+        start_at: Any = None,
+        end_at: Any = None,
+    ) -> list[dict[str, Any]]:
+        window = self.resolve_window(
+            window_preset=window_preset,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        return self._client_key_options(
+            self.repository.client_key_pairs_for_range(window["start"], window["end"])
+        )
 
     def _skipped_scan(
         self,

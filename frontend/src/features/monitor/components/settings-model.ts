@@ -7,6 +7,7 @@ import type {
   RuntimeSettings,
   RuntimeSettingsUpdate,
   SecretSettingName,
+  WechatAlertKey,
 } from '@/lib/api'
 
 export type SettingsForm = {
@@ -34,6 +35,20 @@ export type SettingsForm = {
   wechatAppSecret: string
   wechatOpenid: string
   wechatTemplateId: string
+  wechatKeyQualityTemplateId: string
+  wechatUpstreamHealthTemplateId: string
+  wechatKeyQualityEnabled: boolean
+  wechatKeyQualityThreshold: number
+  wechatKeyQualityMinRequests: number
+  wechatKeyQualityCooldownMinutes: number
+  wechatKeyQualityKeys: WechatAlertKey[]
+  wechatUpstreamHealth15mEnabled: boolean
+  wechatUpstreamHealth15mThreshold: number
+  wechatUpstreamHealth15mMinRequests: number
+  wechatUpstreamHealth30mEnabled: boolean
+  wechatUpstreamHealth30mThreshold: number
+  wechatUpstreamHealth30mMinRequests: number
+  wechatUpstreamHealthCooldownMinutes: number
   probeWorkerConcurrency: number
   probeQueueLimit: number
   probeStepDelaySeconds: number
@@ -293,6 +308,60 @@ TPS：{{tps.DATA}}
 时间：{{time.DATA}}
 {{remark.DATA}}`
 
+export const WECHAT_KEY_QUALITY_TEMPLATE_BODY = `{{first.DATA}}
+密钥：{{key.DATA}}
+窗口：{{window.DATA}}
+正常率：{{rate.DATA}}
+阈值：{{threshold.DATA}}
+请求量：{{requests.DATA}}
+异常：{{abnormal.DATA}}
+时间：{{time.DATA}}
+{{remark.DATA}}`
+
+export const WECHAT_UPSTREAM_HEALTH_TEMPLATE_BODY = `{{first.DATA}}
+窗口：{{window.DATA}}
+成功率：{{rate.DATA}}
+阈值：{{threshold.DATA}}
+请求量：{{requests.DATA}}
+失败：{{failed.DATA}}
+时间：{{time.DATA}}
+{{remark.DATA}}`
+
+export function normalizeWechatAlertKeys(keys: unknown): WechatAlertKey[] {
+  if (!Array.isArray(keys)) return []
+  const seen = new Set<string>()
+  const values: WechatAlertKey[] = []
+  for (const item of keys) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as { id?: unknown; name?: unknown; threshold?: unknown }
+    const id = String(record.id ?? '').trim()
+    if (!id || id === 'unlabeled' || seen.has(id)) continue
+    seen.add(id)
+    const next: WechatAlertKey = {
+      id,
+      name: String(record.name ?? '').trim(),
+    }
+    const threshold = Number(record.threshold)
+    if (Number.isFinite(threshold) && threshold >= 1 && threshold <= 100) {
+      next.threshold = threshold
+    }
+    values.push(next)
+  }
+  return values
+}
+
+export function toggleWechatAlertKey(
+  keys: WechatAlertKey[],
+  option: { id: string; name?: string }
+): WechatAlertKey[] {
+  const id = option.id.trim()
+  if (!id || id === 'unlabeled') return keys
+  if (keys.some((item) => item.id === id)) {
+    return keys.filter((item) => item.id !== id)
+  }
+  return [...keys, { id, name: option.name?.trim() || '' }]
+}
+
 export function registerWebhookUrl() {
   if (typeof window === 'undefined') return REGISTER_WEBHOOK_PATH
   return new URL(REGISTER_WEBHOOK_PATH, window.location.origin).toString()
@@ -332,6 +401,23 @@ export function toSettingsForm(
     wechatAppSecret: settings.wechatAppSecret,
     wechatOpenid: settings.wechatOpenid,
     wechatTemplateId: settings.wechatTemplateId,
+    wechatKeyQualityTemplateId: settings.wechatKeyQualityTemplateId ?? '',
+    wechatUpstreamHealthTemplateId: settings.wechatUpstreamHealthTemplateId ?? '',
+    wechatKeyQualityEnabled: settings.wechatKeyQualityEnabled ?? false,
+    wechatKeyQualityThreshold: settings.wechatKeyQualityThreshold ?? 90,
+    wechatKeyQualityMinRequests: settings.wechatKeyQualityMinRequests ?? 20,
+    wechatKeyQualityCooldownMinutes: settings.wechatKeyQualityCooldownMinutes ?? 30,
+    wechatKeyQualityKeys: normalizeWechatAlertKeys(settings.wechatKeyQualityKeys),
+    wechatUpstreamHealth15mEnabled: settings.wechatUpstreamHealth15mEnabled ?? false,
+    wechatUpstreamHealth15mThreshold: settings.wechatUpstreamHealth15mThreshold ?? 80,
+    wechatUpstreamHealth15mMinRequests:
+      settings.wechatUpstreamHealth15mMinRequests ?? 10,
+    wechatUpstreamHealth30mEnabled: settings.wechatUpstreamHealth30mEnabled ?? false,
+    wechatUpstreamHealth30mThreshold: settings.wechatUpstreamHealth30mThreshold ?? 80,
+    wechatUpstreamHealth30mMinRequests:
+      settings.wechatUpstreamHealth30mMinRequests ?? 20,
+    wechatUpstreamHealthCooldownMinutes:
+      settings.wechatUpstreamHealthCooldownMinutes ?? 15,
     probeWorkerConcurrency: settings.probeWorkerConcurrency,
     probeQueueLimit: settings.probeQueueLimit,
     probeStepDelaySeconds: settings.probeStepDelaySeconds,
@@ -465,6 +551,20 @@ export function buildSettingsPayload(
     wechatAppId: form.wechatAppId.trim(),
     wechatOpenid: form.wechatOpenid.trim(),
     wechatTemplateId: form.wechatTemplateId.trim(),
+    wechatKeyQualityTemplateId: form.wechatKeyQualityTemplateId.trim(),
+    wechatUpstreamHealthTemplateId: form.wechatUpstreamHealthTemplateId.trim(),
+    wechatKeyQualityEnabled: form.wechatKeyQualityEnabled,
+    wechatKeyQualityThreshold: form.wechatKeyQualityThreshold,
+    wechatKeyQualityMinRequests: form.wechatKeyQualityMinRequests,
+    wechatKeyQualityCooldownMinutes: form.wechatKeyQualityCooldownMinutes,
+    wechatKeyQualityKeys: normalizeWechatAlertKeys(form.wechatKeyQualityKeys),
+    wechatUpstreamHealth15mEnabled: form.wechatUpstreamHealth15mEnabled,
+    wechatUpstreamHealth15mThreshold: form.wechatUpstreamHealth15mThreshold,
+    wechatUpstreamHealth15mMinRequests: form.wechatUpstreamHealth15mMinRequests,
+    wechatUpstreamHealth30mEnabled: form.wechatUpstreamHealth30mEnabled,
+    wechatUpstreamHealth30mThreshold: form.wechatUpstreamHealth30mThreshold,
+    wechatUpstreamHealth30mMinRequests: form.wechatUpstreamHealth30mMinRequests,
+    wechatUpstreamHealthCooldownMinutes: form.wechatUpstreamHealthCooldownMinutes,
     probeWorkerConcurrency: form.probeWorkerConcurrency,
     probeQueueLimit: form.probeQueueLimit,
     probeStepDelaySeconds: form.probeStepDelaySeconds,
@@ -684,8 +784,24 @@ export function validateSettings(form: SettingsForm) {
       !form.wechatTemplateId.trim())
   ) {
     throw new Error(
-      '开启微信异常推送前请填写 AppID、AppSecret、OpenID 和模板 ID'
+      '开启微信推送前请填写 AppID、AppSecret、OpenID 和账号异常模板 ID'
     )
+  }
+  if (form.wechatNotificationEnabled && form.wechatKeyQualityEnabled) {
+    if (!form.wechatKeyQualityTemplateId.trim()) {
+      throw new Error('开启密钥正常率通知前请填写对应模板 ID')
+    }
+    if (form.wechatKeyQualityKeys.length > 100) {
+      throw new Error('密钥正常率通知最多选择 100 个 Key')
+    }
+  }
+  if (
+    form.wechatNotificationEnabled &&
+    (form.wechatUpstreamHealth15mEnabled ||
+      form.wechatUpstreamHealth30mEnabled) &&
+    !form.wechatUpstreamHealthTemplateId.trim()
+  ) {
+    throw new Error('开启上游成功率通知前请填写对应模板 ID')
   }
   if (form.initialProbeOnRegister && !form.registerProbeProfileIds.length) {
     throw new Error('注册后探针至少选择一个探针方案')

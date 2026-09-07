@@ -98,11 +98,12 @@ class WeChatTestAccountClient:
         *,
         access_token: str,
         open_id: str,
+        template_id: str,
         template_data: dict[str, dict[str, str]],
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "touser": open_id,
-            "template_id": self.settings.wechat_template_id,
+            "template_id": template_id,
             "data": template_data,
         }
         try:
@@ -123,13 +124,18 @@ class WeChatTestAccountClient:
         self,
         *,
         open_id: str,
+        template_id: str,
         template_data: dict[str, dict[str, str]],
     ) -> str:
+        chosen = str(template_id or "").strip()
+        if not chosen:
+            raise WeChatIntegrationError("微信模板 ID 尚未配置")
         for attempt in range(2):
             token = await self.access_token()
             payload = await self._send_once(
                 access_token=token,
                 open_id=open_id,
+                template_id=chosen,
                 template_data=template_data,
             )
             error_code = int(payload.get("errcode") or 0)
@@ -145,12 +151,14 @@ class WeChatTestAccountClient:
         self,
         *,
         template_data: dict[str, dict[str, str]],
+        template_id: str = "",
     ) -> dict[str, Any]:
         open_id = self.settings.wechat_openid.strip()
         if not open_id:
             raise WeChatIntegrationError("微信推送 OpenID 尚未配置")
         message_id = await self.send_template_message(
             open_id=open_id,
+            template_id=template_id or self.settings.wechat_template_id,
             template_data=template_data,
         )
         return {
