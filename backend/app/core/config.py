@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GROKIQ_", env_file=".env", extra="ignore")
 
     app_name: str = "GrokIQ"
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8090
     debug: bool = False
     # Resolve the source-tree default from this module instead of the process

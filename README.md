@@ -475,7 +475,7 @@ docker compose up -d --build
 python3 -m venv .venv
 .venv/bin/pip install -e 'backend[dev]'
 cd backend
-../.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8090 --reload --http h11
+../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090 --reload --http h11
 ```
 
 前端：
