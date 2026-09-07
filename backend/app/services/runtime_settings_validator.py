@@ -239,7 +239,6 @@ class RuntimeSettingsValidator:
             "AppID": candidate.wechat_app_id,
             "AppSecret": candidate.wechat_app_secret,
             "OpenID": candidate.wechat_openid,
-            "账号异常模板 ID": candidate.wechat_template_id,
         }
         missing = [label for label, value in required.items() if not value]
         if missing:
@@ -252,6 +251,8 @@ class RuntimeSettingsValidator:
         )
         if not candidate.wechat_notification_enabled:
             return
+        if candidate.wechat_account_alert_enabled and not candidate.wechat_template_id:
+            raise ValueError("开启账号异常通知前请填写对应模板 ID")
         if candidate.wechat_key_quality_enabled and not candidate.wechat_key_quality_template_id:
             raise ValueError("开启密钥正常率通知前请填写对应模板 ID")
         if (

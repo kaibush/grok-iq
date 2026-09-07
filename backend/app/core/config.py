@@ -133,6 +133,7 @@ class Settings(BaseSettings):
     wechat_template_id: str = ""
     wechat_key_quality_template_id: str = ""
     wechat_upstream_health_template_id: str = ""
+    wechat_account_alert_enabled: bool = False
     wechat_key_quality_enabled: bool = False
     wechat_key_quality_threshold: float = Field(default=90.0, ge=1, le=100)
     wechat_key_quality_min_requests: int = Field(default=20, ge=1, le=10_000)
@@ -285,6 +286,7 @@ class Settings(BaseSettings):
         "wechat_template_id",
         "wechat_key_quality_template_id",
         "wechat_upstream_health_template_id",
+        "wechat_account_alert_enabled",
         "wechat_key_quality_enabled",
         "wechat_key_quality_threshold",
         "wechat_key_quality_min_requests",

@@ -15,6 +15,7 @@ from app.services.runtime_settings_validator import RuntimeSettingsValidator
 
 REGISTER_FIXED_STRATEGY_MIGRATION_KEY = "register_probe_fixed_strategy_v2"
 PROBE_TPS_OVERRIDE_DEFAULT_MODE_KEY = "probe_tps_override_missing_reasoning_default_v1"
+WECHAT_ACCOUNT_ALERT_SWITCH_MIGRATION_KEY = "wechat_account_alert_switch_v1"
 INITIAL_ONBOARDING_COMPLETED_KEY = "initial_onboarding_completed_v1"
 RISK_RULE_SWITCH_FIELDS = {
     "reasoning_zero": "reasoning_zero_risk_enabled",
@@ -79,6 +80,19 @@ class RuntimeSettingsService:
                 self.repository.save(migrated)
             self.repository.mark_migration_applied(
                 PROBE_TPS_OVERRIDE_DEFAULT_MODE_KEY
+            )
+        if not self.repository.migration_applied(
+            WECHAT_ACCOUNT_ALERT_SWITCH_MIGRATION_KEY
+        ):
+            if (
+                "wechat_account_alert_enabled" not in overrides
+                and overrides.get("wechat_notification_enabled")
+            ):
+                migrated = {"wechat_account_alert_enabled": True}
+                overrides.update(migrated)
+                self.repository.save(migrated)
+            self.repository.mark_migration_applied(
+                WECHAT_ACCOUNT_ALERT_SWITCH_MIGRATION_KEY
             )
         if not overrides:
             return
@@ -228,6 +242,7 @@ class RuntimeSettingsService:
             "wechatTemplateId": s.wechat_template_id,
             "wechatKeyQualityTemplateId": s.wechat_key_quality_template_id,
             "wechatUpstreamHealthTemplateId": s.wechat_upstream_health_template_id,
+            "wechatAccountAlertEnabled": s.wechat_account_alert_enabled,
             "wechatKeyQualityEnabled": s.wechat_key_quality_enabled,
             "wechatKeyQualityThreshold": s.wechat_key_quality_threshold,
             "wechatKeyQualityMinRequests": s.wechat_key_quality_min_requests,

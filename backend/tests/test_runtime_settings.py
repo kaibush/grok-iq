@@ -737,7 +737,7 @@ def test_register_callback_setting_requires_url_and_is_persisted(tmp_path: Path)
     assert reloaded_settings.register_callback_timeout_seconds == 8
 
 
-def test_wechat_notifications_require_the_four_test_account_values(tmp_path: Path):
+def test_wechat_notifications_require_channel_credentials(tmp_path: Path):
     database, settings, service = build_service(tmp_path)
     with pytest.raises(ValueError, match="AppID、AppSecret、OpenID"):
         service.update({"wechat_notification_enabled": True})
@@ -748,7 +748,6 @@ def test_wechat_notifications_require_the_four_test_account_values(tmp_path: Pat
             "wechat_app_id": "wx-test",
             "wechat_app_secret": "wechat-secret",
             "wechat_openid": "openid-test",
-            "wechat_template_id": "template-test",
         }
     )
     assert changed == [
@@ -756,10 +755,11 @@ def test_wechat_notifications_require_the_four_test_account_values(tmp_path: Pat
         "wechat_app_secret",
         "wechat_notification_enabled",
         "wechat_openid",
-        "wechat_template_id",
     ]
     assert settings.wechat_notification_enabled is True
+    assert settings.wechat_account_alert_enabled is False
     assert service.public_view()["wechatAppSecretConfigured"] is True
+    assert service.public_view()["wechatAccountAlertEnabled"] is False
 
     with database.session() as session:
         stored = session.scalar(
@@ -768,6 +768,52 @@ def test_wechat_notifications_require_the_four_test_account_values(tmp_path: Pat
         assert stored is not None
         assert "wechat-secret" not in json.dumps(stored.value)
 
+
+def test_wechat_account_alert_requires_template(tmp_path: Path):
+    _, settings, service = build_service(tmp_path)
+    with pytest.raises(ValueError, match="账号异常"):
+        service.update(
+            {
+                "wechat_notification_enabled": True,
+                "wechat_app_id": "wx-test",
+                "wechat_app_secret": "wechat-secret",
+                "wechat_openid": "openid-test",
+                "wechat_account_alert_enabled": True,
+            }
+        )
+
+    changed = service.update(
+        {
+            "wechat_notification_enabled": True,
+            "wechat_app_id": "wx-test",
+            "wechat_app_secret": "wechat-secret",
+            "wechat_openid": "openid-test",
+            "wechat_account_alert_enabled": True,
+            "wechat_template_id": "template-account",
+        }
+    )
+    assert "wechat_account_alert_enabled" in changed
+    assert settings.wechat_account_alert_enabled is True
+    assert service.public_view()["wechatAccountAlertEnabled"] is True
+
+
+def test_existing_wechat_channel_keeps_account_alerts_enabled(tmp_path: Path):
+    database, settings, service = build_service(tmp_path)
+    repository = SettingsRepository(database, settings)
+    repository.save(
+        {
+            "wechat_notification_enabled": True,
+            "wechat_app_id": "wx-test",
+            "wechat_app_secret": "wechat-secret",
+            "wechat_openid": "openid-test",
+            "wechat_template_id": "template-account",
+        }
+    )
+
+    service.load()
+
+    assert settings.wechat_account_alert_enabled is True
+    assert repository.load()["wechat_account_alert_enabled"] is True
 
 
 def test_wechat_metric_alert_settings_require_templates_and_reject_unlabeled_keys(

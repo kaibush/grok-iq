@@ -72,6 +72,7 @@ export function SettingsNotificationsTab({
   onTest: (scenario: WechatTestScenario) => void
 }) {
   const channelOn = form.wechatNotificationEnabled
+  const accountOn = channelOn && form.wechatAccountAlertEnabled
   const keyQualityOn = channelOn && form.wechatKeyQualityEnabled
   const upstreamOn =
     channelOn &&
@@ -113,6 +114,7 @@ export function SettingsNotificationsTab({
           form={form}
           busy={busy}
           testPending={testPending}
+          enabled={accountOn}
           set={set}
           onTest={onTest}
         />
@@ -165,7 +167,7 @@ function ChannelPanel({
       <div className='space-y-5'>
         <SwitchRow
           label='开启微信推送'
-          description='账号异常仍按状态升级推送；密钥正常率和上游成功率要在各自选项卡里单独打开。'
+          description='只控制通道。账号异常、密钥正常率和上游成功率要在各自选项卡里单独打开。'
           checked={form.wechatNotificationEnabled}
           onCheckedChange={(value) => set('wechatNotificationEnabled', value)}
         />
@@ -204,12 +206,14 @@ function AccountAlertPanel({
   form,
   busy,
   testPending,
+  enabled,
   set,
   onTest,
 }: {
   form: SettingsForm
   busy: boolean
   testPending: boolean
+  enabled: boolean
   set: SettingsSetter
   onTest: (scenario: WechatTestScenario) => void
 }) {
@@ -220,9 +224,16 @@ function AccountAlertPanel({
         title='账号异常'
         description='账号首次进入观察、疑似、高风险或隔离，以及风险升级时推送。同一状态不会重复刷屏。'
       >
-        <p className='text-sm leading-6 text-muted-foreground'>
-          这套规则跟总开关走，没有单独的启用项。先在“微信通道”打开推送，再填模板 ID。
-        </p>
+        <SwitchRow
+          label='开启这套规则'
+          description={
+            enabled
+              ? '总开关和本规则都已打开，账号风险升级后会推送。'
+              : '先打开微信通道，再打开本规则。'
+          }
+          checked={form.wechatAccountAlertEnabled}
+          onCheckedChange={(value) => set('wechatAccountAlertEnabled', value)}
+        />
       </SettingsCard>
       <TemplateCard
         title='账号异常模板'

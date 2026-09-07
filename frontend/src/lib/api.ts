@@ -1913,6 +1913,7 @@ export type RuntimeSettings = {
   wechatTemplateId: string
   wechatKeyQualityTemplateId: string
   wechatUpstreamHealthTemplateId: string
+  wechatAccountAlertEnabled: boolean
   wechatKeyQualityEnabled: boolean
   wechatKeyQualityThreshold: number
   wechatKeyQualityMinRequests: number
@@ -2043,6 +2044,7 @@ export type RuntimeSettingsUpdate = Partial<
     | 'wechatTemplateId'
     | 'wechatKeyQualityTemplateId'
     | 'wechatUpstreamHealthTemplateId'
+    | 'wechatAccountAlertEnabled'
     | 'wechatKeyQualityEnabled'
     | 'wechatKeyQualityThreshold'
     | 'wechatKeyQualityMinRequests'
@@ -2446,6 +2448,7 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     wechatTemplateId: value.wechatTemplateId ?? '',
     wechatKeyQualityTemplateId: value.wechatKeyQualityTemplateId ?? '',
     wechatUpstreamHealthTemplateId: value.wechatUpstreamHealthTemplateId ?? '',
+    wechatAccountAlertEnabled: value.wechatAccountAlertEnabled ?? false,
     wechatKeyQualityEnabled: value.wechatKeyQualityEnabled ?? false,
     wechatKeyQualityThreshold: value.wechatKeyQualityThreshold ?? 90,
     wechatKeyQualityMinRequests: value.wechatKeyQualityMinRequests ?? 20,

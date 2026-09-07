@@ -37,6 +37,7 @@ export type SettingsForm = {
   wechatTemplateId: string
   wechatKeyQualityTemplateId: string
   wechatUpstreamHealthTemplateId: string
+  wechatAccountAlertEnabled: boolean
   wechatKeyQualityEnabled: boolean
   wechatKeyQualityThreshold: number
   wechatKeyQualityMinRequests: number
@@ -403,6 +404,7 @@ export function toSettingsForm(
     wechatTemplateId: settings.wechatTemplateId,
     wechatKeyQualityTemplateId: settings.wechatKeyQualityTemplateId ?? '',
     wechatUpstreamHealthTemplateId: settings.wechatUpstreamHealthTemplateId ?? '',
+    wechatAccountAlertEnabled: settings.wechatAccountAlertEnabled ?? false,
     wechatKeyQualityEnabled: settings.wechatKeyQualityEnabled ?? false,
     wechatKeyQualityThreshold: settings.wechatKeyQualityThreshold ?? 90,
     wechatKeyQualityMinRequests: settings.wechatKeyQualityMinRequests ?? 20,
@@ -553,6 +555,7 @@ export function buildSettingsPayload(
     wechatTemplateId: form.wechatTemplateId.trim(),
     wechatKeyQualityTemplateId: form.wechatKeyQualityTemplateId.trim(),
     wechatUpstreamHealthTemplateId: form.wechatUpstreamHealthTemplateId.trim(),
+    wechatAccountAlertEnabled: form.wechatAccountAlertEnabled,
     wechatKeyQualityEnabled: form.wechatKeyQualityEnabled,
     wechatKeyQualityThreshold: form.wechatKeyQualityThreshold,
     wechatKeyQualityMinRequests: form.wechatKeyQualityMinRequests,
@@ -780,12 +783,14 @@ export function validateSettings(form: SettingsForm) {
     form.wechatNotificationEnabled &&
     (!form.wechatAppId.trim() ||
       !form.wechatAppSecret.trim() ||
-      !form.wechatOpenid.trim() ||
-      !form.wechatTemplateId.trim())
+      !form.wechatOpenid.trim())
   ) {
-    throw new Error(
-      '开启微信推送前请填写 AppID、AppSecret、OpenID 和账号异常模板 ID'
-    )
+    throw new Error('开启微信推送前请填写 AppID、AppSecret 和 OpenID')
+  }
+  if (form.wechatNotificationEnabled && form.wechatAccountAlertEnabled) {
+    if (!form.wechatTemplateId.trim()) {
+      throw new Error('开启账号异常通知前请填写对应模板 ID')
+    }
   }
   if (form.wechatNotificationEnabled && form.wechatKeyQualityEnabled) {
     if (!form.wechatKeyQualityTemplateId.trim()) {

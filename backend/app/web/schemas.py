@@ -392,6 +392,9 @@ class RuntimeSettingsInput(BaseModel):
     wechat_upstream_health_template_id: str | None = Field(
         default=None, alias="wechatUpstreamHealthTemplateId", max_length=256
     )
+    wechat_account_alert_enabled: bool | None = Field(
+        default=None, alias="wechatAccountAlertEnabled"
+    )
     wechat_key_quality_enabled: bool | None = Field(
         default=None, alias="wechatKeyQualityEnabled"
     )

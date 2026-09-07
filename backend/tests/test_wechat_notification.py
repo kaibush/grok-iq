@@ -31,11 +31,12 @@ class StubWeChatClient:
 
 
 def build_service(
-    *, enabled: bool = True
+    *, enabled: bool = True, account_enabled: bool | None = None
 ) -> tuple[Settings, StubWeChatClient, WeChatAccountNotificationService]:
     settings = Settings(
         _env_file=None,
         wechat_notification_enabled=enabled,
+        wechat_account_alert_enabled=enabled if account_enabled is None else account_enabled,
         wechat_app_id="wx-test",
         wechat_app_secret="secret-test",
         wechat_openid="openid-test",
@@ -58,6 +59,21 @@ async def test_disabled_notification_does_not_send():
     )
 
     assert result == {"sent": 0, "skipped": "disabled"}
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_account_alert_switch_can_disable_without_turning_off_channel():
+    _, client, service = build_service(enabled=True, account_enabled=False)
+
+    result = await service.notify_account_transition(
+        account={"id": 7, "name": "demo"},
+        previous=None,
+        current={"monitor_status": "high_risk", "risk_score": 86.5},
+        source="probe",
+    )
+
+    assert result == {"sent": 0, "skipped": "account_disabled"}
     assert client.calls == []
 
 

@@ -160,6 +160,14 @@ class WeChatAccountNotificationService:
                 source,
             )
             return {"sent": 0, "skipped": "disabled"}
+        if not self.settings.wechat_account_alert_enabled:
+            logger.info(
+                "wechat notification skipped account=%s status=%s source=%s reason=account_disabled",
+                account_id,
+                status,
+                source,
+            )
+            return {"sent": 0, "skipped": "account_disabled"}
         if not self.should_notify(previous, current, force=force):
             reason = "healthy" if status not in ABNORMAL_STATUS_RANK else "unchanged"
             logger.info(
