@@ -20,6 +20,7 @@ import {
   sortedAttempts,
   usageSourceLabel,
 } from '@/features/monitor/pages/request-audit-gateway'
+import { parseRequestSample } from '@/features/monitor/pages/request-audit-request-sample'
 
 const reasoningEffortLabels: Record<string, string> = {
   auto: '自动',
@@ -118,8 +119,19 @@ export function AuditUsageCell({ row }: { row: RequestAuditRecord }) {
 export function AuditGatewayFields({ record }: { record: RequestAuditRecord }) {
   const path = compactRequestPath(record)
   const cost = auditCostLabel(record)
+  const latestUserTurn = parseRequestSample(record.requestSample).latestUserTurn
   return (
     <>
+      {latestUserTurn ? (
+        <div className='sm:col-span-2 lg:col-span-3'>
+          <GatewayField
+            label='用户原文'
+            value={latestUserTurn}
+            copyValue={latestUserTurn}
+            preserve
+          />
+        </div>
+      ) : null}
       {record.clientIp ? (
         <GatewayField label='客户端 IP' value={record.clientIp} mono copyValue={record.clientIp} />
       ) : null}
@@ -240,7 +252,8 @@ export function AuditBillingPanel({ record }: { record: RequestAuditRecord }) {
 export function AuditRequestPanel({ record }: { record: RequestAuditRecord }) {
   const path = compactRequestPath(record)
   const headers = headerEntries(record.requestHeaders)
-  const requestBody = formatRequestSample(record.requestSample)
+  const parsedSample = parseRequestSample(record.requestSample)
+  const requestBody = parsedSample.bodyText
   return (
     <div className='space-y-3'>
       <div>
@@ -260,6 +273,17 @@ export function AuditRequestPanel({ record }: { record: RequestAuditRecord }) {
         </div>
       )}
       <AuditHeadersPanel headers={headers} empty='没有保存请求头。' />
+      {parsedSample.latestUserTurn ? (
+        <div className='overflow-hidden rounded-lg border bg-muted/15'>
+          <div className='flex items-center justify-between gap-2 px-3 py-2'>
+            <span className='text-xs font-medium'>用户原文</span>
+            <CopyButton value={parsedSample.latestUserTurn} className='size-6 shrink-0' />
+          </div>
+          <pre className='max-h-48 overflow-auto px-3 pb-3 text-xs leading-relaxed whitespace-pre-wrap break-words'>
+            {parsedSample.latestUserTurn}
+          </pre>
+        </div>
+      ) : null}
       {requestBody ? (
         <div className='overflow-hidden rounded-lg border bg-muted/15'>
           <div className='flex items-center justify-between gap-2 px-3 py-2'>
@@ -282,16 +306,6 @@ export function AuditRequestPanel({ record }: { record: RequestAuditRecord }) {
       )}
     </div>
   )
-}
-
-function formatRequestSample(value?: string) {
-  const trimmed = value?.trim() ?? ''
-  if (!trimmed) return ''
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
-  } catch {
-    return trimmed
-  }
 }
 
 export function AuditAttemptsPanel({ record }: { record: RequestAuditRecord }) {
@@ -485,18 +499,21 @@ export function GatewayField({
   value,
   mono = false,
   copyValue,
+  preserve = false,
 }: {
   label: string
   value: string
   mono?: boolean
   copyValue?: string
+  preserve?: boolean
 }) {
   return (
     <div className='min-w-0 rounded-lg border bg-background p-3'>
       <dt className='text-[11px] text-muted-foreground'>{label}</dt>
       <dd
         className={cn(
-          'mt-1 text-sm break-words',
+          'mt-1 text-sm',
+          preserve ? 'max-h-32 overflow-auto whitespace-pre-wrap break-words' : 'break-words',
           mono && 'font-mono break-all tabular-nums'
         )}
       >
