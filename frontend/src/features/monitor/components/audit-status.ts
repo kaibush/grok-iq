@@ -32,6 +32,12 @@ export function auditErrorLabel(code: string) {
   return AUDIT_ERROR_LABELS[code] || code
 }
 
+const INTERNAL_AUDIT_ERROR_CODES = new Set(['quality_degraded'])
+
+export function isInternalAuditError(code?: string | null) {
+  return INTERNAL_AUDIT_ERROR_CODES.has((code || '').trim())
+}
+
 export function isSuccessfulAuditStatus(row: {
   statusCode?: number
   errorCode?: string | null

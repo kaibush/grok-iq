@@ -187,3 +187,52 @@ def test_recent_request_health_keeps_fresh_when_rows_recent_but_state_absent(
     payload = service.recent_request_health()
 
     assert payload["stale"] is False
+
+
+def test_recent_request_health_omits_internal_quality_intercepts(tmp_path: Path):
+    repository, service = _build(tmp_path)
+    now = utc_now()
+    repository.upsert_records(
+        [
+            _record(now - timedelta(minutes=2), upstream_id="1", status_code=200),
+            _record(
+                now - timedelta(minutes=3),
+                upstream_id="2",
+                status_code=200,
+                error_code="quality_degraded",
+            ),
+            _record(
+                now - timedelta(minutes=4),
+                upstream_id="3",
+                status_code=503,
+                error_code="quality_degraded",
+            ),
+            _record(
+                now - timedelta(minutes=6),
+                upstream_id="4",
+                status_code=503,
+                error_code="upstream_server_error_unavailable",
+            ),
+        ]
+    )
+
+    payload = service.recent_request_health()
+
+    assert payload["windows"]["15m"] == {
+        "requests": 2,
+        "successfulRequests": 1,
+        "failedRequests": 1,
+        "successRate": 50.0,
+    }
+    assert payload["errors"] == [
+        {
+            "statusCode": 503,
+            "errorCode": "upstream_server_error_unavailable",
+            "requests": 1,
+        }
+    ]
+    assert payload["models"][0]["requests"] == 2
+    assert payload["models"][0]["failedRequests"] == 1
+    assert payload["models"][0]["mainError"]["errorCode"] == (
+        "upstream_server_error_unavailable"
+    )

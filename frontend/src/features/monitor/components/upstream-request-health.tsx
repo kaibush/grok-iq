@@ -30,7 +30,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/page'
 import { StatCard, type StatTone } from '@/components/stat-card'
 import { TitledCard } from '@/components/titled-card'
-import { auditErrorLabel } from '@/features/monitor/components/audit-status'
+import {
+  auditErrorLabel,
+  isInternalAuditError,
+} from '@/features/monitor/components/audit-status'
 
 const HEALTH_WINDOWS = [
   { key: '15m', label: '最近 15 分钟', icon: Gauge, buckets: 3 },
@@ -195,9 +198,15 @@ export function UpstreamRequestHealth({
     }
     return points
   }, [data?.series])
-  const models = data?.models ?? []
+  const models = (data?.models ?? []).map((model) =>
+    model.mainError && isInternalAuditError(model.mainError.errorCode)
+      ? { ...model, mainError: null }
+      : model
+  )
   const visibleModels = models.slice(0, 6)
-  const errors = data?.errors ?? []
+  const errors = (data?.errors ?? []).filter(
+    (item) => !isInternalAuditError(item.errorCode)
+  )
   const failedTotal =
     data?.windows?.['1h']?.failedRequests ??
     errors.reduce((sum, item) => sum + item.requests, 0)

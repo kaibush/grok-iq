@@ -81,6 +81,9 @@ REQUEST_HEALTH_SERIES_BUCKETS = 12
 # Audit scans are adaptive (seconds while busy, up to five minutes while
 # idle). Treat the board as stale only after the scan/rows fall far behind.
 REQUEST_HEALTH_STALE_AFTER_SECONDS = 600.0
+# grok2api records these for missing-thinking intercepts and account switches.
+# They belong on the internal audit ledger, not the public status board.
+REQUEST_HEALTH_INTERNAL_ERROR_CODES = frozenset({"quality_degraded"})
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +408,10 @@ def _health_success(status_code: int, error_code: str) -> bool:
     return 200 <= int(status_code or 0) < 300 and not str(error_code or "").strip()
 
 
+def _is_internal_health_error(error_code: str) -> bool:
+    return str(error_code or "").strip() in REQUEST_HEALTH_INTERNAL_ERROR_CODES
+
+
 def _health_rows(
     rows: list[dict[str, Any]],
 ) -> list[tuple[datetime, bool, str, int, str]]:
@@ -415,6 +422,8 @@ def _health_rows(
             continue
         status_code = int(row.get("status_code") or 0)
         error_code = str(row.get("error_code") or "").strip()
+        if _is_internal_health_error(error_code):
+            continue
         model = str(
             row.get("model_public_id") or row.get("model_upstream_model") or ""
         ).strip()
@@ -3660,7 +3669,8 @@ class RequestAuditService:
         The public status page needs a quick "is the upstream healthy right
         now" answer without fanning out to grok2api. The local projection is
         kept seconds fresh by the adaptive scanner, so counting its newest
-        hour is enough for 15m/30m/1h success rates.
+        hour is enough for 15m/30m/1h success rates. Internal quality
+        intercepts stay on the audit ledger and are omitted here.
         """
 
         end = utc_now()
