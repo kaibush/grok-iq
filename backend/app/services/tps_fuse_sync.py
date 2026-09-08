@@ -42,7 +42,13 @@ IDLE_RESULT = {"ok": True, "status": "idle", "error": ""}
 
 
 def desired_tps_fuse(settings: Settings) -> dict[str, Any]:
-    """Map grok-iq runtime settings onto grok2api ``config.tpsFuse``."""
+    """Map grok-iq cooldown-zone settings onto grok2api ``config.tpsFuse``.
+
+    ``minGenerationMs`` / ``minOutputTokens`` are probe thresholds kept in the
+    grok2api payload for schema compatibility. Grok-iq cooldown and grok2api
+    request-path fuse both count measurable TPS >= ``hardTPS`` and do not use
+    those two fields as hit filters.
+    """
 
     return {
         "enabled": bool(
