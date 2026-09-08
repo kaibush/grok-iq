@@ -81,7 +81,7 @@ const THUMB_FRAME_HEIGHT = HTML_THUMB_FRAME_HEIGHT
 const THUMB_GRID_CLASSNAME =
   'grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 
-function previewThumbColumns(width: number) {
+export function previewThumbColumns(width: number) {
   if (width >= 1536) return 5
   if (width >= 1280) return 4
   if (width >= 768) return 3
@@ -989,17 +989,23 @@ export function ResultPreviewGallery({
   }, [open, safeIndex, view, effectiveGroup, roundLayout])
 
   useEffect(() => {
+    if (!open || view !== 'grid') return
     const node = gridRef.current
-    if (!node || view !== 'grid') return
+    if (!node) return
     const measure = () => {
       const width = node.clientWidth
+      if (width <= 0) return
       setGridCols(previewThumbColumns(width))
     }
     measure()
+    const raf = requestAnimationFrame(measure)
     const observer = new ResizeObserver(measure)
     observer.observe(node)
-    return () => observer.disconnect()
-  }, [view, items.length, effectiveGroup, roundLayout])
+    return () => {
+      cancelAnimationFrame(raf)
+      observer.disconnect()
+    }
+  }, [open, view, items.length, effectiveGroup, roundLayout])
 
   useEffect(() => {
     if (!open) return
@@ -2214,7 +2220,10 @@ function VirtualizedThumbGrid({
     }
   }, [scrollRef, items.length, columns])
   const gap = 12
-  const cols = Math.max(1, columns)
+  const cols = Math.max(
+    1,
+    viewport.width > 0 ? previewThumbColumns(viewport.width) : columns
+  )
   const cellWidth =
     cols > 1 ? (viewport.width - gap * (cols - 1)) / cols : viewport.width
   const thumbHeight = cellWidth * (THUMB_FRAME_HEIGHT / THUMB_FRAME_WIDTH)

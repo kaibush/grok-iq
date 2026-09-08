@@ -5,6 +5,7 @@ import {
   previewItemsFromAccountPreview,
   previewItemsFromAccounts,
   previewItemsFromRuns,
+  previewThumbColumns,
 } from './result-preview-gallery'
 
 const run = (overrides: Partial<ProbeRun> = {}): ProbeRun =>
@@ -93,5 +94,15 @@ describe('previewItemsFromAccounts', () => {
     expect(items).toHaveLength(1)
     expect(items[0]?.accountId).toBe(7111)
     expect(items[0]?.source).toBe('account')
+  })
+})
+
+describe('previewThumbColumns', () => {
+  it('keeps desktop thumbnails in a multi-card grid', () => {
+    expect(previewThumbColumns(0)).toBe(1)
+    expect(previewThumbColumns(375)).toBe(1)
+    expect(previewThumbColumns(640)).toBe(2)
+    expect(previewThumbColumns(1280)).toBe(4)
+    expect(previewThumbColumns(1600)).toBe(5)
   })
 })
