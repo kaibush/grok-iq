@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Loader2, Play, PowerOff, RefreshCw, Search, Timer, TimerOff } from 'lucide-react'
+import { Loader2, Play, PowerOff, RefreshCw, Search, ShieldBan, Timer, TimerOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
@@ -240,6 +240,8 @@ export function CooldownPage() {
   const [releaseIds, setReleaseIds] = useState<number[]>([])
   const [disableOpen, setDisableOpen] = useState(false)
   const [disableIds, setDisableIds] = useState<number[]>([])
+  const [isolateOpen, setIsolateOpen] = useState(false)
+  const [isolateIds, setIsolateIds] = useState<number[]>([])
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [upstreamAccount, setUpstreamAccount] =
     useState<CooldownAccount | null>(null)
@@ -549,13 +551,68 @@ export function CooldownPage() {
     },
   })
   const disablePending = disableMutation.isPending
-  const selectionActionPending = releasePending || disablePending
 
   const openDisable = (accountIds: number[]) => {
     const ids = uniqueIds(accountIds)
     if (ids.length === 0) return
     setDisableIds(ids)
     setDisableOpen(true)
+  }
+
+  const isolateMutation = useMutation({
+    mutationFn: (accountIds: number[]) =>
+      api.accountBatchAction({
+        account_ids: accountIds,
+        action: 'isolate',
+        note: '冷却区人工移入隔离区',
+        propagate: true,
+      }),
+    onSuccess: (result) => {
+      const skippedAccountIds = result.skippedAccountIds ?? []
+      const failedAccountIds = result.failedAccountIds ?? []
+      const alreadyIsolatedIds = result.alreadyIsolatedAccountIds ?? []
+      const retainedAccountIds = uniqueIds([
+        ...skippedAccountIds,
+        ...failedAccountIds,
+      ])
+      setIsolateOpen(false)
+      setIsolateIds([])
+      syncSelection(retainedAccountIds)
+      if (
+        failedAccountIds.length > 0 ||
+        skippedAccountIds.length > 0 ||
+        alreadyIsolatedIds.length > 0
+      ) {
+        const details = [`已移入隔离区 ${result.updated} 个账号`]
+        if (failedAccountIds.length) {
+          details.push(`${failedAccountIds.length} 个操作失败并保留选择`)
+        }
+        if (skippedAccountIds.length) {
+          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+        }
+        if (alreadyIsolatedIds.length) {
+          details.push(`${alreadyIsolatedIds.length} 个原本已在隔离区`)
+        }
+        toast.warning(details.join('；'))
+      } else {
+        toast.success(`已移入隔离区 ${result.updated} 个账号`)
+      }
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['accounts'] })
+      void client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+  const isolatePending = isolateMutation.isPending
+  const selectionActionPending =
+    releasePending || disablePending || isolatePending
+
+  const openIsolate = (accountIds: number[]) => {
+    const ids = uniqueIds(accountIds)
+    if (ids.length === 0) return
+    setIsolateIds(ids)
+    setIsolateOpen(true)
   }
 
   const openSelectedProbe = () => {
@@ -709,6 +766,14 @@ export function CooldownPage() {
                   <PowerOff />
                 </ToolbarAction>
               ) : null}
+              <ToolbarAction
+                label={`将已选 ${selected.length} 个账号移入隔离区`}
+                pending={isolatePending}
+                disabled={selectionActionPending || selected.length === 0}
+                onClick={() => openIsolate(selected)}
+              >
+                <ShieldBan />
+              </ToolbarAction>
             </SelectionToolbar>
           </ActionToolbar>
         }
@@ -724,6 +789,8 @@ export function CooldownPage() {
           setReleaseIds([])
           setDisableOpen(false)
           setDisableIds([])
+          setIsolateOpen(false)
+          setIsolateIds([])
           updateView({ source: next, page: 1 })
         }}
         className='gap-3'
@@ -976,6 +1043,49 @@ export function CooldownPage() {
         handleConfirm={() => {
           if (disableIds.length === 0) return
           disableMutation.mutate(disableIds)
+        }}
+      />
+      <ConfirmDialog
+        open={isolateOpen}
+        onOpenChange={(open) => {
+          if (!open && !isolatePending) {
+            setIsolateOpen(false)
+            setIsolateIds([])
+          }
+        }}
+        title={`将 ${isolateIds.length} 个账号移入隔离区？`}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              {`将停用已选 ${isolateIds.length} 个账号的上游，并把它们移入隔离区，不会删除账号。`}
+            </p>
+            <p className='font-medium text-foreground'>
+              隔离区是长期隔离（不自动到期恢复）并停用上游；暂时停用仍走原来的停用时长逻辑。
+            </p>
+            <p className='text-muted-foreground'>
+              正在执行探针或等待账号设置恢复的账号会被跳过并保留选择。
+            </p>
+          </div>
+        }
+        cancelBtnText='取消'
+        confirmText={
+          isolatePending ? (
+            <>
+              <Loader2 className='animate-spin' />
+              移入中…
+            </>
+          ) : (
+            <>
+              <ShieldBan />
+              确认移入隔离区
+            </>
+          )
+        }
+        isLoading={isolatePending}
+        disabled={isolateIds.length === 0}
+        handleConfirm={() => {
+          if (isolateIds.length === 0) return
+          isolateMutation.mutate(isolateIds)
         }}
       />
       <AccountUpstreamDialog
