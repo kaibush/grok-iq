@@ -149,9 +149,7 @@ export function RequestAuditDetailBody({
         defaultValue='overview'
         className='mt-4 flex min-h-0 flex-1 flex-col overflow-hidden'
       >
-        <TabsList
-          className='h-auto w-full shrink-0 justify-start overflow-x-auto sm:w-fit'
-        >
+        <TabsList className='h-auto w-full shrink-0 justify-start overflow-x-auto sm:w-fit'>
           {tabs.map((tab) => {
             const Icon = tab.icon
             return (
@@ -230,9 +228,7 @@ function OverviewPanel({ record }: { record: RequestAuditRecord }) {
           />
           <AuditDetailField
             label='账号'
-            value={
-              `${record.accountName || `账号 ${record.accountId ?? '未知'}`} · ID ${record.accountId ?? '未知'}`
-            }
+            value={`${record.accountName || `账号 ${record.accountId ?? '未知'}`} · ID ${record.accountId ?? '未知'}`}
             copyValue={
               record.accountId != null ? String(record.accountId) : undefined
             }
@@ -713,9 +709,7 @@ function DetailStat({
       <div className='text-[11px] text-muted-foreground'>{label}</div>
       <div
         className={
-          plain
-            ? 'mt-1'
-            : 'mt-1 font-mono text-lg font-semibold tabular-nums'
+          plain ? 'mt-1' : 'mt-1 font-mono text-lg font-semibold tabular-nums'
         }
       >
         {children}
@@ -830,7 +824,9 @@ function AuditSampleEvidence({
   return (
     <div className='min-w-0'>
       <div className='text-[11px] text-muted-foreground'>{label}</div>
-      <div className={cn('mt-1 break-all text-foreground', mono && 'font-mono')}>
+      <div
+        className={cn('mt-1 break-all text-foreground', mono && 'font-mono')}
+      >
         {value}
       </div>
     </div>

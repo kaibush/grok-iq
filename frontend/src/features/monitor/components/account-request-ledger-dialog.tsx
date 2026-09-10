@@ -1,11 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  ArrowLeft,
-  Eye,
-  RefreshCw,
-  ScrollText,
-} from 'lucide-react'
+import { ArrowLeft, Eye, RefreshCw, ScrollText } from 'lucide-react'
 import {
   api,
   type RequestAuditRecord,
@@ -16,14 +11,6 @@ import {
 } from '@/lib/api'
 import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
-import { CopyableText } from '@/components/copy-button'
-import { EmptyState, LoadingState } from '@/components/page'
-import { ServerPagination } from '@/components/server-pagination'
-import {
-  auditErrorCode,
-  auditErrorLabel,
-  isSuccessfulAuditStatus,
-} from '@/features/monitor/components/audit-status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -53,6 +40,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { CopyableText } from '@/components/copy-button'
+import { EmptyState, LoadingState } from '@/components/page'
+import { ServerPagination } from '@/components/server-pagination'
+import type { AccountIdentity } from '@/features/monitor/components/account-upstream-dialog'
+import {
+  auditErrorCode,
+  auditErrorLabel,
+  isSuccessfulAuditStatus,
+} from '@/features/monitor/components/audit-status'
 import { RequestAuditDetailBody } from '@/features/monitor/components/request-audit-detail'
 import {
   AuditUsageCell,
@@ -63,7 +59,6 @@ import {
   streamSampleDiagnostics,
   streamSamplePreview,
 } from '@/features/monitor/pages/request-audit-stream-sample'
-import type { AccountIdentity } from '@/features/monitor/components/account-upstream-dialog'
 
 const WINDOW_OPTIONS: Array<{
   value: Exclude<RequestAuditWindowPreset, 'custom'>
@@ -118,7 +113,11 @@ function RiskBadge({
   return (
     <Badge
       variant={
-        value === 'high' ? 'destructive' : value === 'watch' ? 'warning' : 'success'
+        value === 'high'
+          ? 'destructive'
+          : value === 'watch'
+            ? 'warning'
+            : 'success'
       }
       title={
         value === 'high'
@@ -160,7 +159,9 @@ export function AccountRequestLedgerDialog({
 }) {
   const accountId = account ? Number(account.id) : 0
   const accountLabel =
-    account?.name || account?.email || (accountId ? `账号 ${accountId}` : '账号')
+    account?.name ||
+    account?.email ||
+    (accountId ? `账号 ${accountId}` : '账号')
   const [windowPreset, setWindowPreset] = useState<RequestAuditWindowPreset>(
     initialWindow?.window ?? 'today'
   )
@@ -172,12 +173,16 @@ export function AccountRequestLedgerDialog({
       ? { startAt: initialWindow.startAt, endAt: initialWindow.endAt }
       : {}
   )
-  const [risk, setRisk] = useState<(typeof RISK_OPTIONS)[number]['value']>('all')
+  const [risk, setRisk] =
+    useState<(typeof RISK_OPTIONS)[number]['value']>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [selected, setSelected] = useState<RequestAuditRecord | null>(null)
   const [resetNonce, setResetNonce] = useState({ open, accountId })
-  if (open && (resetNonce.open !== open || resetNonce.accountId !== accountId)) {
+  if (
+    open &&
+    (resetNonce.open !== open || resetNonce.accountId !== accountId)
+  ) {
     setResetNonce({ open, accountId })
     const nextWindow = initialWindow?.window ?? 'today'
     setWindowPreset(nextWindow)
@@ -285,7 +290,10 @@ export function AccountRequestLedgerDialog({
                   setPage(1)
                 }}
               >
-                <SelectTrigger className='h-8 w-40' aria-label='请求流水时间窗口'>
+                <SelectTrigger
+                  className='h-8 w-40'
+                  aria-label='请求流水时间窗口'
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -303,7 +311,10 @@ export function AccountRequestLedgerDialog({
                   setPage(1)
                 }}
               >
-                <SelectTrigger className='h-8 w-36' aria-label='按风险筛选请求流水'>
+                <SelectTrigger
+                  className='h-8 w-36'
+                  aria-label='按风险筛选请求流水'
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -322,7 +333,9 @@ export function AccountRequestLedgerDialog({
                 disabled={query.isFetching}
                 onClick={() => void query.refetch()}
               >
-                <RefreshCw className={query.isFetching ? 'animate-spin' : undefined} />
+                <RefreshCw
+                  className={query.isFetching ? 'animate-spin' : undefined}
+                />
                 刷新
               </Button>
               {query.data?.window ? (
@@ -437,7 +450,9 @@ function LedgerRow({
   return (
     <TableRow rowId={row.id}>
       <TableCell className='align-middle !whitespace-normal'>
-        <div className='text-[11px] tabular-nums'>{formatDate(row.createdAt)}</div>
+        <div className='text-[11px] tabular-nums'>
+          {formatDate(row.createdAt)}
+        </div>
         <CopyableText
           value={row.requestId || row.id}
           className='max-w-full items-start'
@@ -451,7 +466,10 @@ function LedgerRow({
         </CopyableText>
       </TableCell>
       <TableCell className='align-middle !whitespace-normal'>
-        <div className='max-w-56 text-xs break-words' title={row.modelPublicId || undefined}>
+        <div
+          className='max-w-56 text-xs break-words'
+          title={row.modelPublicId || undefined}
+        >
           {row.modelPublicId || '—'}
         </div>
         <div
@@ -485,7 +503,9 @@ function LedgerRow({
       <TableCell className='align-middle'>
         <Badge
           variant={isSuccessfulAuditStatus(row) ? 'success' : 'destructive'}
-          title={errorCode ? `${row.statusCode || '—'} · ${errorCode}` : undefined}
+          title={
+            errorCode ? `${row.statusCode || '—'} · ${errorCode}` : undefined
+          }
         >
           {row.statusCode || '—'}
         </Badge>
@@ -536,8 +556,11 @@ function LedgerDetail({
   record: RequestAuditRecord
   thresholds: RequestAuditThresholds
 }) {
-  const { view, loading: gatewayLoading, error: gatewayError } =
-    useHydratedRequestAudit(source, true)
+  const {
+    view,
+    loading: gatewayLoading,
+    error: gatewayError,
+  } = useHydratedRequestAudit(source, true)
   const record = view ?? source
   return (
     <RequestAuditDetailBody
@@ -548,4 +571,3 @@ function LedgerDetail({
     />
   )
 }
-
