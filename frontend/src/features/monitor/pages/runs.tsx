@@ -34,6 +34,7 @@ import {
   RotateCcw,
   Search,
   ServerCog,
+  ShieldBan,
   SlidersHorizontal,
   Square,
   Trash2,
@@ -54,8 +55,8 @@ import {
 } from '@/lib/api'
 import { extractHtmlPreviews } from '@/lib/formatted-content'
 import { StatusBadge } from '@/lib/status'
-import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { formatDualTps, tpsOverridden } from '@/lib/tps'
+import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { usePaintDeferredValue } from '@/hooks/use-paint-deferred-value'
 import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
@@ -70,7 +71,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { EnabledBadge } from '@/components/enabled-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -88,6 +88,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { ProgressBar } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -110,23 +111,25 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { ActionToolbar, ToolbarAction } from '@/components/action-toolbar'
-import { ExportMenu } from '@/components/export-menu'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { CopyButton, CopyableText } from '@/components/copy-button'
+import { EnabledBadge } from '@/components/enabled-badge'
+import { ExportMenu } from '@/components/export-menu'
 import {
   FormattedContentPreviewButton,
   HtmlPreviewButton,
   MarkdownView,
   SourceCodeView,
 } from '@/components/formatted-content'
-import { ProgressBar } from '@/components/ui/progress'
 import { Page, PageHeader, LoadingState, EmptyState } from '@/components/page'
-import { TablePanel } from '@/components/table-panel'
 import { PersistedViewNotice } from '@/components/persisted-view-notice'
 import { SelectionToolbar } from '@/components/selection-toolbar'
 import {
   ServerPagination,
   ServerTableLoadingOverlay,
 } from '@/components/server-pagination'
+import { TablePanel } from '@/components/table-panel'
+import { AccountProbeDetailDialog } from '@/features/monitor/components/account-probe-detail-dialog'
 import {
   AccountRestoreIndicator,
   EgressBindingIndicator,
@@ -137,21 +140,23 @@ import {
   getEgressNodeName,
   type EgressNodeNameMap,
 } from '@/features/monitor/components/egress-node-names'
+import { EgressNodeReference } from '@/features/monitor/components/egress-node-reference'
+import { FilterChip } from '@/features/monitor/components/filter-chip'
 import {
   ModelBindWindowError,
   ModelBindWindowHint,
   isModelBindWindowIssue,
 } from '@/features/monitor/components/model-bind-window-hint'
-import { EgressNodeReference } from '@/features/monitor/components/egress-node-reference'
-import { FilterChip } from '@/features/monitor/components/filter-chip'
+import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import { ReasoningPanel } from '@/features/monitor/components/reasoning-panel'
-import { DualTpsValue, SampleTpsDetail } from '@/features/monitor/components/tps-display'
-import { AccountProbeDetailDialog } from '@/features/monitor/components/account-probe-detail-dialog'
 import {
   previewItemsFromRuns,
   ResultPreviewGallery,
 } from '@/features/monitor/components/result-preview-gallery'
-import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
+import {
+  DualTpsValue,
+  SampleTpsDetail,
+} from '@/features/monitor/components/tps-display'
 import {
   isRunsPath,
   pinnedAccountIdFromRunsSearch,
@@ -320,6 +325,7 @@ export function RunsPage() {
   } | null>(null)
   const [egressBindingOpen, setEgressBindingOpen] = useState(false)
   const [egressBindingTarget, setEgressBindingTarget] = useState<string>()
+  const [isolateConfirmOpen, setIsolateConfirmOpen] = useState(false)
   const [bulkCancelOpen, setBulkCancelOpen] = useState(false)
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkRestoreOpen, setBulkRestoreOpen] = useState(false)
@@ -502,9 +508,7 @@ export function RunsPage() {
     enabled: resultPreview != null && !invalidTimeRange,
   })
   const previewSource =
-    resultPreview &&
-    resultPreview.page === tableQuery.page &&
-    query.data
+    resultPreview && resultPreview.page === tableQuery.page && query.data
       ? query.data
       : previewRunsQuery.data?.page === previewPage
         ? previewRunsQuery.data
@@ -522,7 +526,12 @@ export function RunsPage() {
         ? { ...item, sampleId: previewSampleId }
         : item
     )
-  }, [previewSource?.items, profileNameById, previewSampleId, previewSampleIndex])
+  }, [
+    previewSource?.items,
+    profileNameById,
+    previewSampleId,
+    previewSampleIndex,
+  ])
   const previewTotal = previewSource?.total ?? query.data?.total ?? 0
   const previewPageCount = Math.max(
     1,
@@ -855,6 +864,62 @@ export function RunsPage() {
       void client.invalidateQueries({ queryKey: ['egress'] })
     },
   })
+  const isolateBatchMutation = useMutation({
+    mutationFn: (accountIds: number[]) =>
+      api.accountBatchAction({
+        account_ids: accountIds,
+        action: 'isolate',
+        note: '任务中心人工移入隔离区',
+        propagate: true,
+      }),
+    onSuccess: (result) => {
+      const skippedAccountIds = result.skippedAccountIds ?? []
+      const failedAccountIds = result.failedAccountIds ?? []
+      const alreadyIsolatedIds = result.alreadyIsolatedAccountIds ?? []
+      const retainedAccountIds = new Set([
+        ...skippedAccountIds,
+        ...failedAccountIds,
+      ])
+      setIsolateConfirmOpen(false)
+      setSelection((current) => {
+        const next = new Map<string, RunSelectionItem>()
+        for (const [id, item] of current) {
+          if (item.accountId <= 0 || retainedAccountIds.has(item.accountId)) {
+            next.set(id, item)
+          }
+        }
+        return next
+      })
+      setAllFilteredSelected(false)
+      if (
+        failedAccountIds.length > 0 ||
+        skippedAccountIds.length > 0 ||
+        alreadyIsolatedIds.length > 0
+      ) {
+        const details = [`已移入隔离区 ${result.updated} 个账号`]
+        if (failedAccountIds.length) {
+          details.push(`${failedAccountIds.length} 个操作失败并保留选择`)
+        }
+        if (skippedAccountIds.length) {
+          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+        }
+        if (alreadyIsolatedIds.length) {
+          details.push(`${alreadyIsolatedIds.length} 个原本已在隔离区`)
+        }
+        toast.warning(details.join('；'))
+      } else {
+        toast.success(`已移入隔离区 ${result.updated} 个账号`)
+      }
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['runs'] })
+      void client.invalidateQueries({ queryKey: ['run'] })
+      void client.invalidateQueries({ queryKey: ['accounts'] })
+      void client.invalidateQueries({ queryKey: ['account'] })
+      void client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
 
   const clearSelection = () => {
     setSelection((current) => (current.size === 0 ? current : new Map()))
@@ -935,10 +1000,12 @@ export function RunsPage() {
 
   const bulkPending =
     bulkCancel.isPending || bulkDelete.isPending || bulkRestore.isPending
+  const isolatePending = isolateBatchMutation.isPending
   const selectionActionPending =
     bulkPending ||
     selectionMutation.isPending ||
-    egressBindingMutation.isPending
+    egressBindingMutation.isPending ||
+    isolatePending
   const bindableEgress = (egress.data?.items ?? []).filter(
     (node) => node.enabled && node.proxyConfigured
   )
@@ -955,39 +1022,39 @@ export function RunsPage() {
         description='Cron、注册联动和手动探针共用持久队列；支持进度查看、批量重测、取消、重试与删除。'
         descriptionAsHint
         actions={
-            <ActionToolbar label='任务列表操作'>
-              <ToolbarAction
-                label='刷新任务列表'
-                pending={query.isFetching}
-                onClick={() => void query.refetch()}
-              >
-                <RefreshCw />
-              </ToolbarAction>
-              <ToolbarAction
-                label={
-                  allFilteredSelected
-                    ? '清除当前筛选的全选'
-                    : '全选当前筛选下的所有可操作任务'
+          <ActionToolbar label='任务列表操作'>
+            <ToolbarAction
+              label='刷新任务列表'
+              pending={query.isFetching}
+              onClick={() => void query.refetch()}
+            >
+              <RefreshCw />
+            </ToolbarAction>
+            <ToolbarAction
+              label={
+                allFilteredSelected
+                  ? '清除当前筛选的全选'
+                  : '全选当前筛选下的所有可操作任务'
+              }
+              active={allFilteredSelected}
+              pending={selectionMutation.isPending}
+              disabled={
+                showTableLoading ||
+                bulkPending ||
+                invalidTimeRange ||
+                (query.data?.total ?? 0) === 0
+              }
+              onClick={() => {
+                if (allFilteredSelected) {
+                  clearSelection()
+                  toast.success('已清除当前筛选的全选')
+                  return
                 }
-                active={allFilteredSelected}
-                pending={selectionMutation.isPending}
-                disabled={
-                  showTableLoading ||
-                  bulkPending ||
-                  invalidTimeRange ||
-                  (query.data?.total ?? 0) === 0
-                }
-                onClick={() => {
-                  if (allFilteredSelected) {
-                    clearSelection()
-                    toast.success('已清除当前筛选的全选')
-                    return
-                  }
-                  selectionMutation.mutate()
-                }}
-              >
-                <ListChecks />
-              </ToolbarAction>
+                selectionMutation.mutate()
+              }}
+            >
+              <ListChecks />
+            </ToolbarAction>
             <ExportMenu
               label='导出样本'
               onExport={(format) =>
@@ -1040,6 +1107,20 @@ export function RunsPage() {
                 }}
               >
                 <ServerCog />
+              </ToolbarAction>
+              <ToolbarAction
+                label={
+                  selectedAccountIds.length
+                    ? `将已选任务中的 ${selectedAccountIds.length} 个账号移入隔离区`
+                    : '所选任务中没有可隔离账号'
+                }
+                pending={isolatePending}
+                disabled={
+                  selectedAccountIds.length === 0 || selectionActionPending
+                }
+                onClick={() => setIsolateConfirmOpen(true)}
+              >
+                <ShieldBan />
               </ToolbarAction>
               <ToolbarAction
                 label={
@@ -1140,10 +1221,7 @@ export function RunsPage() {
               </div>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button
-                    variant='outline'
-                    className='h-8 shrink-0 gap-2 px-3'
-                  >
+                  <Button variant='outline' className='h-8 shrink-0 gap-2 px-3'>
                     <SlidersHorizontal className='size-4' />
                     筛选条件
                     {activeFilterCount > 0 && (
@@ -1330,18 +1408,18 @@ export function RunsPage() {
                 )}
               </div>
             )}
-          {runsView.active && (
-            <PersistedViewNotice
-              restored={runsView.restored}
-              summary={runsViewSummary}
-              onClear={clearRunsView}
-            />
-          )}
-          {invalidTimeRange && (
-            <p className='text-xs text-destructive'>
-              开始时间需要早于或等于结束时间。
-            </p>
-          )}
+            {runsView.active && (
+              <PersistedViewNotice
+                restored={runsView.restored}
+                summary={runsViewSummary}
+                onClear={clearRunsView}
+              />
+            )}
+            {invalidTimeRange && (
+              <p className='text-xs text-destructive'>
+                开始时间需要早于或等于结束时间。
+              </p>
+            )}
           </div>
         }
         footer={
@@ -1365,56 +1443,56 @@ export function RunsPage() {
           ) : null
         }
       >
-          {query.isLoading && !query.data ? (
-            <LoadingState />
-          ) : (
-            <>
-              <div className='relative min-h-48' aria-busy={showTableLoading}>
-                {currentPageRuns.length ? (
-                  <RunsTable
-                    runs={currentPageRuns}
-                    egressNodeNames={egressNodeNames}
-                    selection={selection}
-                    selectAllChecked={selectAllChecked}
-                    currentPageActionableCount={currentPageActionable.length}
-                    selectionActionPending={selectionActionPending}
-                    actionPending={mutate.isPending || selectionActionPending}
-                    onToggleCurrentPage={toggleCurrentPageSelection}
-                    onToggleRun={toggleRunSelection}
-                    onDetail={openDetail}
-                    onAccountDetail={setAccountDetailId}
-                    onAction={handleRunAction}
-                  />
-                ) : (
-                  <EmptyState
-                    title={
-                      deferredSearch ||
-                      status !== 'all' ||
-                      createdFrom ||
-                      createdTo
-                        ? '未找到匹配任务'
-                        : '暂无探针任务'
-                    }
-                    description={
-                      deferredSearch ||
-                      status !== 'all' ||
-                      createdFrom ||
-                      createdTo
-                        ? '请调整账号搜索词、任务状态或时间范围。'
-                        : '从账号页面手动选择账号，或配置一个 Cron 计划。'
-                    }
-                  />
-                )}
-                {showTableLoading && (
-                  <ServerTableLoadingOverlay
-                    page={page}
-                    itemLabel='任务'
-                    message='正在更新任务筛选结果…'
-                  />
-                )}
-              </div>
-            </>
-          )}
+        {query.isLoading && !query.data ? (
+          <LoadingState />
+        ) : (
+          <>
+            <div className='relative min-h-48' aria-busy={showTableLoading}>
+              {currentPageRuns.length ? (
+                <RunsTable
+                  runs={currentPageRuns}
+                  egressNodeNames={egressNodeNames}
+                  selection={selection}
+                  selectAllChecked={selectAllChecked}
+                  currentPageActionableCount={currentPageActionable.length}
+                  selectionActionPending={selectionActionPending}
+                  actionPending={mutate.isPending || selectionActionPending}
+                  onToggleCurrentPage={toggleCurrentPageSelection}
+                  onToggleRun={toggleRunSelection}
+                  onDetail={openDetail}
+                  onAccountDetail={setAccountDetailId}
+                  onAction={handleRunAction}
+                />
+              ) : (
+                <EmptyState
+                  title={
+                    deferredSearch ||
+                    status !== 'all' ||
+                    createdFrom ||
+                    createdTo
+                      ? '未找到匹配任务'
+                      : '暂无探针任务'
+                  }
+                  description={
+                    deferredSearch ||
+                    status !== 'all' ||
+                    createdFrom ||
+                    createdTo
+                      ? '请调整账号搜索词、任务状态或时间范围。'
+                      : '从账号页面手动选择账号，或配置一个 Cron 计划。'
+                  }
+                />
+              )}
+              {showTableLoading && (
+                <ServerTableLoadingOverlay
+                  page={page}
+                  itemLabel='任务'
+                  message='正在更新任务筛选结果…'
+                />
+              )}
+            </div>
+          </>
+        )}
       </TablePanel>
       <AccountProbeDetailDialog
         accountId={accountDetailId}
@@ -1443,7 +1521,13 @@ export function RunsPage() {
         onPageChange={(nextPage, land) =>
           setResultPreview((current) =>
             current
-              ? { ...current, page: nextPage, land, index: 0, sampleId: undefined }
+              ? {
+                  ...current,
+                  page: nextPage,
+                  land,
+                  index: 0,
+                  sampleId: undefined,
+                }
               : current
           )
         }
@@ -1559,6 +1643,44 @@ export function RunsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog
+        open={isolateConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open && !isolatePending) setIsolateConfirmOpen(false)
+        }}
+        title={`将 ${selectedAccountIds.length} 个账号移入隔离区？`}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              将停用已选任务中的 {selectedAccountIds.length}{' '}
+              个去重账号的上游，并把它们移入隔离区，不会删除账号或任务。
+            </p>
+            <p className='font-medium text-foreground'>
+              隔离区是长期隔离（不自动到期恢复）并停用上游；暂时停用仍走原来的停用时长逻辑。
+            </p>
+            <p className='text-muted-foreground'>
+              正在执行探针或等待账号设置恢复的账号会被跳过并保留选择。
+            </p>
+          </div>
+        }
+        cancelBtnText='取消'
+        confirmText={
+          isolatePending ? (
+            <>
+              <Loader2 className='animate-spin' />
+              移入中…
+            </>
+          ) : (
+            <>
+              <ShieldBan />
+              确认移入隔离区
+            </>
+          )
+        }
+        isLoading={isolatePending}
+        disabled={selectedAccountIds.length === 0}
+        handleConfirm={() => isolateBatchMutation.mutate(selectedAccountIds)}
+      />
       <AlertDialog
         open={bulkCancelOpen}
         onOpenChange={(open) => {
@@ -2354,9 +2476,7 @@ function RunDetail({
         egressNodeNames={egressNodeNames}
         onRestore={() => onAction('restore')}
       />
-      {run.error ? (
-        <ModelBindWindowError message={run.error} />
-      ) : null}
+      {run.error ? <ModelBindWindowError message={run.error} /> : null}
       <div className='rounded-lg border bg-muted/20 p-4'>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='min-w-0'>
@@ -2909,101 +3029,97 @@ function SampleCard({
           </div>
         ) : null}
         {executionMode === 'quality_test' && !sample.response_text ? (
-              <div className='rounded-lg border border-sky-500/20 bg-sky-500/5 p-4'>
-                <div className='text-sm font-medium'>上游仅返回哈希和指标</div>
-                <p className='mt-1 text-xs leading-5 text-muted-foreground'>
-                  快速出口质量探针不会返回可渲染正文；账号与出口由 grok2api
-                  审计记录交叉核验。
-                </p>
-                <div className='mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4'>
-                  <Evidence label='响应哈希' value={sample.response_sha256} />
-                  <Evidence label='Request ID' value={sample.request_id} />
-                  <Evidence
-                    label='核验账号'
-                    value={sample.verified_account_id}
+          <div className='rounded-lg border border-sky-500/20 bg-sky-500/5 p-4'>
+            <div className='text-sm font-medium'>上游仅返回哈希和指标</div>
+            <p className='mt-1 text-xs leading-5 text-muted-foreground'>
+              快速出口质量探针不会返回可渲染正文；账号与出口由 grok2api
+              审计记录交叉核验。
+            </p>
+            <div className='mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4'>
+              <Evidence label='响应哈希' value={sample.response_sha256} />
+              <Evidence label='Request ID' value={sample.request_id} />
+              <Evidence label='核验账号' value={sample.verified_account_id} />
+              <Evidence
+                label='核验出口'
+                value={
+                  sample.verified_egress_node_id ? (
+                    <EgressNodeReference
+                      nodeId={sample.verified_egress_node_id}
+                      nodeName={getEgressNodeName(
+                        egressNodeNames,
+                        sample.verified_egress_node_id
+                      )}
+                    />
+                  ) : (
+                    '—'
+                  )
+                }
+              />
+            </div>
+          </div>
+        ) : (
+          <>
+            <ReasoningPanel
+              content={sample.reasoning_text || ''}
+              tokenCount={sample.reasoning_tokens}
+            />
+            {responseExpanded ? (
+              <div
+                ref={responseScrollRef}
+                className='max-h-[32rem] min-w-0 overflow-auto overscroll-contain rounded-lg'
+                onScroll={(event) => {
+                  responseScrollTopRef.current = event.currentTarget.scrollTop
+                }}
+              >
+                {hasHtmlPreview ? (
+                  <SourceCodeView
+                    content={responseText}
+                    className='min-h-full rounded-lg'
                   />
-                  <Evidence
-                    label='核验出口'
-                    value={
-                      sample.verified_egress_node_id ? (
-                        <EgressNodeReference
-                          nodeId={sample.verified_egress_node_id}
-                          nodeName={getEgressNodeName(
-                            egressNodeNames,
-                            sample.verified_egress_node_id
-                          )}
-                        />
-                      ) : (
-                        '—'
-                      )
-                    }
+                ) : (
+                  <MarkdownView
+                    content={responseText}
+                    codeBlockClassName='max-h-none overflow-visible overscroll-auto'
                   />
-                </div>
+                )}
               </div>
             ) : (
-              <>
-                <ReasoningPanel
-                  content={sample.reasoning_text || ''}
-                  tokenCount={sample.reasoning_tokens}
-                />
-                {responseExpanded ? (
-                  <div
-                    ref={responseScrollRef}
-                    className='max-h-[32rem] min-w-0 overflow-auto overscroll-contain rounded-lg'
-                    onScroll={(event) => {
-                      responseScrollTopRef.current =
-                        event.currentTarget.scrollTop
-                    }}
-                  >
-                    {hasHtmlPreview ? (
-                      <SourceCodeView
-                        content={responseText}
-                        className='min-h-full rounded-lg'
-                      />
-                    ) : (
-                      <MarkdownView
-                        content={responseText}
-                        codeBlockClassName='max-h-none overflow-visible overscroll-auto'
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    type='button'
-                    className='flex w-full items-center gap-3 rounded-lg border border-dashed bg-muted/20 p-3 text-start transition-colors hover:bg-muted/40'
-                    onClick={() => setResponseDisplay('expanded')}
-                  >
-                    <ChevronDown className='size-4 shrink-0 text-muted-foreground' />
-                    <span className='min-w-0 flex-1'>
-                      <span className='block text-sm font-medium'>
-                        {hasHtmlPreview ? 'HTML 响应已折叠' : '长响应已折叠'}
-                      </span>
-                      <span className='mt-1 line-clamp-2 block font-mono text-xs text-muted-foreground'>
-                        {responsePreview || '点击展开完整响应'}
-                      </span>
-                    </span>
-                    <Badge variant='outline' className='shrink-0 tabular-nums'>
-                      {formatNumber(responseText.length, 0)} 字符
-                    </Badge>
-                  </button>
-                )}
-                <div className='mt-3 flex items-center gap-2'>
-                  <HtmlPreviewButton
-                    content={responseText}
-                    expectedImageUrl={expectedImageUrl}
-                  />
-                  {responseCollapsible && responseExpanded && (
-                    <Button
-                      size='sm'
-                      variant='ghost'
-                      onClick={() => setResponseDisplay('collapsed')}
-                    >
-                      <ChevronUp />
-                      收起响应
-                    </Button>
-                  )}
-                </div>
-              </>
+              <button
+                type='button'
+                className='flex w-full items-center gap-3 rounded-lg border border-dashed bg-muted/20 p-3 text-start transition-colors hover:bg-muted/40'
+                onClick={() => setResponseDisplay('expanded')}
+              >
+                <ChevronDown className='size-4 shrink-0 text-muted-foreground' />
+                <span className='min-w-0 flex-1'>
+                  <span className='block text-sm font-medium'>
+                    {hasHtmlPreview ? 'HTML 响应已折叠' : '长响应已折叠'}
+                  </span>
+                  <span className='mt-1 line-clamp-2 block font-mono text-xs text-muted-foreground'>
+                    {responsePreview || '点击展开完整响应'}
+                  </span>
+                </span>
+                <Badge variant='outline' className='shrink-0 tabular-nums'>
+                  {formatNumber(responseText.length, 0)} 字符
+                </Badge>
+              </button>
+            )}
+            <div className='mt-3 flex items-center gap-2'>
+              <HtmlPreviewButton
+                content={responseText}
+                expectedImageUrl={expectedImageUrl}
+              />
+              {responseCollapsible && responseExpanded && (
+                <Button
+                  size='sm'
+                  variant='ghost'
+                  onClick={() => setResponseDisplay('collapsed')}
+                >
+                  <ChevronUp />
+                  收起响应
+                </Button>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
