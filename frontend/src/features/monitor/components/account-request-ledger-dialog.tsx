@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/api'
 import { slimRequestAuditRecord } from '@/lib/preview-payload'
 import { cn, formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
-import { CopyButton, CopyableText } from '@/components/copy-button'
+import { CopyableText } from '@/components/copy-button'
 import { EmptyState, LoadingState } from '@/components/page'
 import { ServerPagination } from '@/components/server-pagination'
 import {
@@ -53,22 +53,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { RequestAuditDetailBody } from '@/features/monitor/components/request-audit-detail'
 import {
-  AuditAttemptsPanel,
-  AuditBillingPanel,
-  AuditGatewayFields,
-  AuditRequestPanel,
   AuditUsageCell,
   AttemptCountHint,
-  GatewayHydrationNote,
-  reasoningEffortLabel,
   useHydratedRequestAudit,
 } from '@/features/monitor/pages/request-audit-gateway-view'
 import {
-  formatSampleWindow,
   streamSampleDiagnostics,
   streamSamplePreview,
-  streamSampleWarnings,
 } from '@/features/monitor/pages/request-audit-stream-sample'
 import type { AccountIdentity } from '@/features/monitor/components/account-upstream-dialog'
 
@@ -247,7 +240,10 @@ export function AccountRequestLedgerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size='wide' className='overflow-hidden'>
+      <DialogContent
+        size='wide'
+        className='h-[min(52rem,calc(100dvh-2rem))] overflow-hidden'
+      >
         <DialogHeader className='shrink-0'>
           <DialogTitle className='flex items-center gap-2'>
             {selected ? (
@@ -543,220 +539,13 @@ function LedgerDetail({
   const { view, loading: gatewayLoading, error: gatewayError } =
     useHydratedRequestAudit(source, true)
   const record = view ?? source
-  const errorCode = auditErrorCode(record)
-  const actionLabel = actionStatusLabel(record)
-  const sample = record.streamSample
-  const diagnostics = streamSampleDiagnostics(record)
-  const warnings = streamSampleWarnings(diagnostics)
   return (
-    <div className='min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pe-1'>
-      <GatewayHydrationNote
-        loading={gatewayLoading}
-        error={gatewayError}
-        hydrated={record.gatewayHydrated}
-      />
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-        <DetailStat label='速度'>
-          <Tps value={record.tps} />
-        </DetailStat>
-        <DetailStat label='输出 Token'>
-          {formatNumber(record.outputTokens, 0)}
-        </DetailStat>
-        <DetailStat label='耗时'>
-          {record.durationMs ? `${formatNumber(record.durationMs, 0)} ms` : '未测量'}
-        </DetailStat>
-        <DetailStat label='风险'>
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <RiskBadge value={record.riskLevel} thresholds={thresholds} />
-            {actionLabel ? (
-              <Badge variant='outline' className='h-5 px-1.5 text-[10px]'>
-                {actionLabel}
-              </Badge>
-            ) : null}
-          </div>
-        </DetailStat>
-      </div>
-
-      <dl className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-        <DetailField
-          label='请求 ID'
-          value={record.requestId || '—'}
-          copyValue={record.requestId || undefined}
-        />
-        <DetailField label='审计 ID' value={record.id} copyValue={record.id} />
-        <DetailField
-          label='客户端 Key'
-          value={
-            record.clientKeyName
-              ? `${record.clientKeyName}${record.clientKeyId ? ` · ID ${record.clientKeyId}` : ''}`
-              : record.clientKeyId
-                ? `#${record.clientKeyId}`
-                : '—'
-          }
-        />
-        <DetailField
-          label='代理节点'
-          value={`${record.egressNodeName || '未映射代理节点'} · ID ${record.egressNodeId ?? '未知'}`}
-        />
-        <DetailField
-          label='模型'
-          value={record.modelPublicId || record.modelUpstreamModel || '—'}
-        />
-        <DetailField label='创建时间' value={formatDate(record.createdAt)} />
-        <DetailField
-          label='状态码'
-          value={
-            errorCode
-              ? `${record.statusCode || '—'} · ${auditErrorLabel(errorCode)}`
-              : String(record.statusCode || '—')
-          }
-        />
-        {errorCode ? (
-          <DetailField
-            label='上游错误'
-            value={`${auditErrorLabel(errorCode)} · ${errorCode}`}
-            copyValue={errorCode}
-          />
-        ) : null}
-        <DetailField
-          label='思考等级'
-          value={reasoningEffortLabel(record.reasoningEffort) || '未记录'}
-        />
-        <DetailField
-          label='推理 Token'
-          value={formatNumber(record.reasoningTokens, 0)}
-        />
-        <DetailField
-          label='Media Input'
-          value={
-            record.hasMediaInput
-              ? `${formatNumber(record.mediaInputImages, 0)} 张`
-              : '无'
-          }
-        />
-        <AuditGatewayFields record={record} />
-      </dl>
-
-      {record.riskReasons.length > 0 ? (
-        <div className='rounded-lg border border-amber-500/25 bg-amber-500/5 p-3'>
-          <div className='text-sm font-medium text-amber-800 dark:text-amber-200'>
-            风险依据
-          </div>
-          <ul className='mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground'>
-            {record.riskReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      <div className='space-y-3'>
-        <div>
-          <h3 className='text-sm font-semibold'>内容样本</h3>
-          <p className='mt-1 text-xs text-muted-foreground'>
-            截取思考和输出的开头/结尾。流式来自实时分片；非流式来自内部完整结果，方便人工核对。
-          </p>
-        </div>
-        {!diagnostics.hasSample || !sample ? (
-          <div className='rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground'>
-            该请求没有保存思考/输出样本。升级前的历史记录不会有样本。
-          </div>
-        ) : (
-          <>
-            {warnings.length > 0 ? (
-              <div className='space-y-1.5 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200'>
-                {warnings.map((warning) => (
-                  <p key={warning}>{warning}</p>
-                ))}
-              </div>
-            ) : null}
-            <dl className='grid gap-3 sm:grid-cols-2'>
-              <DetailField
-                label='思考字符 · 分片'
-                value={`${formatNumber(sample.thinkingChars ?? 0, 0)} · ${formatNumber(sample.thinkingChunks ?? 0, 0)} 片`}
-              />
-              <DetailField
-                label='输出字符 · 分片'
-                value={`${formatNumber(sample.outputChars ?? 0, 0)} · ${formatNumber(sample.outputChunks ?? 0, 0)} 片`}
-              />
-              <DetailField
-                label='思考时间窗'
-                value={formatSampleWindow(
-                  sample.firstThinkingMs,
-                  sample.lastThinkingMs,
-                  formatNumber
-                )}
-              />
-              <DetailField
-                label='输出时间窗'
-                value={formatSampleWindow(
-                  sample.firstOutputMs,
-                  sample.lastOutputMs,
-                  formatNumber
-                )}
-              />
-            </dl>
-            <SampleSnippet title='思考开头' value={sample.thinkingHead} />
-            <SampleSnippet title='思考结尾' value={sample.thinkingTail} />
-            <SampleSnippet title='输出开头' value={sample.outputHead} />
-            <SampleSnippet title='输出结尾' value={sample.outputTail} />
-          </>
-        )}
-      </div>
-      <AuditBillingPanel record={record} />
-      <AuditRequestPanel record={record} />
-      <AuditAttemptsPanel record={record} />
-    </div>
+    <RequestAuditDetailBody
+      record={record}
+      thresholds={thresholds}
+      gatewayLoading={gatewayLoading}
+      gatewayError={gatewayError}
+    />
   )
 }
 
-function DetailStat({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactNode
-}) {
-  return (
-    <div className='rounded-lg border bg-muted/15 p-3'>
-      <div className='text-[11px] text-muted-foreground'>{label}</div>
-      <div className='mt-1 font-mono text-lg font-semibold tabular-nums'>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function DetailField({
-  label,
-  value,
-  copyValue,
-}: {
-  label: string
-  value: string
-  copyValue?: string
-}) {
-  return (
-    <div className='rounded-lg border bg-muted/10 px-3 py-2'>
-      <div className='text-[11px] text-muted-foreground'>{label}</div>
-      <div className='mt-1 flex items-start gap-1 text-sm break-all'>
-        <span className='min-w-0 flex-1'>{value}</span>
-        {copyValue ? (
-          <CopyButton value={copyValue} className='size-6 shrink-0' />
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-function SampleSnippet({ title, value }: { title: string; value?: string }) {
-  if (!value) return null
-  return (
-    <div className='rounded-lg border bg-muted/10 p-3'>
-      <div className='text-[11px] text-muted-foreground'>{title}</div>
-      <pre className='mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-5'>
-        {value}
-      </pre>
-    </div>
-  )
-}

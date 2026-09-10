@@ -127,7 +127,7 @@ import {
 } from '@/components/ui/tooltip'
 import { ActionToolbar, ToolbarAction } from '@/components/action-toolbar'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { CopyButton, CopyableText } from '@/components/copy-button'
+import { CopyableText } from '@/components/copy-button'
 import { EnabledBadge } from '@/components/enabled-badge'
 import { ExportMenu } from '@/components/export-menu'
 import { InfoTooltip } from '@/components/info-tooltip'
@@ -148,24 +148,17 @@ import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import { RequestAuditClientBoard } from '@/features/monitor/components/request-audit-client-board'
 import { RequestAuditQualityBoard } from '@/features/monitor/components/request-audit-quality-board'
 import { RequestAuditAccountHistoryBoard } from '@/features/monitor/components/request-audit-account-history'
+import { RequestAuditDetailBody } from '@/features/monitor/components/request-audit-detail'
 import {
-  AuditAttemptsPanel,
-  AuditBillingPanel,
-  AuditGatewayFields,
-  AuditRequestPanel,
   AuditUsageCell,
   AttemptCountHint,
   ClientIpHint,
-  GatewayHydrationNote,
   SourcesHint,
-  reasoningEffortLabel,
   useHydratedRequestAudit,
 } from '@/features/monitor/pages/request-audit-gateway-view'
 import {
-  formatSampleWindow,
   streamSampleDiagnostics,
   streamSamplePreview,
-  streamSampleWarnings,
 } from '@/features/monitor/pages/request-audit-stream-sample'
 import {
   isRequestAuditsPath,
@@ -176,7 +169,6 @@ import {
   type RequestAuditTab,
   type RequestAuditsSearch,
 } from '@/features/monitor/pages/request-audits-search'
-import { runsSearchFromAccount } from '@/features/monitor/pages/runs-search'
 import { usePaintDeferredValue } from '@/hooks/use-paint-deferred-value'
 import { useServerTableLoading } from '@/hooks/use-server-table-loading'
 
@@ -4437,7 +4429,10 @@ function AuditRecordDetailDialog({
   const record = view ?? source
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size='wide' className='overflow-hidden'>
+      <DialogContent
+        size='wide'
+        className='h-[min(52rem,calc(100dvh-2rem))] overflow-hidden'
+      >
         <DialogHeader className='shrink-0'>
           <DialogTitle className='flex items-center gap-2'>
             <Eye className='size-5 text-primary' />
@@ -4450,464 +4445,22 @@ function AuditRecordDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {record && (
-          <div className='min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pe-1'>
-            <GatewayHydrationNote
-              loading={gatewayLoading}
-              error={gatewayError}
-              hydrated={record.gatewayHydrated}
-            />
-            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-              <div className='rounded-lg border bg-muted/15 p-3'>
-                <div className='text-[11px] text-muted-foreground'>速度</div>
-                <div className='mt-1 font-mono text-lg font-semibold tabular-nums'>
-                  <Tps value={record.tps} />
-                </div>
-              </div>
-              <div className='rounded-lg border bg-muted/15 p-3'>
-                <div className='text-[11px] text-muted-foreground'>
-                  输出 Token
-                </div>
-                <div className='mt-1 font-mono text-lg font-semibold tabular-nums'>
-                  {formatNumber(record.outputTokens, 0)}
-                </div>
-              </div>
-              <div className='rounded-lg border bg-muted/15 p-3'>
-                <div className='text-[11px] text-muted-foreground'>耗时</div>
-                <div className='mt-1 font-mono text-lg font-semibold tabular-nums'>
-                  {record.durationMs
-                    ? `${formatNumber(record.durationMs, 0)} ms`
-                    : '未测量'}
-                </div>
-              </div>
-              <div className='rounded-lg border bg-muted/15 p-3'>
-                <div className='text-[11px] text-muted-foreground'>风险</div>
-                <div className='mt-1'>
-                  <RiskBadge value={record.riskLevel} thresholds={thresholds} />
-                </div>
-              </div>
-            </div>
-
-            <dl className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-              <AuditDetailField
-                label='请求 ID'
-                value={record.requestId || '—'}
-                mono
-                copyValue={record.requestId || undefined}
-              />
-              <AuditDetailField
-                label='审计 ID'
-                value={record.id}
-                mono
-                copyValue={record.id}
-              />
-              <AuditDetailField
-                label='账号'
-                value={`${record.accountName || `账号 ${record.accountId ?? '未知'}`} · ID ${record.accountId ?? '未知'}`}
-                copyValue={
-                  record.accountId != null
-                    ? String(record.accountId)
-                    : undefined
-                }
-              />
-              <AuditDetailField
-                label='客户端 Key'
-                value={
-                  record.clientKeyName
-                    ? `${record.clientKeyName}${record.clientKeyId ? ` · ID ${record.clientKeyId}` : ''}`
-                    : record.clientKeyId
-                      ? `#${record.clientKeyId}`
-                      : '—'
-                }
-              />
-              <AuditDetailField
-                label='当前上游状态'
-                value={upstreamAccountStatusText(record)}
-              />
-              <AuditDetailField
-                label='代理节点'
-                value={`${record.egressNodeName || '未映射代理节点'} · ID ${record.egressNodeId ?? '未知'}`}
-              />
-              <AuditDetailField
-                label='模型'
-                value={record.modelPublicId || record.modelUpstreamModel || '—'}
-              />
-              <AuditDetailField
-                label='操作'
-                value={record.operation || 'responses'}
-              />
-              <AuditDetailField
-                label='创建时间'
-                value={formatDate(record.createdAt)}
-              />
-              <AuditDetailField
-                label='首 Token 延迟'
-                value={
-                  record.firstTokenMs == null
-                    ? '—'
-                    : `${formatNumber(record.firstTokenMs, 0)} ms`
-                }
-              />
-              <AuditDetailField
-                label='状态码'
-                value={
-                  auditErrorCode(record)
-                    ? `${record.statusCode || '—'} · ${auditErrorLabel(auditErrorCode(record))}`
-                    : String(record.statusCode || '—')
-                }
-                mono
-              />
-              {auditErrorCode(record) ? (
-                <AuditDetailField
-                  label='上游错误'
-                  value={`${auditErrorLabel(auditErrorCode(record))} · ${auditErrorCode(record)}`}
-                  mono
-                  copyValue={auditErrorCode(record)}
-                />
-              ) : null}
-              <AuditDetailField
-                label='输入 Token'
-                value={formatNumber(record.inputTokens, 0)}
-                mono
-              />
-              <AuditDetailField
-                label='Media Input'
-                value={
-                  record.hasMediaInput
-                    ? `${formatNumber(record.mediaInputImages, 0)} 张`
-                    : '无'
-                }
-              />
-              <AuditDetailField
-                label='推理 Token'
-                value={formatNumber(record.reasoningTokens, 0)}
-                mono
-              />
-              <AuditDetailField
-                label='思考等级'
-                value={reasoningEffortLabel(record.reasoningEffort) || '未记录'}
-              />
-              <AuditDetailField
-                label='总 Token'
-                value={formatNumber(record.totalTokens, 0)}
-                mono
-              />
-              <AuditGatewayFields record={record} />
-            </dl>
-
-            <div className='rounded-lg border border-primary/25 bg-primary/5 p-3'>
-              <div className='flex flex-wrap items-center gap-2'>
-                <div className='flex items-center gap-1.5 text-sm font-medium'>
-                  自动处置
-                  <InfoTooltip
-                    label='自动处置'
-                    content={requestAuditAutoDisableHelp}
-                    contentClassName='max-w-[28rem]'
-                  />
-                </div>
-                <PreDisableCheckBadge check={record.preDisableCheck} compact />
-              </div>
-              {record.preDisableCheck ? (
-                <div className='mt-3 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4'>
-                  <AuditDetailField
-                    label='最终动作'
-                    value={record.preDisableCheck.actionStatus || '—'}
-                  />
-                  <AuditDetailField
-                    label='处置时间'
-                    value={formatDate(record.preDisableCheck.checkedAt)}
-                  />
-                  <AuditDetailField
-                    label='优先级调整'
-                    value={
-                      record.preDisableCheck.appliedPriority != null
-                        ? `${record.preDisableCheck.previousPriority ?? '未知'} → ${record.preDisableCheck.appliedPriority}`
-                        : '—'
-                    }
-                    mono
-                  />
-                  {record.preDisableCheck.ssoVerdict &&
-                  record.preDisableCheck.ssoVerdict !== 'skipped' ? (
-                    <>
-                      <AuditDetailField
-                        label='历史 SSO 判定'
-                        value={record.preDisableCheck.ssoVerdict}
-                      />
-                      <AuditDetailField
-                        label='bot source'
-                        value={
-                          record.preDisableCheck.botFlag.found
-                            ? String(
-                                record.preDisableCheck.botFlag.source ?? '—'
-                              )
-                            : '未下发'
-                        }
-                        mono
-                      />
-                    </>
-                  ) : null}
-                </div>
-              ) : (
-                <p className='mt-2 text-xs leading-5 text-muted-foreground'>
-                  该请求尚未产生处置记录；只有达到规则阈值的高风险请求才会进入自动停用流程。
-                </p>
-              )}
-              {record.preDisableCheck?.botFlag.details && (
-                <div className='mt-3 rounded-md border bg-background/70 p-2 text-xs text-muted-foreground'>
-                  {record.preDisableCheck.botFlag.details}
-                </div>
-              )}
-              {record.preDisableCheck?.checkError && (
-                <div className='mt-3 text-xs text-destructive'>
-                  {record.preDisableCheck.checkError}
-                </div>
-              )}
-              {record.preDisableCheck?.actionError && (
-                <div className='mt-1 text-xs text-destructive'>
-                  {record.preDisableCheck.actionError}
-                </div>
-              )}
-              {record.preDisableCheck?.egressRecommendation?.type ===
-                'change_egress' && (
-                <div className='mt-3 rounded-md border border-amber-500/30 bg-amber-500/8 p-2 text-xs'>
-                  <div className='font-medium text-amber-700 dark:text-amber-300'>
-                    {record.preDisableCheck.egressRecommendation.label}
-                  </div>
-                  <div className='mt-1 text-muted-foreground'>
-                    {record.preDisableCheck.egressRecommendation.reason}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className='rounded-lg border border-sky-500/25 bg-sky-500/5 p-3 text-sm'>
-              <div className='font-medium text-sky-800 dark:text-sky-200'>
-                节点归因说明
-              </div>
-              <p className='mt-1 leading-5 text-muted-foreground'>
-                历史请求保留代理节点标识；动态 IP
-                只在节点视角显示最近探测快照，不代表本条请求当时使用的 IP。
-                账号启停与鉴权同样来自最近的上游查询快照，不回写为历史状态。
-              </p>
-            </div>
-
-            <AuditBillingPanel record={record} />
-            <StreamSamplePanel record={record} />
-            <AuditRequestPanel record={record} />
-            <AuditAttemptsPanel record={record} />
-
-            <div className='space-y-3'>
-              <div className='flex flex-wrap items-center justify-between gap-2'>
-                <div>
-                  <h3 className='text-sm font-semibold'>关联探针任务样本</h3>
-                  <p className='mt-1 text-xs text-muted-foreground'>
-                    这里展示 GrokIQ 本地探针任务与这条请求审计的交叉证据。
-                  </p>
-                </div>
-                {probeLoading && (
-                  <RefreshCw className='size-4 animate-spin text-primary' />
-                )}
-              </div>
-              {probeError && (
-                <div className='flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between'>
-                  <span className='text-destructive'>
-                    探针样本读取异常：{probeError}
-                  </span>
-                  <Button variant='outline' size='sm' onClick={onProbeRetry}>
-                    <RefreshCw />
-                    重试
-                  </Button>
-                </div>
-              )}
-              {!probeLoading && !probeError && !probeSamples.length && (
-                <div className='rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground'>
-                  未找到关联的本地探针样本
-                </div>
-              )}
-              <div className='space-y-3'>
-                {probeSamples.map((context) => (
-                  <ProbeAuditSampleCard
-                    key={context.sample.id}
-                    context={context}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {record.riskReasons.length > 0 && (
-              <div className='rounded-lg border border-amber-500/25 bg-amber-500/5 p-3'>
-                <div className='text-sm font-medium text-amber-800 dark:text-amber-200'>
-                  风险依据
-                </div>
-                <ul className='mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground'>
-                  {record.riskReasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
+        {record ? (
+          <RequestAuditDetailBody
+            record={record}
+            thresholds={thresholds}
+            gatewayLoading={gatewayLoading}
+            gatewayError={gatewayError}
+            probe={{
+              samples: probeSamples,
+              loading: probeLoading,
+              error: probeError,
+              onRetry: onProbeRetry,
+            }}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
-  )
-}
-
-function ProbeAuditSampleCard({
-  context,
-}: {
-  context: RequestAuditProbeContext
-}) {
-  const sample = context.sample
-  const run = context.run
-  const target =
-    sample.target_kind === 'current'
-      ? '账号当前节点'
-      : sample.target_kind === 'direct'
-        ? '上游调度诊断'
-        : sample.egress_name || sample.target_key
-  return (
-    <div className='rounded-xl border bg-card'>
-      <div className='flex flex-wrap items-center gap-2 border-b px-4 py-3'>
-        <span className='text-sm font-semibold'>
-          {run.planName || '手动探针任务'}
-        </span>
-        <Badge variant='outline'>第 {sample.round_number} 轮</Badge>
-        <Badge variant='secondary'>{target}</Badge>
-        <StatusBadge value={sample.classification || sample.status} />
-        <span className='ms-auto text-xs text-muted-foreground'>
-          {formatDate(sample.created_at)}
-        </span>
-        <Button asChild variant='ghost' size='sm'>
-          <Link
-            to='/runs'
-            search={runsSearchFromAccount(sample.account_id, run.id) as never}
-          >
-            <ExternalLink />
-            任务中心
-          </Link>
-        </Button>
-      </div>
-      <div className='grid gap-3 border-b bg-muted/15 p-4 sm:grid-cols-2 lg:grid-cols-5'>
-        <AuditSampleMetric label='任务状态' value={run.status} />
-        <AuditSampleMetric
-          label='TPS'
-          value={`${formatNumber(sample.tps)} Token/s`}
-          mono
-        />
-        <AuditSampleMetric
-          label='首 Token'
-          value={`${formatNumber(sample.first_token_ms, 0)} ms`}
-          mono
-        />
-        <AuditSampleMetric
-          label='总耗时'
-          value={`${formatNumber(sample.duration_ms, 0)} ms`}
-          mono
-        />
-        <AuditSampleMetric
-          label='输出 Token'
-          value={formatNumber(sample.output_tokens, 0)}
-          mono
-        />
-      </div>
-      <div className='grid gap-3 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4'>
-        <AuditSampleEvidence label='任务 ID' value={run.id} mono />
-        <AuditSampleEvidence
-          label='Profile'
-          value={run.profileName || run.profileId}
-        />
-        <AuditSampleEvidence label='触发方式' value={run.trigger || 'manual'} />
-        <AuditSampleEvidence
-          label='Request ID'
-          value={sample.request_id || '—'}
-          mono
-        />
-        <AuditSampleEvidence
-          label='审计 ID'
-          value={sample.audit_id ?? '—'}
-          mono
-        />
-        <AuditSampleEvidence
-          label='核验账号'
-          value={sample.verified_account_id ?? '—'}
-          mono
-        />
-        <AuditSampleEvidence
-          label='核验节点'
-          value={sample.verified_egress_node_id ?? '—'}
-          mono
-        />
-        <AuditSampleEvidence
-          label='HTTP 状态'
-          value={sample.status_code || '—'}
-          mono
-        />
-      </div>
-      {sample.error && (
-        <div className='mx-4 mb-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-          {sample.error}
-        </div>
-      )}
-      {(sample.responsePreview || sample.response_text) && (
-        <details className='mx-4 mb-4 rounded-lg border bg-muted/10 p-3'>
-          <summary className='cursor-pointer text-sm font-medium'>
-            查看响应摘要
-            {sample.responseLength
-              ? ` · ${formatNumber(sample.responseLength, 0)} 字符`
-              : ''}
-          </summary>
-          <pre className='mt-3 max-h-64 overflow-auto text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground'>
-            {sample.response_text || sample.responsePreview}
-          </pre>
-        </details>
-      )}
-    </div>
-  )
-}
-
-function AuditSampleMetric({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-}) {
-  return (
-    <div className='min-w-0'>
-      <div className='text-[11px] text-muted-foreground'>{label}</div>
-      <div
-        className={cn(
-          'mt-1 text-sm font-medium break-words',
-          mono && 'font-mono tabular-nums'
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function AuditSampleEvidence({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string
-  value: string | number
-  mono?: boolean
-}) {
-  return (
-    <div className='min-w-0'>
-      <div className='text-[11px] text-muted-foreground'>{label}</div>
-      <div
-        className={cn('mt-1 break-all text-foreground', mono && 'font-mono')}
-      >
-        {value}
-      </div>
-    </div>
   )
 }
 
@@ -4967,156 +4520,6 @@ function AuditThroughputCell({ row }: { row: RequestAuditRecord }) {
         </div>
       ) : null}
     </>
-  )
-}
-
-function StreamSamplePanel({ record }: { record: RequestAuditRecord }) {
-  const sample = record.streamSample
-  const diagnostics = streamSampleDiagnostics(record)
-  const warnings = streamSampleWarnings(diagnostics)
-  return (
-    <div className='space-y-3'>
-      <div>
-        <h3 className='text-sm font-semibold'>内容样本</h3>
-        <p className='mt-1 text-xs text-muted-foreground'>
-          截取思考和输出的开头/结尾。流式来自实时分片；非流式来自内部完整结果，方便人工核对。
-        </p>
-      </div>
-      {!diagnostics.hasSample || !sample ? (
-        <div className='rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground'>
-          该请求没有保存思考/输出样本。升级前的历史记录不会有样本。
-        </div>
-      ) : (
-        <>
-          <div className='flex flex-wrap gap-1.5'>
-            <SampleChip ok={diagnostics.hasThinking} label='明文思考' />
-            <SampleChip
-              ok={diagnostics.hasEncryptedThinking}
-              label='加密思考'
-              hideWhenFalse
-            />
-            <SampleChip ok={diagnostics.hasOutput} label='实体输出' />
-            <SampleChip
-              ok={diagnostics.thinkingThenOutput}
-              label='思考后有输出'
-              hideWhenFalse
-            />
-            {sample.truncated ? (
-              <Badge variant='outline' className='text-[10px]'>
-                样本已裁剪
-              </Badge>
-            ) : null}
-          </div>
-          {warnings.length > 0 ? (
-            <div className='space-y-1.5 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200'>
-              {warnings.map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          ) : null}
-          <dl className='grid gap-3 sm:grid-cols-2'>
-            <AuditDetailField
-              label='思考字符 · 分片'
-              value={`${formatNumber(sample.thinkingChars ?? 0, 0)} · ${formatNumber(sample.thinkingChunks ?? 0, 0)} 片`}
-            />
-            <AuditDetailField
-              label='输出字符 · 分片'
-              value={`${formatNumber(sample.outputChars ?? 0, 0)} · ${formatNumber(sample.outputChunks ?? 0, 0)} 片`}
-            />
-            <AuditDetailField
-              label='思考时间窗'
-              value={formatSampleWindow(
-                sample.firstThinkingMs,
-                sample.lastThinkingMs,
-                formatNumber
-              )}
-            />
-            <AuditDetailField
-              label='输出时间窗'
-              value={formatSampleWindow(
-                sample.firstOutputMs,
-                sample.lastOutputMs,
-                formatNumber
-              )}
-            />
-          </dl>
-          <SampleSnippet title='思考开头' value={sample.thinkingHead} />
-          <SampleSnippet title='思考结尾' value={sample.thinkingTail} />
-          <SampleSnippet title='输出开头' value={sample.outputHead} />
-          <SampleSnippet title='输出结尾' value={sample.outputTail} />
-        </>
-      )}
-    </div>
-  )
-}
-
-function SampleChip({
-  ok,
-  label,
-  hideWhenFalse = false,
-}: {
-  ok: boolean
-  label: string
-  hideWhenFalse?: boolean
-}) {
-  if (!ok && hideWhenFalse) return null
-  return (
-    <Badge
-      variant={ok ? 'secondary' : 'outline'}
-      className={cn(
-        'text-[10px]',
-        ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'
-      )}
-    >
-      {ok ? '✓' : '✗'} {label}
-    </Badge>
-  )
-}
-
-function SampleSnippet({ title, value }: { title: string; value?: string }) {
-  if (!value) return null
-  return (
-    <section className='overflow-hidden rounded-lg border bg-muted/20'>
-      <div className='flex h-9 items-center justify-between gap-2 px-3'>
-        <span className='text-[11px] font-medium'>{title}</span>
-        <CopyButton value={value} className='size-6' />
-      </div>
-      <pre className='max-h-64 overflow-auto px-3 pb-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap'>
-        {value}
-      </pre>
-    </section>
-  )
-}
-
-function AuditDetailField({
-  label,
-  value,
-  mono = false,
-  copyValue,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-  copyValue?: string
-}) {
-  return (
-    <div className='min-w-0 rounded-lg border bg-background p-3'>
-      <dt className='text-[11px] text-muted-foreground'>{label}</dt>
-      <dd
-        className={cn(
-          'mt-1 text-sm break-words',
-          mono && 'font-mono break-all tabular-nums'
-        )}
-      >
-        {copyValue ? (
-          <CopyableText value={copyValue} className='max-w-full'>
-            <span className='min-w-0 break-all'>{value}</span>
-          </CopyableText>
-        ) : (
-          value
-        )}
-      </dd>
-    </div>
   )
 }
 
