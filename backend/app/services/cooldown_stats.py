@@ -18,6 +18,10 @@ EXPIRED_STATUS = "expired"
 ALL_STATUS = "all"
 ALLOWED_STATUSES = {COOLING_STATUS, EXPIRED_STATUS, ALL_STATUS}
 DEFAULT_LABEL = "高速 TPS 冷却"
+MISSING_THINKING_ERROR = "missing_thinking"
+MISSING_THINKING_LABEL = "grok2api 降智冷却"
+MISSING_THINKING_SOURCE = "grok2api"
+MISSING_THINKING_REASON = "grok2api 缺思考进入冷却"
 EXPIRING_SOON_SECONDS = 120
 _FAR_FUTURE = datetime(9999, 12, 31, tzinfo=UTC)
 _FAR_PAST = datetime(1970, 1, 1, tzinfo=UTC)
@@ -41,6 +45,7 @@ def compute_cooldown_stats(
     min_count: int,
     cooldown_minutes: int,
     isolation_enabled: bool,
+    extra_cooling: list[dict[str, Any]] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current = now or utc_now()
@@ -49,30 +54,21 @@ def compute_cooldown_stats(
         remaining_seconds(_recommendation(row).get("cooldownUntil"), now=current)
         for row in cooling_rows.values()
     ]
-    expiring_soon = sum(
-        1 for value in remaining_values if value <= EXPIRING_SOON_SECONDS
-    )
+    extra_items = extra_cooling or []
+    remaining_values.extend(max(0, int(item.get("remainingSeconds") or 0)) for item in extra_items)
+    expiring_soon = sum(1 for value in remaining_values if value <= EXPIRING_SOON_SECONDS)
     disabled_by_cooldown = sum(
-        1
-        for row in cooling_rows.values()
-        if bool(_recommendation(row).get("disabledByCooldown"))
-    )
-    cooled_events = [
-        row for row in rows if _in_range(_cooled_at(row), start, end)
-    ]
-    expired_events = [
-        row for row in rows if _in_range(_expired_at(row), start, end)
-    ]
+        1 for row in cooling_rows.values() if bool(_recommendation(row).get("disabledByCooldown"))
+    ) + sum(1 for item in extra_items if bool(item.get("disabledByCooldown")))
+    cooled_events = [row for row in rows if _in_range(_cooled_at(row), start, end)]
+    expired_events = [row for row in rows if _in_range(_expired_at(row), start, end)]
     unique_account_ids = {
-        account_id
-        for account_id in (_account_id(row) for row in cooled_events)
-        if account_id > 0
+        account_id for account_id in (_account_id(row) for row in cooled_events) if account_id > 0
     }
     isolated_after = sum(
         1
         for account_id in unique_account_ids
-        if str((assessments.get(account_id) or {}).get("monitor_status") or "")
-        == "quarantined"
+        if str((assessments.get(account_id) or {}).get("monitor_status") or "") == "quarantined"
     )
     return {
         "range": {
@@ -85,13 +81,11 @@ def compute_cooldown_stats(
             "isolationEnabled": bool(isolation_enabled),
         },
         "zone": {
-            "cooling": len(cooling_rows),
+            "cooling": len(cooling_rows) + len(extra_items),
             "expiringSoon": expiring_soon,
             "disabledByCooldown": disabled_by_cooldown,
             "avgRemainingSeconds": (
-                int(round(sum(remaining_values) / len(remaining_values)))
-                if remaining_values
-                else None
+                int(round(sum(remaining_values) / len(remaining_values))) if remaining_values else None
             ),
         },
         "events": {
@@ -184,11 +178,7 @@ def build_cooldown_zone_item(
     recommendation = _recommendation(verification)
     current = now or utc_now()
     until = recommendation.get("cooldownUntil")
-    remaining = (
-        0
-        if status != COOLING_STATUS
-        else remaining_seconds(until, now=current)
-    )
+    remaining = 0 if status != COOLING_STATUS else remaining_seconds(until, now=current)
     min_count = _as_int(tps_min_count, 0)
     if min_count <= 0:
         min_count = _as_int(recommendation.get("tpsMinCount"), 0)
@@ -197,11 +187,7 @@ def build_cooldown_zone_item(
         minutes = _as_int(cooldown_minutes, 0)
     audit_tps = _as_float(verification.get("audit_tps"), 0.0)
     max_tps_raw = recommendation.get("maxTps")
-    max_tps = (
-        audit_tps
-        if max_tps_raw is None or max_tps_raw == ""
-        else _as_float(max_tps_raw, audit_tps)
-    )
+    max_tps = audit_tps if max_tps_raw is None or max_tps_raw == "" else _as_float(max_tps_raw, audit_tps)
     return {
         "id": account_id,
         "name": str(upstream.get("name") or f"账号 #{account_id}"),
@@ -214,7 +200,7 @@ def build_cooldown_zone_item(
         "actionError": str(verification.get("action_error") or ""),
         "label": str(recommendation.get("label") or DEFAULT_LABEL),
         "reason": str(recommendation.get("reason") or ""),
-        "source": "request_audit",
+        "source": str(recommendation.get("source") or "request_audit"),
         "cooledAt": _iso(recommendation.get("cooledAt")),
         "cooldownUntil": _iso(until),
         "expiredAt": _iso(recommendation.get("expiredAt")),
@@ -226,13 +212,15 @@ def build_cooldown_zone_item(
         "auditTps": audit_tps,
         "auditId": str(verification.get("audit_upstream_id") or ""),
         "auditCreatedAt": _iso(verification.get("audit_created_at")),
-        "riskReasons": _string_list(
-            recommendation.get("riskReasons") or recommendation.get("detail")
-        ),
+        "riskReasons": _string_list(recommendation.get("riskReasons") or recommendation.get("detail")),
         "disabledByCooldown": bool(recommendation.get("disabledByCooldown")),
         "releasedManually": bool(recommendation.get("releasedManually")),
         "cooldownCount": int(cooldown_count),
-        "nextAction": "isolate",
+        "nextAction": (
+            "isolate"
+            if recommendation.get("nextAction") is None
+            else str(recommendation.get("nextAction") or "")
+        ),
     }
 
 
@@ -244,6 +232,130 @@ def remaining_seconds(value: Any, *, now: datetime | None = None) -> int:
     return max(0, int((until - current).total_seconds()))
 
 
+def account_id_of(account: dict[str, Any]) -> int:
+    try:
+        value = int(account.get("id") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return value if value > 0 else 0
+
+
+def account_last_error(account: dict[str, Any]) -> str:
+    raw = account.get("lastError")
+    if raw is None or str(raw).strip() == "":
+        raw = account.get("last_error")
+    return str(raw or "").strip()
+
+
+def is_missing_thinking_cooling(
+    account: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if account_last_error(account) != MISSING_THINKING_ERROR:
+        return False
+    if not bool(account.get("enabled", True)):
+        return False
+    until = parse_optional_datetime(account.get("cooldownUntil") or account.get("cooldown_until"))
+    return until is not None and until > (now or utc_now())
+
+
+def build_missing_thinking_cooldown_item(
+    account: dict[str, Any],
+    *,
+    quarantined: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or utc_now()
+    account_id = account_id_of(account)
+    until = parse_optional_datetime(account.get("cooldownUntil") or account.get("cooldown_until"))
+    updated = parse_optional_datetime(account.get("updatedAt") or account.get("updated_at"))
+    degrade_last = parse_optional_datetime(account.get("degradeLast") or account.get("degrade_last"))
+    cooled_at = degrade_last or updated or current
+    minutes = 0
+    if until is not None:
+        minutes = max(1, int((until - cooled_at).total_seconds() / 60))
+    failure_count = _as_int(
+        account.get("failureCount") or account.get("failure_count"),
+        0,
+    )
+    degrade_hits = _as_int(
+        account.get("degradeHits") or account.get("degrade_hits"),
+        0,
+    )
+    verification = {
+        "account_id": account_id,
+        "action_status": "cooled",
+        "action_error": "",
+        "audit_upstream_id": "",
+        "audit_created_at": cooled_at,
+        "audit_tps": 0,
+        "checked_at": updated or current,
+        "egress_recommendation": {
+            "kind": "missing_thinking_cooldown",
+            "type": "missing_thinking_cooldown",
+            "label": MISSING_THINKING_LABEL,
+            "reason": MISSING_THINKING_REASON,
+            "source": MISSING_THINKING_SOURCE,
+            "cooledAt": cooled_at,
+            "cooldownUntil": until,
+            "minutes": minutes,
+            "tpsStreak": failure_count,
+            "tpsMinCount": 0,
+            "disabledByCooldown": False,
+            "nextAction": "",
+            "riskReasons": [MISSING_THINKING_ERROR],
+        },
+    }
+    payload = build_cooldown_zone_item(
+        account_id=account_id,
+        status=COOLING_STATUS,
+        verification=verification,
+        cooldown_count=max(degrade_hits, failure_count, 1),
+        upstream=account,
+        missing_upstream=False,
+        quarantined=quarantined,
+        tps_min_count=0,
+        cooldown_minutes=minutes,
+        now=current,
+    )
+    payload["tpsStreak"] = None
+    payload["tpsMinCount"] = None
+    payload["maxTps"] = None
+    payload["auditTps"] = None
+    payload["nextAction"] = ""
+    return payload
+
+
+def merge_cooldown_zone_items(
+    local_items: list[dict[str, Any]],
+    grok_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_id: dict[int, dict[str, Any]] = {}
+    for item in local_items:
+        account_id = int(item.get("id") or 0)
+        if account_id > 0:
+            by_id[account_id] = item
+    for item in grok_items:
+        account_id = int(item.get("id") or 0)
+        if account_id <= 0:
+            continue
+        current = by_id.get(account_id)
+        if current is None or (
+            item.get("status") == COOLING_STATUS and current.get("status") != COOLING_STATUS
+        ):
+            by_id[account_id] = item
+    values = list(by_id.values())
+    cooling = [item for item in values if item.get("status") == COOLING_STATUS]
+    expired = [item for item in values if item.get("status") != COOLING_STATUS]
+    cooling.sort(key=lambda item: parse_optional_datetime(item.get("cooldownUntil")) or _FAR_FUTURE)
+    expired.sort(
+        key=lambda item: parse_optional_datetime(item.get("expiredAt") or item.get("cooledAt")) or _FAR_PAST,
+        reverse=True,
+    )
+    return cooling + expired
+
+
 def matches_cooldown_search(item: dict[str, Any], search: str) -> bool:
     token = str(search or "").strip().lower()
     if not token:
@@ -253,6 +365,9 @@ def matches_cooldown_search(item: dict[str, Any], search: str) -> bool:
         or token in str(item.get("email") or "").lower()
         or token == str(item.get("id") or "")
         or token in str(item.get("auditId") or "").lower()
+        or token in str(item.get("label") or "").lower()
+        or token in str(item.get("reason") or "").lower()
+        or token in str(item.get("source") or "").lower()
     )
 
 
@@ -310,9 +425,7 @@ def _latest(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 
 def _row_recency_key(row: dict[str, Any]) -> tuple[float, int]:
-    stamp = parse_optional_datetime(row.get("checked_at")) or parse_optional_datetime(
-        row.get("updated_at")
-    )
+    stamp = parse_optional_datetime(row.get("checked_at")) or parse_optional_datetime(row.get("updated_at"))
     return (
         stamp.timestamp() if stamp is not None else 0.0,
         int(row.get("id") or 0),
@@ -320,9 +433,7 @@ def _row_recency_key(row: dict[str, Any]) -> tuple[float, int]:
 
 
 def _cooling_sort_key(item: dict[str, Any]) -> datetime:
-    until = parse_optional_datetime(
-        _recommendation(item.get("verification") or {}).get("cooldownUntil")
-    )
+    until = parse_optional_datetime(_recommendation(item.get("verification") or {}).get("cooldownUntil"))
     return until or _FAR_FUTURE
 
 

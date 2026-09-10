@@ -710,6 +710,14 @@ class Grok2APIClient:
             "PATCH", f"/api/admin/v1/accounts/{account_id}", json={"enabled": enabled}
         )
 
+    async def clear_account_cooldown(self, account_id: int) -> dict[str, Any]:
+        """Clear grok2api request-path cooldown without toggling enabled."""
+
+        return await self.admin_request(
+            "POST",
+            f"/api/admin/v1/accounts/{account_id}/clear-cooldown",
+        )
+
     async def set_account_priority(self, account_id: int, priority: int) -> dict[str, Any]:
         """Adjust one upstream account's routing priority without changing state."""
 

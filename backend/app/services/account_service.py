@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -17,9 +18,14 @@ from app.persistence.sso_report_repository import SsoReportRepository
 from app.services.account_timeline import build_account_timeline
 from app.services.cooldown_stats import (
     ALLOWED_STATUSES,
+    account_id_of,
     build_cooldown_zone_item,
+    build_missing_thinking_cooldown_item,
     compute_cooldown_stats,
+    is_missing_thinking_cooling,
     matches_cooldown_search,
+    merge_cooldown_zone_items,
+    remaining_seconds,
     resolve_cooldown_list_range,
     select_cooldown_zone_rows,
 )
@@ -28,6 +34,7 @@ from app.services.isolation_stats import compute_isolation_stats, resolve_stats_
 QUARANTINE_RECOVERY_PRIORITY = -2_000_000_000
 PUBLIC_UPSTREAM_SUMMARY_TTL_SECONDS = 10.0
 PUBLIC_UPSTREAM_PROVIDERS = ("grok_build", "grok_web", "grok_console")
+logger = logging.getLogger(__name__)
 
 
 class AccountService:
@@ -210,9 +217,7 @@ class AccountService:
             upstream_params["search"] = search.strip()
         upstream = await self.client.list_all_accounts(**upstream_params)
         assessments = (
-            self.accounts.get_assessments(
-                [int(item.get("id") or 0) for item in upstream]
-            )
+            self.accounts.get_assessments([int(item.get("id") or 0) for item in upstream])
             if monitor_status or recovery_guarded in {"true", "false"}
             else {}
         )
@@ -238,9 +243,7 @@ class AccountService:
         selectable = [item for item in matched if self._is_probe_selectable(item)]
         return {
             "accountIds": [int(item["id"]) for item in selectable],
-            "disabledAccountIds": [
-                int(item["id"]) for item in selectable if not bool(item.get("enabled"))
-            ],
+            "disabledAccountIds": [int(item["id"]) for item in selectable if not bool(item.get("enabled"))],
             "matched": len(matched),
             "selectable": len(selectable),
             "excluded": len(matched) - len(selectable),
@@ -281,9 +284,7 @@ class AccountService:
                 "enabled": bool(item.get("enabled")),
                 "authStatus": str(item.get("authStatus") or ""),
                 "egressNodeId": (
-                    str(item.get("egressNodeId"))
-                    if int(item.get("egressNodeId") or 0) > 0
-                    else None
+                    str(item.get("egressNodeId")) if int(item.get("egressNodeId") or 0) > 0 else None
                 ),
                 "egressAssignmentMode": str(item.get("egressAssignmentMode") or ""),
                 **self._sso_overlay(
@@ -306,9 +307,7 @@ class AccountService:
             "pageSize": int(payload.get("pageSize") or page_size),
         }
 
-    async def public_upstream_account_summary(
-        self, *, include_inventory: bool = False
-    ) -> dict[str, Any]:
+    async def public_upstream_account_summary(self, *, include_inventory: bool = False) -> dict[str, Any]:
         """Return sanitized grok2api account counts for the public status page.
 
         The browser never talks to grok2api. Only integer aggregates leave
@@ -329,9 +328,7 @@ class AccountService:
             if cached is not None:
                 return cached
             try:
-                raw = await self.client.admin_request(
-                    "GET", "/api/admin/v1/accounts/summary"
-                )
+                raw = await self.client.admin_request("GET", "/api/admin/v1/accounts/summary")
                 payload = _public_upstream_summary(raw, reachable=True)
             except Exception:
                 payload = _public_upstream_summary({}, reachable=False)
@@ -340,24 +337,17 @@ class AccountService:
 
     def _fresh_public_summary(self) -> dict[str, Any] | None:
         cached = self._public_summary_cache
-        if (
-            cached is not None
-            and time.monotonic() - cached[0] < PUBLIC_UPSTREAM_SUMMARY_TTL_SECONDS
-        ):
+        if cached is not None and time.monotonic() - cached[0] < PUBLIC_UPSTREAM_SUMMARY_TTL_SECONDS:
             return cached[1]
         return None
 
     async def dashboard(self, hours: int) -> dict[str, Any]:
-        upstream = await self.client.admin_request(
-            "GET", "/api/admin/v1/accounts/summary"
-        )
+        upstream = await self.client.admin_request("GET", "/api/admin/v1/accounts/summary")
         metrics = self.accounts.dashboard_metrics(hours)
         assessments = self.accounts.list_assessments(limit=8)
         assessment_ids = [int(item["account_id"]) for item in assessments]
         verifications = self._latest_verifications(assessment_ids)
-        labels = await self.client.list_all_accounts(
-            {int(item["account_id"]) for item in assessments}
-        )
+        labels = await self.client.list_all_accounts({int(item["account_id"]) for item in assessments})
         labels_by_id = {int(item.get("id") or 0): item for item in labels}
         workers = {
             **(metrics.get("workers") or {}),
@@ -369,9 +359,7 @@ class AccountService:
             "workers": workers,
             "riskyAccounts": [
                 self._overlay(
-                    labels_by_id.get(
-                        int(item["account_id"]), {"id": item["account_id"]}
-                    ),
+                    labels_by_id.get(int(item["account_id"]), {"id": item["account_id"]}),
                     item,
                     verification=verifications.get(int(item["account_id"])),
                 )
@@ -507,9 +495,7 @@ class AccountService:
 
         if action not in {"quarantine", "isolate", "restore"}:
             raise ValueError("批量账号动作无效")
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
 
@@ -535,15 +521,13 @@ class AccountService:
             already_ids = {
                 account_id
                 for account_id in unique_ids
-                if account_id not in locked_ids
-                and not self._is_quarantined(assessments.get(account_id))
+                if account_id not in locked_ids and not self._is_quarantined(assessments.get(account_id))
             }
             already_key = "alreadyRestoredAccountIds"
         eligible_ids = [
             account_id
             for account_id in unique_ids
-            if account_id not in locked_ids
-            and account_id not in already_ids
+            if account_id not in locked_ids and account_id not in already_ids
         ]
         semaphore = asyncio.Semaphore(6)
 
@@ -562,12 +546,8 @@ class AccountService:
                     return account_id, str(exc)
             return account_id, ""
 
-        values = await asyncio.gather(
-            *(apply(account_id) for account_id in eligible_ids)
-        )
-        failures = [
-            {"id": account_id, "error": error} for account_id, error in values if error
-        ]
+        values = await asyncio.gather(*(apply(account_id) for account_id in eligible_ids))
+        failures = [{"id": account_id, "error": error} for account_id, error in values if error]
         failed_ids = [int(value["id"]) for value in failures]
         return {
             "requested": len(unique_ids),
@@ -613,9 +593,7 @@ class AccountService:
                 "propagated": False,
                 "assessment": assessment,
             }
-        if normalized_account_id in self.probes.account_settings_locked_ids(
-            {normalized_account_id}
-        ):
+        if normalized_account_id in self.probes.account_settings_locked_ids({normalized_account_id}):
             return {
                 "accountId": normalized_account_id,
                 "actionStatus": "task_protected",
@@ -651,16 +629,10 @@ class AccountService:
             title = "账号已移入隔离区"
         else:
             alert_kind = (
-                "auto_isolate"
-                if normalized_source == "probe"
-                else f"{normalized_source}_auto_isolate"[:48]
+                "auto_isolate" if normalized_source == "probe" else f"{normalized_source}_auto_isolate"[:48]
             )
             severity = "critical"
-            title = (
-                "账号已被自动移入隔离区"
-                if was_enabled
-                else "账号已处于停用状态并移入隔离区"
-            )
+            title = "账号已被自动移入隔离区" if was_enabled else "账号已处于停用状态并移入隔离区"
         self.accounts.create_alert(
             account_id=normalized_account_id,
             kind=alert_kind,
@@ -702,9 +674,7 @@ class AccountService:
 
         normalized_account_id = int(account_id)
         assessment = self.accounts.get_assessment(normalized_account_id) or {}
-        was_already_quarantined = (
-            str(assessment.get("monitor_status") or "") == "quarantined"
-        )
+        was_already_quarantined = str(assessment.get("monitor_status") or "") == "quarantined"
         if not self.settings.auto_quarantine and not force:
             return {
                 "accountId": normalized_account_id,
@@ -712,18 +682,14 @@ class AccountService:
                 "assessment": assessment,
             }
         if self.request_audits is not None:
-            self.request_audits.clear_egress_recommendations_for_account(
-                normalized_account_id
-            )
+            self.request_audits.clear_egress_recommendations_for_account(normalized_account_id)
         if was_already_quarantined and not force:
             return {
                 "accountId": normalized_account_id,
                 "actionStatus": "already_quarantined",
                 "assessment": assessment,
             }
-        if normalized_account_id in self.probes.account_settings_locked_ids(
-            {normalized_account_id}
-        ):
+        if normalized_account_id in self.probes.account_settings_locked_ids({normalized_account_id}):
             return {
                 "accountId": normalized_account_id,
                 "actionStatus": "task_protected",
@@ -762,26 +728,18 @@ class AccountService:
         )
         normalized_source = str(source or "monitor").strip() or "monitor"
         alert_kind = (
-            "auto_quarantine"
-            if normalized_source == "probe"
-            else f"{normalized_source}_auto_quarantine"[:48]
+            "auto_quarantine" if normalized_source == "probe" else f"{normalized_source}_auto_quarantine"[:48]
         )
         self.accounts.create_alert(
             account_id=normalized_account_id,
             kind=alert_kind,
             severity="critical",
-            title=(
-                "账号已被自动停用"
-                if was_enabled
-                else "账号已处于停用状态并记录隔离"
-            ),
+            title=("账号已被自动停用" if was_enabled else "账号已处于停用状态并记录隔离"),
             detail={
                 "source": normalized_source,
                 "actionStatus": action_status,
                 "quarantineUntil": app_isoformat(until),
-                "recoveryMode": (
-                    "temporary" if until is not None else "permanent"
-                ),
+                "recoveryMode": ("temporary" if until is not None else "permanent"),
                 "riskScore": float(risk_score),
                 **(detail or {}),
             },
@@ -816,9 +774,7 @@ class AccountService:
                 "actionStatus": "deprioritize_disabled",
                 "priority": target_priority,
             }
-        if normalized_account_id in self.probes.account_settings_locked_ids(
-            {normalized_account_id}
-        ):
+        if normalized_account_id in self.probes.account_settings_locked_ids({normalized_account_id}):
             return {
                 "accountId": normalized_account_id,
                 "actionStatus": "task_protected",
@@ -875,9 +831,7 @@ class AccountService:
         normalized_account_id = int(account_id)
         cooldown_minutes = max(1, min(int(minutes), 1440))
         until = utc_now() + timedelta(minutes=cooldown_minutes)
-        if normalized_account_id in self.probes.account_settings_locked_ids(
-            {normalized_account_id}
-        ):
+        if normalized_account_id in self.probes.account_settings_locked_ids({normalized_account_id}):
             return {
                 "accountId": normalized_account_id,
                 "actionStatus": "task_protected",
@@ -929,9 +883,7 @@ class AccountService:
                 "actionStatus": "already_quarantined",
                 "reenabled": False,
             }
-        if normalized_account_id in self.probes.account_settings_locked_ids(
-            {normalized_account_id}
-        ):
+        if normalized_account_id in self.probes.account_settings_locked_ids({normalized_account_id}):
             return {
                 "accountId": normalized_account_id,
                 "actionStatus": "task_protected",
@@ -964,19 +916,13 @@ class AccountService:
         account_ids: list[int],
         enabled: bool,
     ) -> dict[str, Any]:
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
         locked_ids = self.probes.account_settings_locked_ids(set(unique_ids))
-        eligible_ids = [
-            account_id for account_id in unique_ids if account_id not in locked_ids
-        ]
+        eligible_ids = [account_id for account_id in unique_ids if account_id not in locked_ids]
         update_result = (
-            await self.client.set_accounts_enabled(eligible_ids, enabled)
-            if eligible_ids
-            else None
+            await self.client.set_accounts_enabled(eligible_ids, enabled) if eligible_ids else None
         )
         failures = list(update_result.failures) if update_result else []
         return {
@@ -986,10 +932,7 @@ class AccountService:
             "enabled": enabled,
             "skippedAccountIds": sorted(locked_ids),
             "failedAccountIds": sorted(failure.account_id for failure in failures),
-            "failures": [
-                {"id": failure.account_id, "error": failure.error}
-                for failure in failures
-            ],
+            "failures": [{"id": failure.account_id, "error": failure.error} for failure in failures],
         }
 
     async def set_accounts_egress(
@@ -998,15 +941,11 @@ class AccountService:
         account_ids: list[int],
         egress_node_id: int | None,
     ) -> dict[str, Any]:
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
         locked_ids = self.probes.account_settings_locked_ids(set(unique_ids))
-        eligible_ids = [
-            account_id for account_id in unique_ids if account_id not in locked_ids
-        ]
+        eligible_ids = [account_id for account_id in unique_ids if account_id not in locked_ids]
         update_result = (
             await self.client.set_accounts_egress(
                 eligible_ids,
@@ -1017,14 +956,10 @@ class AccountService:
             else None
         )
         failures = list(update_result.failures) if update_result else []
-        successful_ids = set(eligible_ids) - {
-            int(failure.account_id) for failure in failures
-        }
+        successful_ids = set(eligible_ids) - {int(failure.account_id) for failure in failures}
         if self.request_audits is not None:
             for account_id in successful_ids:
-                self.request_audits.clear_egress_recommendations_for_account(
-                    account_id
-                )
+                self.request_audits.clear_egress_recommendations_for_account(account_id)
         return {
             "requested": len(unique_ids),
             "eligible": len(eligible_ids),
@@ -1033,10 +968,7 @@ class AccountService:
             "assignmentMode": "manual" if egress_node_id is not None else "",
             "skippedAccountIds": sorted(locked_ids),
             "failedAccountIds": sorted(failure.account_id for failure in failures),
-            "failures": [
-                {"id": failure.account_id, "error": failure.error}
-                for failure in failures
-            ],
+            "failures": [{"id": failure.account_id, "error": failure.error} for failure in failures],
         }
 
     async def ensure_account_egress(self, account: dict[str, Any]) -> dict[str, Any]:
@@ -1079,9 +1011,7 @@ class AccountService:
             mode="manual",
         )
         if result.updated != 1:
-            reason = (
-                result.failures[0].error if result.failures else "上游未更新账号绑定"
-            )
+            reason = result.failures[0].error if result.failures else "上游未更新账号绑定"
             raise ValueError(f"Webhook 账号自动绑定出口失败：{reason}")
         return await self.client.get_account(account_id)
 
@@ -1227,9 +1157,7 @@ class AccountService:
         upstream_by_id: dict[int, dict[str, Any]] = {}
         if account_ids:
             upstream_items = await self.client.get_accounts_by_ids(set(account_ids))
-            upstream_by_id = {
-                int(item.get("id") or 0): item for item in upstream_items
-            }
+            upstream_by_id = {int(item.get("id") or 0): item for item in upstream_items}
         sso_account_ids = self._account_ids_with_sso(account_ids)
         verifications = self._latest_verifications(account_ids)
         values = []
@@ -1267,21 +1195,34 @@ class AccountService:
             "pageSize": page_size,
         }
 
-    def cooldown_stats(self, *, start: str = "", end: str = "") -> dict[str, Any]:
+    async def cooldown_stats(self, *, start: str = "", end: str = "") -> dict[str, Any]:
         range_start, range_end = resolve_stats_range(start, end)
-        rows = (
-            self.request_audits.tps_cooldown_verifications()
-            if self.request_audits is not None
-            else []
-        )
+        rows = self.request_audits.tps_cooldown_verifications() if self.request_audits is not None else []
         account_ids = sorted(
-            {
-                int(row.get("account_id") or 0)
-                for row in rows
-                if int(row.get("account_id") or 0) > 0
-            }
+            {int(row.get("account_id") or 0) for row in rows if int(row.get("account_id") or 0) > 0}
         )
-        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
+        grok_accounts = await self._list_missing_thinking_cooldown_accounts()
+        grok_ids = [account_id_of(item) for item in grok_accounts if account_id_of(item) > 0]
+        assessments = (
+            self.accounts.get_assessments(sorted(set(account_ids) | set(grok_ids)))
+            if account_ids or grok_ids
+            else {}
+        )
+        tps_cooling_ids = {
+            int(row.get("account_id") or 0)
+            for row in rows
+            if str(row.get("action_status") or "") == "cooled" and int(row.get("account_id") or 0) > 0
+        }
+        extra_cooling = [
+            {
+                "remainingSeconds": remaining_seconds(
+                    item.get("cooldownUntil") or item.get("cooldown_until")
+                ),
+                "disabledByCooldown": False,
+            }
+            for item in grok_accounts
+            if account_id_of(item) not in tps_cooling_ids
+        ]
         return compute_cooldown_stats(
             rows=rows,
             assessments=assessments,
@@ -1290,6 +1231,7 @@ class AccountService:
             min_count=int(self.settings.request_audit_tps_only_min_count),
             cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
             isolation_enabled=bool(self.settings.request_audit_isolation_enabled),
+            extra_cooling=extra_cooling,
         )
 
     async def list_cooldown_zone(
@@ -1305,31 +1247,41 @@ class AccountService:
         normalized_status = str(status or "cooling").strip().lower() or "cooling"
         if normalized_status not in ALLOWED_STATUSES:
             raise ValueError("冷却状态仅支持 cooling、expired 或 all")
-        if self.request_audits is None:
-            return {
-                "items": [],
-                "total": 0,
-                "page": page,
-                "pageSize": page_size,
-            }
         range_start = range_end = None
         if normalized_status in {"expired", "all"}:
             range_start, range_end = resolve_cooldown_list_range(start, end)
-        selected = select_cooldown_zone_rows(
-            self.request_audits.tps_cooldown_verifications(),
-            status=normalized_status,
-            start=range_start,
-            end=range_end,
+        selected = (
+            select_cooldown_zone_rows(
+                self.request_audits.tps_cooldown_verifications(),
+                status=normalized_status,
+                start=range_start,
+                end=range_end,
+            )
+            if self.request_audits is not None
+            else []
+        )
+        grok_accounts = (
+            await self._list_missing_thinking_cooldown_accounts()
+            if normalized_status in {"cooling", "all"}
+            else []
         )
         account_ids = [int(item["account_id"]) for item in selected]
-        upstream_by_id: dict[int, dict[str, Any]] = {}
-        if account_ids:
-            upstream_items = await self.client.get_accounts_by_ids(set(account_ids))
-            upstream_by_id = {
-                int(item.get("id") or 0): item for item in upstream_items
-            }
-        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
-        values: list[dict[str, Any]] = []
+        grok_ids = [account_id_of(item) for item in grok_accounts if account_id_of(item) > 0]
+        upstream_by_id: dict[int, dict[str, Any]] = {
+            account_id_of(item): item for item in grok_accounts if account_id_of(item) > 0
+        }
+        missing_local_ids = [account_id for account_id in account_ids if account_id not in upstream_by_id]
+        if missing_local_ids:
+            upstream_items = await self.client.get_accounts_by_ids(set(missing_local_ids))
+            upstream_by_id.update(
+                {int(item.get("id") or 0): item for item in upstream_items if int(item.get("id") or 0) > 0}
+            )
+        assessments = (
+            self.accounts.get_assessments(sorted(set(account_ids) | set(grok_ids)))
+            if account_ids or grok_ids
+            else {}
+        )
+        local_values: list[dict[str, Any]] = []
         for item in selected:
             account_id = int(item["account_id"])
             upstream = upstream_by_id.get(account_id)
@@ -1337,19 +1289,32 @@ class AccountService:
             if missing_upstream:
                 upstream = self._missing_upstream_stub(account_id)
             assessment = assessments.get(account_id)
-            payload = build_cooldown_zone_item(
-                account_id=account_id,
-                status=str(item["status"]),
-                verification=item["verification"],
-                cooldown_count=int(item["cooldown_count"]),
-                upstream=upstream,
-                missing_upstream=missing_upstream,
-                quarantined=self._is_quarantined(assessment),
-                tps_min_count=int(self.settings.request_audit_tps_only_min_count),
-                cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
+            local_values.append(
+                build_cooldown_zone_item(
+                    account_id=account_id,
+                    status=str(item["status"]),
+                    verification=item["verification"],
+                    cooldown_count=int(item["cooldown_count"]),
+                    upstream=upstream,
+                    missing_upstream=missing_upstream,
+                    quarantined=self._is_quarantined(assessment),
+                    tps_min_count=int(self.settings.request_audit_tps_only_min_count),
+                    cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
+                )
             )
-            if matches_cooldown_search(payload, search):
-                values.append(payload)
+        grok_values = [
+            build_missing_thinking_cooldown_item(
+                item,
+                quarantined=self._is_quarantined(assessments.get(account_id_of(item))),
+            )
+            for item in grok_accounts
+            if account_id_of(item) > 0
+        ]
+        values = [
+            payload
+            for payload in merge_cooldown_zone_items(local_values, grok_values)
+            if matches_cooldown_search(payload, search)
+        ]
         offset = (page - 1) * page_size
         return {
             "items": values[offset : offset + page_size],
@@ -1363,40 +1328,32 @@ class AccountService:
         *,
         account_ids: list[int],
     ) -> dict[str, Any]:
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
-        empty = {
-            "requested": len(unique_ids),
-            "eligible": 0,
-            "released": 0,
-            "reenabled": 0,
-            "skippedAccountIds": [],
-            "skippedNotCoolingAccountIds": sorted(unique_ids),
-            "skippedQuarantinedAccountIds": [],
-            "failedAccountIds": [],
-            "failures": [],
-        }
-        if self.request_audits is None:
-            return empty
-        latest = self.request_audits.latest_tps_cooldowns_for_accounts(unique_ids)
+        latest = (
+            self.request_audits.latest_tps_cooldowns_for_accounts(unique_ids)
+            if self.request_audits is not None
+            else {}
+        )
+        grok_by_id = await self._missing_thinking_cooldown_by_ids(unique_ids)
         not_cooling: list[int] = []
         eligible_ids: list[int] = []
+        grok_eligible_ids: list[int] = []
         for account_id in unique_ids:
             row = latest.get(account_id)
-            if (
-                not isinstance(row, dict)
-                or str(row.get("action_status") or "") != "cooled"
-            ):
+            tps_cooling = isinstance(row, dict) and str(row.get("action_status") or "") == "cooled"
+            grok_cooling = account_id in grok_by_id
+            if tps_cooling:
+                eligible_ids.append(account_id)
+            if grok_cooling:
+                grok_eligible_ids.append(account_id)
+            if not tps_cooling and not grok_cooling:
                 not_cooling.append(account_id)
-                continue
-            eligible_ids.append(account_id)
-        locked_ids = self.probes.account_settings_locked_ids(set(eligible_ids))
+        locked_ids = self.probes.account_settings_locked_ids(set(eligible_ids) | set(grok_eligible_ids))
         skipped_protected = set(locked_ids)
         skipped_quarantined: list[int] = []
-        released = 0
+        released_ids: set[int] = set()
         reenabled = 0
         failures: list[dict[str, Any]] = []
         now = utc_now()
@@ -1410,9 +1367,7 @@ class AccountService:
             try:
                 result = await self.release_tps_cooldown(
                     account_id,
-                    disabled_by_cooldown=bool(
-                        recommendation.get("disabledByCooldown")
-                    ),
+                    disabled_by_cooldown=bool(recommendation.get("disabledByCooldown")),
                 )
             except Exception as exc:
                 failures.append({"id": account_id, "error": str(exc)})
@@ -1430,7 +1385,7 @@ class AccountService:
                 )
                 continue
             audit_id = str(row.get("audit_upstream_id") or "")
-            if audit_id:
+            if audit_id and self.request_audits is not None:
                 self.request_audits.update_verification(
                     audit_id,
                     {
@@ -1446,17 +1401,30 @@ class AccountService:
             if action_status == "already_quarantined":
                 skipped_quarantined.append(account_id)
                 continue
-            released += 1
+            released_ids.add(account_id)
             if result.get("reenabled"):
                 reenabled += 1
+        for account_id in grok_eligible_ids:
+            if account_id in locked_ids:
+                skipped_protected.add(account_id)
+                continue
+            if self._is_quarantined(self.accounts.get_assessment(account_id)):
+                skipped_quarantined.append(account_id)
+                continue
+            try:
+                await self.client.clear_account_cooldown(account_id)
+            except Exception as exc:
+                failures.append({"id": account_id, "error": str(exc)})
+                continue
+            released_ids.add(account_id)
         return {
             "requested": len(unique_ids),
-            "eligible": len(eligible_ids),
-            "released": released,
+            "eligible": len(set(eligible_ids) | set(grok_eligible_ids)),
+            "released": len(released_ids),
             "reenabled": reenabled,
             "skippedAccountIds": sorted(skipped_protected),
             "skippedNotCoolingAccountIds": sorted(not_cooling),
-            "skippedQuarantinedAccountIds": sorted(skipped_quarantined),
+            "skippedQuarantinedAccountIds": sorted(set(skipped_quarantined)),
             "failedAccountIds": sorted(int(item["id"]) for item in failures),
             "failures": failures,
         }
@@ -1466,15 +1434,11 @@ class AccountService:
         *,
         account_ids: list[int],
     ) -> dict[str, Any]:
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
         locked_ids = self.probes.account_settings_locked_ids(set(unique_ids))
-        eligible_ids = [
-            account_id for account_id in unique_ids if account_id not in locked_ids
-        ]
+        eligible_ids = [account_id for account_id in unique_ids if account_id not in locked_ids]
         deleted = 0
         failures: list[dict[str, Any]] = []
         for account_id in eligible_ids:
@@ -1511,18 +1475,12 @@ class AccountService:
         *,
         account_ids: list[int],
     ) -> dict[str, Any]:
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
         locked_ids = self.probes.account_settings_locked_ids(set(unique_ids))
-        eligible_ids = [
-            account_id for account_id in unique_ids if account_id not in locked_ids
-        ]
-        delete_result = (
-            await self.client.delete_accounts(eligible_ids) if eligible_ids else None
-        )
+        eligible_ids = [account_id for account_id in unique_ids if account_id not in locked_ids]
+        delete_result = await self.client.delete_accounts(eligible_ids) if eligible_ids else None
         failures = list(delete_result.failures) if delete_result else []
         failed_account_ids = {failure.account_id for failure in failures}
         for account_id in eligible_ids:
@@ -1541,10 +1499,7 @@ class AccountService:
             "deleted": delete_result.deleted if delete_result else 0,
             "skippedAccountIds": sorted(locked_ids),
             "failedAccountIds": sorted(failed_account_ids),
-            "failures": [
-                {"id": failure.account_id, "error": failure.error}
-                for failure in failures
-            ],
+            "failures": [{"id": failure.account_id, "error": failure.error} for failure in failures],
         }
 
     async def delete_quarantine_upstream_accounts(
@@ -1552,16 +1507,12 @@ class AccountService:
         *,
         account_ids: list[int],
     ) -> dict[str, Any]:
-        unique_ids = list(
-            dict.fromkeys(account_id for account_id in account_ids if account_id > 0)
-        )
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
         assessments = self.accounts.get_assessments(unique_ids)
         isolation_ids = [
-            account_id
-            for account_id in unique_ids
-            if self._is_isolation_zone(assessments.get(account_id))
+            account_id for account_id in unique_ids if self._is_isolation_zone(assessments.get(account_id))
         ]
         skipped_not_quarantined = [
             account_id
@@ -1609,9 +1560,7 @@ class AccountService:
             "failed": failed,
         }
 
-    async def find_registered_account(
-        self, account_id: int | None, email: str
-    ) -> dict[str, Any] | None:
+    async def find_registered_account(self, account_id: int | None, email: str) -> dict[str, Any] | None:
         if account_id:
             try:
                 return await self.client.get_account(account_id)
@@ -1629,9 +1578,7 @@ class AccountService:
 
     @staticmethod
     def _matches(item: dict[str, Any], *, search: str, enabled: str) -> bool:
-        if enabled in {"true", "false"} and bool(item.get("enabled")) != (
-            enabled == "true"
-        ):
+        if enabled in {"true", "false"} and bool(item.get("enabled")) != (enabled == "true"):
             return False
         if not search.strip():
             return True
@@ -1676,6 +1623,45 @@ class AccountService:
             return not str(item.get("egressNodeId") or "").strip()
         return str(item.get("egressNodeId") or "").strip() == requested
 
+    async def _list_missing_thinking_cooldown_accounts(self) -> list[dict[str, Any]]:
+        try:
+            accounts = await self.client.list_all_accounts(
+                status="missingThinking",
+                provider="grok_build",
+                degradeWindow="1h",
+                sortBy="updatedAt",
+                sortOrder="desc",
+            )
+        except IntegrationError as exc:
+            logger.warning("list grok2api missing-thinking cooldowns failed: %s", exc)
+            return []
+        now = utc_now()
+        return [
+            item for item in accounts if isinstance(item, dict) and is_missing_thinking_cooling(item, now=now)
+        ]
+
+    async def _missing_thinking_cooldown_by_ids(
+        self,
+        account_ids: list[int],
+    ) -> dict[int, dict[str, Any]]:
+        requested = [account_id for account_id in account_ids if account_id > 0]
+        if not requested:
+            return {}
+        try:
+            accounts = await self.client.get_accounts_by_ids(set(requested))
+        except IntegrationError as exc:
+            logger.warning("load grok2api missing-thinking cooldowns failed: %s", exc)
+            return {}
+        now = utc_now()
+        result: dict[int, dict[str, Any]] = {}
+        for item in accounts:
+            if not isinstance(item, dict) or not is_missing_thinking_cooling(item, now=now):
+                continue
+            account_id = account_id_of(item)
+            if account_id > 0:
+                result[account_id] = item
+        return result
+
     @staticmethod
     def _is_quarantined(assessment: dict[str, Any] | None) -> bool:
         value = assessment or {}
@@ -1685,8 +1671,7 @@ class AccountService:
     def _is_isolation_zone(assessment: dict[str, Any] | None) -> bool:
         value = assessment or {}
         return (
-            str(value.get("monitor_status") or "") == "quarantined"
-            and value.get("quarantine_until") is None
+            str(value.get("monitor_status") or "") == "quarantined" and value.get("quarantine_until") is None
         )
 
     @staticmethod
@@ -1729,19 +1714,13 @@ class AccountService:
             else {}
         )
         report_values = (
-            self.sso_reports.latest_account_results(account_ids)
-            if self.sso_reports is not None
-            else {}
+            self.sso_reports.latest_account_results(account_ids) if self.sso_reports is not None else {}
         )
         merged = dict(audit_values)
         for account_id, value in report_values.items():
             report_value = self._sso_report_verification(value)
             current = merged.get(account_id)
-            if (
-                current is None
-                or self._verification_time(report_value)
-                >= self._verification_time(current)
-            ):
+            if current is None or self._verification_time(report_value) >= self._verification_time(current):
                 merged[account_id] = report_value
         return merged
 
@@ -1755,11 +1734,7 @@ class AccountService:
 
     @staticmethod
     def _verification_time(value: dict[str, Any]) -> float:
-        raw = (
-            value.get("checked_at")
-            or value.get("updated_at")
-            or value.get("_report_completed_at")
-        )
+        raw = value.get("checked_at") or value.get("updated_at") or value.get("_report_completed_at")
         if hasattr(raw, "timestamp"):
             try:
                 return float(raw.timestamp())
@@ -1889,11 +1864,7 @@ class AccountService:
     @staticmethod
     def _matches_source(overlaid: dict[str, Any], source: str) -> bool:
         assessment = overlaid.get("assessment")
-        disposition = (
-            assessment.get("disposition")
-            if isinstance(assessment, dict)
-            else {}
-        )
+        disposition = assessment.get("disposition") if isinstance(assessment, dict) else {}
         current = ""
         if isinstance(disposition, dict):
             current = str(disposition.get("source") or "")
@@ -1953,22 +1924,13 @@ _PUBLIC_INVENTORY_KEYS = (
 )
 
 
-def _public_upstream_view(
-    payload: dict[str, Any], *, include_inventory: bool
-) -> dict[str, Any]:
+def _public_upstream_view(payload: dict[str, Any], *, include_inventory: bool) -> dict[str, Any]:
     if include_inventory:
         return dict(payload)
-    view = {
-        key: value
-        for key, value in payload.items()
-        if key not in _PUBLIC_INVENTORY_KEYS
-    }
+    view = {key: value for key, value in payload.items() if key not in _PUBLIC_INVENTORY_KEYS}
     providers = view.get("providers")
     if isinstance(providers, dict):
-        view["providers"] = {
-            name: _public_provider_capacity(counts)
-            for name, counts in providers.items()
-        }
+        view["providers"] = {name: _public_provider_capacity(counts) for name, counts in providers.items()}
     return view
 
 
@@ -1997,10 +1959,7 @@ def _public_upstream_summary(raw: Any, *, reachable: bool) -> dict[str, Any]:
         "recovering": _count(payload.get("recovering")),
         "attention": _count(payload.get("attention")),
         "risk": _count(payload.get("risk")),
-        "providers": {
-            name: _provider_counts(providers.get(name))
-            for name in PUBLIC_UPSTREAM_PROVIDERS
-        },
+        "providers": {name: _provider_counts(providers.get(name)) for name in PUBLIC_UPSTREAM_PROVIDERS},
         "recovery": {
             "cooldown": _count(recovery.get("cooldown")),
             "waitingReset": _count(recovery.get("waitingReset")),

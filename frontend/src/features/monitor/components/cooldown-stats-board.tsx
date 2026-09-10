@@ -185,7 +185,7 @@ export function CooldownStatsBoard({
                 tone: 'amber',
                 label: '当前冷却中',
                 value: formatNumber(data?.zone.cooling ?? 0, 0),
-                hint: '当前仍在冷却窗口内、尚未到期恢复的账号。',
+                hint: '当前仍在冷却窗口内、尚未到期恢复的账号，含 grok2api 降智冷却。',
               },
               {
                 icon: Clock3,

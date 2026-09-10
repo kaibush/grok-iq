@@ -17,10 +17,14 @@ from app.services.account_service import AccountService
 
 class CooldownClient:
     def __init__(self, accounts: list[dict[str, Any]] | None = None) -> None:
-        self.accounts = {
-            int(item["id"]): dict(item) for item in (accounts or [])
-        }
+        self.accounts = {int(item["id"]): dict(item) for item in (accounts or [])}
         self.enabled_calls: list[tuple[int, bool]] = []
+        self.list_calls: list[dict[str, Any]] = []
+        self.clear_calls: list[int] = []
+
+    async def list_all_accounts(self, **params: Any) -> list[dict[str, Any]]:
+        self.list_calls.append(params)
+        return [dict(item) for item in self.accounts.values()]
 
     async def get_account(self, account_id: int) -> dict[str, Any]:
         return dict(self.accounts[account_id])
@@ -38,8 +42,16 @@ class CooldownClient:
         account["enabled"] = enabled
         return dict(account)
 
+    async def clear_account_cooldown(self, account_id: int) -> dict[str, Any]:
+        self.clear_calls.append(account_id)
+        account = self.accounts[account_id]
+        account["cooldownUntil"] = None
+        return dict(account)
 
-def _service(tmp_path: Path) -> tuple[
+
+def _service(
+    tmp_path: Path,
+) -> tuple[
     RequestAuditRepository,
     AccountRepository,
     CooldownClient,
@@ -216,9 +228,7 @@ async def test_cooldown_zone_lists_cooling_accounts_and_search(tmp_path: Path):
     assert searched["total"] == 1
     assert searched["items"][0]["id"] == 1
 
-    by_audit = await service.list_cooldown_zone(
-        page=1, page_size=50, search="tps-bravo"
-    )
+    by_audit = await service.list_cooldown_zone(page=1, page_size=50, search="tps-bravo")
     assert by_audit["total"] == 1
     assert by_audit["items"][0]["id"] == 2
 
@@ -322,7 +332,7 @@ async def test_cooldown_stats_separates_inventory_from_range_events(tmp_path: Pa
         source="request_audit",
     )
 
-    stats = service.cooldown_stats(
+    stats = await service.cooldown_stats(
         start=app_isoformat(now - timedelta(hours=12)),
         end=app_isoformat(now + timedelta(hours=12)),
     )
@@ -339,8 +349,7 @@ async def test_cooldown_stats_separates_inventory_from_range_events(tmp_path: Pa
     assert stats["events"]["isolatedAfter"] == 1
     today = app_day_key(now)
     assert any(
-        item["day"] == today and item["cooled"] == 2 and item["expired"] == 1
-        for item in stats["trend"]
+        item["day"] == today and item["cooled"] == 2 and item["expired"] == 1 for item in stats["trend"]
     )
 
 
@@ -448,3 +457,90 @@ async def test_release_cooldown_zone_skips_accounts_that_are_not_cooling(
 
     with pytest.raises(ValueError, match="至少选择一个账号"):
         await service.release_cooldown_zone(account_ids=[0, -3])
+
+
+def _thinking_account(
+    account_id: int,
+    *,
+    enabled: bool = True,
+    last_error: str = "missing_thinking",
+    cooldown_until: datetime | None = None,
+    name: str = "",
+) -> dict[str, Any]:
+    return {
+        "id": str(account_id),
+        "name": name or f"Thinking {account_id}",
+        "email": f"thinking{account_id}@example.test",
+        "enabled": enabled,
+        "lastError": last_error,
+        "cooldownUntil": cooldown_until.isoformat() if cooldown_until else None,
+        "updatedAt": utc_now().isoformat(),
+    }
+
+
+@pytest.mark.asyncio
+async def test_cooldown_zone_includes_grok2api_missing_thinking(tmp_path: Path):
+    repository, _accounts, client, service = _service(tmp_path)
+    now = utc_now()
+    client.accounts[21] = _thinking_account(
+        21,
+        cooldown_until=now + timedelta(minutes=25),
+        name="Cooling Thinker",
+    )
+    client.accounts[22] = _thinking_account(
+        22,
+        last_error="missing_thinking_disabled",
+        enabled=False,
+        name="Disabled Thinker",
+    )
+    client.accounts[23] = _thinking_account(23, cooldown_until=now - timedelta(minutes=5))
+    _seed_cooldown(
+        repository,
+        upstream_id="tps-alpha",
+        account_id=1,
+        action_status="cooled",
+        cooled_at=now - timedelta(minutes=1),
+        cooldown_until=now + timedelta(minutes=5),
+    )
+
+    page = await service.list_cooldown_zone(page=1, page_size=50)
+    assert client.list_calls[0]["status"] == "missingThinking"
+    assert client.list_calls[0]["degradeWindow"] == "1h"
+    ids = [item["id"] for item in page["items"]]
+    assert 1 in ids
+    assert 21 in ids
+    assert 22 not in ids
+    assert 23 not in ids
+    thinker = next(item for item in page["items"] if item["id"] == 21)
+    assert thinker["source"] == "grok2api"
+    assert thinker["label"] == "grok2api 降智冷却"
+    assert thinker["status"] == "cooling"
+    assert thinker["enabled"] is True
+    assert thinker["disabledByCooldown"] is False
+
+    expired = await service.list_cooldown_zone(page=1, page_size=50, status="expired")
+    assert 21 not in [item["id"] for item in expired["items"]]
+
+    stats = await service.cooldown_stats()
+    assert stats["zone"]["cooling"] == 2
+
+
+@pytest.mark.asyncio
+async def test_release_cooldown_zone_clears_grok2api_missing_thinking(tmp_path: Path):
+    _repository, _accounts, client, service = _service(tmp_path)
+    now = utc_now()
+    client.accounts[21] = _thinking_account(
+        21,
+        cooldown_until=now + timedelta(minutes=25),
+    )
+
+    result = await service.release_cooldown_zone(account_ids=[21, 9])
+    assert result["released"] == 1
+    assert result["reenabled"] == 0
+    assert result["skippedNotCoolingAccountIds"] == [9]
+    assert client.clear_calls == [21]
+    assert client.enabled_calls == []
+    assert client.accounts[21]["cooldownUntil"] is None
+
+    page = await service.list_cooldown_zone(page=1, page_size=50)
+    assert page["total"] == 0

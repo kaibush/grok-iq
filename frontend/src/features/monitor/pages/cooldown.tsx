@@ -5,13 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import {
-  Loader2,
-  RefreshCw,
-  Search,
-  Timer,
-  TimerOff,
-} from 'lucide-react'
+import { Loader2, RefreshCw, Search, Timer, TimerOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
@@ -205,9 +199,8 @@ export function CooldownPage() {
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [releaseIds, setReleaseIds] = useState<number[]>([])
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const [upstreamAccount, setUpstreamAccount] = useState<CooldownAccount | null>(
-    null
-  )
+  const [upstreamAccount, setUpstreamAccount] =
+    useState<CooldownAccount | null>(null)
   const [previewItems, setPreviewItems] = useState<ResultPreviewItem[] | null>(
     null
   )
@@ -468,7 +461,8 @@ export function CooldownPage() {
           <div className='space-y-2'>
             <p>
               高速 TPS
-              连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。这里能看到为什么冷却、开始时间、结束时间和剩余时长。冷却结束后如果再次连续高速
+              连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。grok2api
+              因缺思考进入冷却的账号也会同步到这里；提前结束会清除上游冷却，不会改启用状态。冷却结束后如果再次连续高速
               TPS，才会永久停用并移入隔离区。
             </p>
           </div>
@@ -732,15 +726,11 @@ export function CooldownPage() {
         disabledAccountCount={probeDisabledCount}
         profiles={profiles.data ?? []}
         profilesLoading={profiles.isFetching && !profiles.data}
-        profilesError={
-          profiles.isError ? getErrorMessage(profiles.error) : ''
-        }
+        profilesError={profiles.isError ? getErrorMessage(profiles.error) : ''}
         onRefreshProfiles={() => void profiles.refetch()}
         egress={egressData?.items ?? []}
         egressLoading={egressFetching}
-        egressError={
-          egressIsError ? getErrorMessage(egressQueryError) : ''
-        }
+        egressError={egressIsError ? getErrorMessage(egressQueryError) : ''}
         onRefreshEgress={() => void refetchEgress()}
         onCreated={() => {
           setProbeAccountIds([])
@@ -891,6 +881,11 @@ function CooldownRow({
               {account.quarantined ? (
                 <Badge variant='destructive' className='h-5 px-1.5 text-[10px]'>
                   已进入隔离区
+                </Badge>
+              ) : null}
+              {account.source === 'grok2api' ? (
+                <Badge variant='outline' className='h-5 px-1.5 text-[10px]'>
+                  grok2api 降智冷却
                 </Badge>
               ) : null}
               {expiringSoon ? (

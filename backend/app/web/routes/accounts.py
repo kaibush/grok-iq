@@ -167,11 +167,11 @@ def build_accounts_router(service: AccountService) -> APIRouter:
         )
 
     @router.get("/accounts/cooldowns/stats")
-    def cooldown_stats(
+    async def cooldown_stats(
         start: str = Query(default="", alias="from"),
         end: str = Query(default="", alias="to"),
     ) -> dict[str, Any]:
-        return service.cooldown_stats(start=start, end=end)
+        return await service.cooldown_stats(start=start, end=end)
 
     @router.get("/accounts/cooldowns")
     async def cooldown_zone(
