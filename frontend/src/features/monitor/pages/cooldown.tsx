@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Loader2, RefreshCw, Search, Timer, TimerOff } from 'lucide-react'
+import { Loader2, PowerOff, RefreshCw, Search, Timer, TimerOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
@@ -116,6 +116,14 @@ function canReleaseCooldown(account: CooldownAccount) {
   return account.status === 'cooling' && !account.quarantined
 }
 
+function canSelectCooldownAccount(
+  account: CooldownAccount,
+  grokSource: boolean
+) {
+  if (account.missingUpstream) return false
+  return grokSource || canReleaseCooldown(account)
+}
+
 function accountLabelOf(account: CooldownAccount) {
   return account.name || account.email || `账号 ${account.id}`
 }
@@ -131,19 +139,26 @@ function uniqueIds(values: Array<number | undefined | null>) {
   )
 }
 
-function releaseToastMessage(result: CooldownReleaseResult) {
+function releaseToastMessage(
+  result: CooldownReleaseResult,
+  grokSource: boolean
+) {
   const skippedNotCooling = result.skippedNotCoolingAccountIds ?? []
   const skippedQuarantined = result.skippedQuarantinedAccountIds ?? []
   const skippedGeneric = result.skippedAccountIds ?? []
   const failed = result.failedAccountIds ?? []
   const specificSkipped = new Set([...skippedNotCooling, ...skippedQuarantined])
   const otherSkipped = skippedGeneric.filter((id) => !specificSkipped.has(id))
+  const actionLabel = grokSource ? '解除' : '提前结束'
   const parts = [
     result.reenabled
-      ? `已提前结束 ${result.released} 个账号的冷却，重新启用 ${result.reenabled} 个上游`
-      : `已提前结束 ${result.released} 个账号的冷却`,
+      ? `已${actionLabel} ${result.released} 个账号的冷却，重新启用 ${result.reenabled} 个上游`
+      : `已${actionLabel} ${result.released} 个账号的冷却`,
   ]
-  if (failed.length) parts.push(`${failed.length} 个结束失败并保留选择`)
+  if (failed.length)
+    parts.push(
+      `${failed.length} 个${grokSource ? '解除' : '结束'}失败并保留选择`
+    )
   if (skippedQuarantined.length) {
     parts.push(`${skippedQuarantined.length} 个已进入隔离区并跳过`)
   }
@@ -219,8 +234,12 @@ export function CooldownPage() {
   )
   const tableQuery = usePaintDeferredValue(committedQuery)
   const [selected, setSelected] = useState<number[]>([])
+  const [selectedDisabled, setSelectedDisabled] = useState<number[]>([])
+  const [selectedReleasable, setSelectedReleasable] = useState<number[]>([])
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [releaseIds, setReleaseIds] = useState<number[]>([])
+  const [disableOpen, setDisableOpen] = useState(false)
+  const [disableIds, setDisableIds] = useState<number[]>([])
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [upstreamAccount, setUpstreamAccount] =
     useState<CooldownAccount | null>(null)
@@ -307,6 +326,8 @@ export function CooldownPage() {
     if (appliedFilterKeyRef.current === tableFilterKey) return
     appliedFilterKeyRef.current = tableFilterKey
     setSelected((current) => (current.length === 0 ? current : []))
+    setSelectedDisabled((current) => (current.length === 0 ? current : []))
+    setSelectedReleasable((current) => (current.length === 0 ? current : []))
   }, [beginTableInteraction, tableFilterKey, tableQueryPending])
 
   const hasCoolingRows = accounts.some((item) => item.status === 'cooling')
@@ -420,12 +441,27 @@ export function CooldownPage() {
   )
 
   const selectedIdSet = useMemo(() => new Set(selected), [selected])
-  const releasableAccounts = accounts.filter(canReleaseCooldown)
-  const releasableIds = releasableAccounts.map((item) => item.id)
-  const releasableSelected = selected.filter((id) => releasableIds.includes(id))
+  const selectedDisabledSet = useMemo(
+    () => new Set(selectedDisabled),
+    [selectedDisabled]
+  )
+  const selectedReleasableSet = useMemo(
+    () => new Set(selectedReleasable),
+    [selectedReleasable]
+  )
+  const selectableAccounts = accounts.filter((item) =>
+    canSelectCooldownAccount(item, grokSource)
+  )
+  const selectableIds = selectableAccounts.map((item) => item.id)
+  const releasableSelected = selected.filter((id) =>
+    selectedReleasableSet.has(id)
+  )
+  const disableableSelected = grokSource
+    ? selected.filter((id) => !selectedDisabledSet.has(id))
+    : []
   const allChecked =
-    releasableIds.length > 0 &&
-    releasableIds.every((id) => selectedIdSet.has(id))
+    selectableIds.length > 0 &&
+    selectableIds.every((id) => selectedIdSet.has(id))
   const hasActiveFilters = status !== 'cooling' || Boolean(search.trim())
   const viewSummary = [
     sourceLabels[source],
@@ -437,15 +473,24 @@ export function CooldownPage() {
     .filter(Boolean)
     .join(' · ')
 
+  const clearSelection = () => {
+    setSelected([])
+    setSelectedDisabled([])
+    setSelectedReleasable([])
+  }
+
   const syncSelection = (accountIds: number[]) => {
-    setSelected((current) => current.filter((id) => accountIds.includes(id)))
+    const allowed = new Set(accountIds)
+    setSelected((current) => current.filter((id) => allowed.has(id)))
+    setSelectedDisabled((current) => current.filter((id) => allowed.has(id)))
+    setSelectedReleasable((current) => current.filter((id) => allowed.has(id)))
   }
 
   const releaseMutation = useMutation({
     mutationFn: (accountIds: number[]) =>
       api.releaseCooldowns(accountIds, source),
     onSuccess: (result) => {
-      const toastResult = releaseToastMessage(result)
+      const toastResult = releaseToastMessage(result, grokSource)
       setReleaseOpen(false)
       setReleaseIds([])
       syncSelection(toastResult.retainedIds)
@@ -467,20 +512,105 @@ export function CooldownPage() {
     setReleaseOpen(true)
   }
 
+  const disableMutation = useMutation({
+    mutationFn: (accountIds: number[]) =>
+      api.updateAccountsEnabled(accountIds, false),
+    onSuccess: (result) => {
+      const skippedAccountIds = result.skippedAccountIds ?? []
+      const failedAccountIds = result.failedAccountIds ?? []
+      const retainedAccountIds = uniqueIds([
+        ...skippedAccountIds,
+        ...failedAccountIds,
+      ])
+      setDisableOpen(false)
+      setDisableIds([])
+      syncSelection(retainedAccountIds)
+      if (failedAccountIds.length > 0 || skippedAccountIds.length > 0) {
+        const details = [`已停用上游 ${result.updated} 个账号`]
+        if (failedAccountIds.length) {
+          details.push(`${failedAccountIds.length} 个停用失败并保留选择`)
+        }
+        if (skippedAccountIds.length) {
+          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+        }
+        toast.warning(details.join('；'))
+      } else if (result.updated !== result.eligible) {
+        toast.warning(
+          `批量停用完成：上游更新 ${result.updated} / ${result.eligible} 个账号`
+        )
+      } else {
+        toast.success(`已停用上游 ${result.updated} 个账号`)
+      }
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['accounts'] })
+      void client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+  const disablePending = disableMutation.isPending
+  const selectionActionPending = releasePending || disablePending
+
+  const openDisable = (accountIds: number[]) => {
+    const ids = uniqueIds(accountIds)
+    if (ids.length === 0) return
+    setDisableIds(ids)
+    setDisableOpen(true)
+  }
+
   const toggleCurrentPageSelection = (checked: boolean) => {
+    const pageDisabledIds = selectableAccounts
+      .filter((item) => !item.enabled)
+      .map((item) => item.id)
+    const pageReleasableIds = selectableAccounts
+      .filter(canReleaseCooldown)
+      .map((item) => item.id)
     setSelected((current) => {
       const next = new Set(current)
-      for (const id of releasableIds) {
+      for (const id of selectableIds) {
         if (checked) next.add(id)
         else next.delete(id)
+      }
+      return Array.from(next)
+    })
+    setSelectedDisabled((current) => {
+      const next = new Set(current)
+      if (checked) {
+        for (const id of pageDisabledIds) next.add(id)
+      } else {
+        for (const id of selectableIds) next.delete(id)
+      }
+      return Array.from(next)
+    })
+    setSelectedReleasable((current) => {
+      const next = new Set(current)
+      if (checked) {
+        for (const id of pageReleasableIds) next.add(id)
+      } else {
+        for (const id of selectableIds) next.delete(id)
       }
       return Array.from(next)
     })
   }
 
   const toggleAccountSelection = (id: number, checked: boolean) => {
+    const account = accounts.find((item) => item.id === id)
+    const disabled = Boolean(account && !account.enabled)
+    const releasable = Boolean(account && canReleaseCooldown(account))
     setSelected((current) => {
       if (checked) {
+        return current.includes(id) ? current : [...current, id]
+      }
+      return current.filter((item) => item !== id)
+    })
+    setSelectedDisabled((current) => {
+      if (checked && disabled) {
+        return current.includes(id) ? current : [...current, id]
+      }
+      return current.filter((item) => item !== id)
+    })
+    setSelectedReleasable((current) => {
+      if (checked && releasable) {
         return current.includes(id) ? current : [...current, id]
       }
       return current.filter((item) => item !== id)
@@ -495,7 +625,7 @@ export function CooldownPage() {
           <div className='space-y-2'>
             <p>
               {grokSource
-                ? '上游同步只显示后台定时任务写入数据库的 grok2api 缺思考冷却。提前结束会清除上游冷却，不会改启用状态。'
+                ? '上游同步只显示后台定时任务写入数据库的 grok2api 缺思考冷却。解除冷却会清除上游冷却，不会改启用状态；停用全部只改上游启用，不会移入隔离区。'
                 : '本系统冷却来自请求审计高速 TPS。连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。冷却结束后如果再次连续高速 TPS，才会永久停用并移入隔离区。'}
             </p>
           </div>
@@ -520,21 +650,44 @@ export function CooldownPage() {
               wrap={false}
               selectedCount={selected.length}
               entityLabel='账号'
-              disabled={releasePending}
-              onClear={() => setSelected([])}
+              disabled={selectionActionPending}
+              onClear={clearSelection}
             >
               <ToolbarAction
                 label={
-                  releasableSelected.length
-                    ? `提前结束已选 ${releasableSelected.length} 个账号的冷却`
-                    : '已选账号不在冷却中，无法提前结束'
+                  grokSource
+                    ? releasableSelected.length
+                      ? `解除已选 ${releasableSelected.length} 个账号的冷却`
+                      : '已选账号不在冷却中，无法解除冷却'
+                    : releasableSelected.length
+                      ? `提前结束已选 ${releasableSelected.length} 个账号的冷却`
+                      : '已选账号不在冷却中，无法提前结束'
                 }
                 pending={releasePending}
-                disabled={releasePending || releasableSelected.length === 0}
+                disabled={
+                  selectionActionPending || releasableSelected.length === 0
+                }
                 onClick={() => openRelease(releasableSelected)}
               >
                 <TimerOff />
               </ToolbarAction>
+              {grokSource ? (
+                <ToolbarAction
+                  label={
+                    disableableSelected.length
+                      ? `停用全部（${disableableSelected.length} 个启用账号）`
+                      : '已选账号均处于停用状态或缺少上游'
+                  }
+                  destructive
+                  pending={disablePending}
+                  disabled={
+                    selectionActionPending || disableableSelected.length === 0
+                  }
+                  onClick={() => openDisable(disableableSelected)}
+                >
+                  <PowerOff />
+                </ToolbarAction>
+              ) : null}
             </SelectionToolbar>
           </ActionToolbar>
         }
@@ -545,9 +698,11 @@ export function CooldownPage() {
           const next = normalizeCooldownSource(value)
           if (next === source) return
           beginTableInteraction()
-          setSelected([])
+          clearSelection()
           setReleaseOpen(false)
           setReleaseIds([])
+          setDisableOpen(false)
+          setDisableIds([])
           updateView({ source: next, page: 1 })
         }}
         className='gap-3'
@@ -647,9 +802,9 @@ export function CooldownPage() {
               accounts={accounts}
               selected={selected}
               allChecked={allChecked}
-              selectDisabled={releasableIds.length === 0}
+              selectDisabled={selectableIds.length === 0}
               nowMs={nowMs}
-              releasePending={releasePending}
+              actionPending={selectionActionPending}
               onToggleCurrentPage={toggleCurrentPageSelection}
               onToggleAccount={toggleAccountSelection}
               onRelease={(account) => openRelease([account.id])}
@@ -714,12 +869,16 @@ export function CooldownPage() {
             setReleaseIds([])
           }
         }}
-        title={`提前结束 ${releaseIds.length} 个账号的冷却？`}
+        title={
+          grokSource
+            ? `解除 ${releaseIds.length} 个账号的冷却？`
+            : `提前结束 ${releaseIds.length} 个账号的冷却？`
+        }
         desc={
           <div className='space-y-2'>
             <p>
               {grokSource
-                ? `将提前结束 ${releaseIds.length} 个账号的 grok2api 降智冷却。这会清除上游冷却，不会改启用状态。已进入隔离区的账号会跳过。`
+                ? `将调用 grok2api 解除 ${releaseIds.length} 个账号的降智冷却。这会清除上游冷却，不会改启用状态。已进入隔离区或不在冷却中的账号会跳过。`
                 : `将提前结束 ${releaseIds.length} 个账号的冷却并恢复调度。若冷却期间是本系统停用的上游，会重新启用。已进入隔离区的账号会跳过。`}
             </p>
           </div>
@@ -729,12 +888,12 @@ export function CooldownPage() {
           releasePending ? (
             <>
               <Loader2 className='animate-spin' />
-              结束中…
+              {grokSource ? '解除中…' : '结束中…'}
             </>
           ) : (
             <>
               <TimerOff />
-              确认提前结束
+              {grokSource ? '确认解除冷却' : '确认提前结束'}
             </>
           )
         }
@@ -743,6 +902,59 @@ export function CooldownPage() {
         handleConfirm={() => {
           if (releaseIds.length === 0) return
           releaseMutation.mutate(releaseIds)
+        }}
+      />
+      <ConfirmDialog
+        open={disableOpen}
+        onOpenChange={(open) => {
+          if (!open && !disablePending) {
+            setDisableOpen(false)
+            setDisableIds([])
+          }
+        }}
+        title={`停用 ${disableIds.length} 个账号的上游？`}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              {`将通过 grok2api 停用当前选择中的 ${disableIds.length} 个启用账号。停用后这些账号不再参与上游正常调度。`}
+            </p>
+            {selected.length > disableIds.length ? (
+              <p className='text-muted-foreground'>
+                另外 {selected.length - disableIds.length}{' '}
+                个已停用或缺少上游的账号会自动跳过。
+              </p>
+            ) : null}
+            <p className='text-muted-foreground'>
+              这只改上游启用状态，不会解除冷却，也不会移入隔离区。
+            </p>
+            <p className='font-medium text-foreground'>
+              这是人工长期停用，不使用系统设置中的“停用时长”，也不会被隔离恢复任务自动启用。
+            </p>
+            <p className='text-muted-foreground'>
+              正在执行探针或等待账号设置恢复的账号会被跳过并保留选择，避免任务结束时的设置恢复覆盖本次停用。
+            </p>
+          </div>
+        }
+        cancelBtnText='取消'
+        confirmText={
+          disablePending ? (
+            <>
+              <Loader2 className='animate-spin' />
+              停用中…
+            </>
+          ) : (
+            <>
+              <PowerOff />
+              确认停用上游
+            </>
+          )
+        }
+        destructive
+        isLoading={disablePending}
+        disabled={disableIds.length === 0}
+        handleConfirm={() => {
+          if (disableIds.length === 0) return
+          disableMutation.mutate(disableIds)
         }}
       />
       <AccountUpstreamDialog
@@ -811,7 +1023,7 @@ function CooldownTable({
   allChecked,
   selectDisabled,
   nowMs,
-  releasePending,
+  actionPending,
   onToggleCurrentPage,
   onToggleAccount,
   onRelease,
@@ -827,7 +1039,7 @@ function CooldownTable({
   allChecked: boolean
   selectDisabled: boolean
   nowMs: number
-  releasePending: boolean
+  actionPending: boolean
   onToggleCurrentPage: (checked: boolean) => void
   onToggleAccount: (id: number, checked: boolean) => void
   onRelease: (account: CooldownAccount) => void
@@ -850,7 +1062,11 @@ function CooldownTable({
               checked={allChecked}
               disabled={selectDisabled}
               onCheckedChange={(value) => onToggleCurrentPage(value === true)}
-              aria-label='选择当前页可提前结束的冷却账号'
+              aria-label={
+                grokSource
+                  ? '选择当前页账号'
+                  : '选择当前页可提前结束的冷却账号'
+              }
             />
           </TableHead>
           <TableHead>账号</TableHead>
@@ -879,7 +1095,7 @@ function CooldownTable({
             account={account}
             selected={selectedIdSet.has(account.id)}
             nowMs={nowMs}
-            releasePending={releasePending}
+            actionPending={actionPending}
             onSelectedChange={(checked) => onToggleAccount(account.id, checked)}
             onRelease={() => onRelease(account)}
             onOpenUpstream={() => onOpenUpstream(account)}
@@ -899,7 +1115,7 @@ function CooldownRow({
   account,
   selected,
   nowMs,
-  releasePending,
+  actionPending,
   onSelectedChange,
   onRelease,
   onOpenUpstream,
@@ -912,7 +1128,7 @@ function CooldownRow({
   account: CooldownAccount
   selected: boolean
   nowMs: number
-  releasePending: boolean
+  actionPending: boolean
   onSelectedChange: (checked: boolean) => void
   onRelease: () => void
   onOpenUpstream: () => void
@@ -931,6 +1147,7 @@ function CooldownRow({
   const expiringSoon =
     account.status === 'cooling' && isCooldownExpiringSoon(remaining)
   const canRelease = canReleaseCooldown(account)
+  const canSelect = canSelectCooldownAccount(account, grokSource)
   const reason = account.reason?.trim() || account.label?.trim() || '—'
   const peakTps = account.maxTps ?? account.auditTps
   const endedAt = account.cooldownUntil || account.expiredAt
@@ -939,7 +1156,7 @@ function CooldownRow({
       <TableCell>
         <Checkbox
           checked={selected}
-          disabled={!canRelease}
+          disabled={!canSelect}
           onCheckedChange={(value) => onSelectedChange(value === true)}
           aria-label={`选择账号 ${accountLabel}`}
         />
@@ -1047,19 +1264,27 @@ function CooldownRow({
                 <Button
                   size='icon'
                   variant='ghost'
-                  disabled={!canRelease || releasePending}
+                  disabled={!canRelease || actionPending}
                   onClick={onRelease}
-                  aria-label={`提前结束 ${accountLabel} 的冷却`}
+                  aria-label={
+                    grokSource
+                      ? `解除 ${accountLabel} 的冷却`
+                      : `提前结束 ${accountLabel} 的冷却`
+                  }
                 >
                   <TimerOff />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
                 {account.quarantined
-                  ? '已进入隔离区，无法提前结束冷却'
+                  ? grokSource
+                    ? '已进入隔离区，无法解除冷却'
+                    : '已进入隔离区，无法提前结束冷却'
                   : account.status === 'expired'
                     ? '冷却已结束'
-                    : '提前结束冷却'}
+                    : grokSource
+                      ? '解除冷却'
+                      : '提前结束冷却'}
               </TooltipContent>
             </Tooltip>
           }
