@@ -1728,6 +1728,10 @@ function getExecutionPlan(
 
 function scheduleName(scheduleKey: string) {
   if (scheduleKey === 'system:quarantine-recovery') return '隔离恢复检查'
+  if (scheduleKey === 'system:quality-retry-isolation') return 'grok2api 降智停用同步'
+  if (scheduleKey === 'system:missing-thinking-cooldown')
+    return 'grok2api 降智冷却同步'
+  if (scheduleKey === 'system:request-audit-scan') return '请求审计风险扫描'
   if (scheduleKey.startsWith('plan:')) return '已删除的计划'
   return scheduleKey
 }

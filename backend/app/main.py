@@ -28,6 +28,7 @@ from app.services.chat_service import ChatService
 from app.services.egress_service import EgressService
 from app.services.page_visit_service import PageVisitService
 from app.services.probe_manager import ProbeManager
+from app.services.missing_thinking_cooldown_sync import MissingThinkingCooldownSyncService
 from app.services.quality_retry_isolation import QualityRetryIsolationService
 from app.services.register_integration import RegisterIntegrationService
 from app.services.request_audit_service import RequestAuditService
@@ -126,6 +127,11 @@ quality_retry_isolation_service = QualityRetryIsolationService(
     client=grok_client,
     account_service=account_service,
 )
+missing_thinking_cooldown_sync_service = MissingThinkingCooldownSyncService(
+    settings=settings,
+    client=grok_client,
+    accounts=account_repository,
+)
 scheduler_service = SchedulerService(
     settings=settings,
     repository=probe_repository,
@@ -133,6 +139,7 @@ scheduler_service = SchedulerService(
     recovery_callback=account_service.recover_due_quarantines,
     request_audit_callback=request_audit_service.scan_scheduled,
     quality_retry_callback=quality_retry_isolation_service.scan,
+    missing_thinking_cooldown_callback=missing_thinking_cooldown_sync_service.scan,
 )
 register_integration_service = RegisterIntegrationService(
     settings=settings,

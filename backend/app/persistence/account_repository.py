@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, case, delete, func, or_, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.analyzer import (
     SampleMetrics,
@@ -30,6 +31,7 @@ from app.reasoning_policy import canonical_reasoning_model
 from .database import Database
 from .models import (
     AccountAssessment,
+    AccountCooldown,
     Alert,
     AppSetting,
     MetadataRow,
@@ -53,6 +55,9 @@ FIXED_EGRESS_RISK_MIGRATION_KEY = "fixed_egress_risk_formula_v1"
 ALL_EGRESS_RISK_MIGRATION_KEY = "all_egress_risk_formula_v1"
 MAX_OPERATOR_NOTES = 50
 MAX_OPERATOR_NOTE_LENGTH = 2000
+MISSING_THINKING_COOLDOWN_KIND = "missing_thinking_cooldown"
+COOLING_STATUS = "cooling"
+EXPIRED_STATUS = "expired"
 
 
 def _sort_operator_notes(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -939,6 +944,188 @@ class AccountRepository:
                 delete(Alert).where(Alert.account_id == account_id)
             )
             return int(result.rowcount or 0)
+
+    def get_account_cooldown(
+        self,
+        account_id: int,
+        *,
+        kind: str = MISSING_THINKING_COOLDOWN_KIND,
+    ) -> dict[str, Any] | None:
+        with self.database.session() as session:
+            value = session.scalar(
+                select(AccountCooldown).where(
+                    AccountCooldown.account_id == int(account_id),
+                    AccountCooldown.kind == str(kind),
+                )
+            )
+            return model_dict(value) if value is not None else None
+
+    def upsert_missing_thinking_cooldown(
+        self,
+        *,
+        account_id: int,
+        cooled_at: datetime,
+        cooldown_until: datetime | None,
+        last_error: str = "",
+        degrade_hits: int = 0,
+        failure_count: int = 0,
+        snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        payload = {
+            "account_id": int(account_id),
+            "kind": MISSING_THINKING_COOLDOWN_KIND,
+            "status": COOLING_STATUS,
+            "cooled_at": cooled_at,
+            "cooldown_until": cooldown_until,
+            "expired_at": None,
+            "released_manually": False,
+            "last_error": str(last_error or "")[:120],
+            "degrade_hits": max(0, int(degrade_hits)),
+            "failure_count": max(0, int(failure_count)),
+            "snapshot": snapshot or {},
+            "updated_at": now,
+        }
+        with self.database.transaction() as session:
+            existing = session.scalar(
+                select(AccountCooldown).where(
+                    AccountCooldown.account_id == int(account_id),
+                    AccountCooldown.kind == MISSING_THINKING_COOLDOWN_KIND,
+                )
+            )
+            if existing is not None and str(existing.status or "") == COOLING_STATUS:
+                payload["cooled_at"] = existing.cooled_at or cooled_at
+            payload["created_at"] = (
+                existing.created_at if existing is not None else now
+            )
+            session.execute(
+                sqlite_insert(AccountCooldown.__table__)
+                .values(**payload)
+                .on_conflict_do_update(
+                    index_elements=["account_id", "kind"],
+                    set_={
+                        key: payload[key]
+                        for key in payload
+                        if key not in {"account_id", "kind", "created_at"}
+                    },
+                )
+            )
+            value = session.scalar(
+                select(AccountCooldown).where(
+                    AccountCooldown.account_id == int(account_id),
+                    AccountCooldown.kind == MISSING_THINKING_COOLDOWN_KIND,
+                )
+            )
+            if value is None:
+                raise RuntimeError("降智冷却记录写入失败")
+            return model_dict(value)
+
+    def expire_missing_thinking_cooldowns(
+        self,
+        active_account_ids: set[int],
+        *,
+        now: datetime | None = None,
+    ) -> int:
+        current = now or utc_now()
+        with self.database.transaction() as session:
+            query = select(AccountCooldown).where(
+                AccountCooldown.kind == MISSING_THINKING_COOLDOWN_KIND,
+                AccountCooldown.status == COOLING_STATUS,
+            )
+            if active_account_ids:
+                query = query.where(
+                    AccountCooldown.account_id.notin_(sorted(active_account_ids))
+                )
+            rows = session.scalars(query).all()
+            expired = 0
+            for row in rows:
+                row.status = EXPIRED_STATUS
+                row.expired_at = current
+                row.released_manually = False
+                row.updated_at = current
+                expired += 1
+            return expired
+
+    def expire_due_missing_thinking_cooldowns(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> int:
+        current = now or utc_now()
+        with self.database.transaction() as session:
+            rows = session.scalars(
+                select(AccountCooldown).where(
+                    AccountCooldown.kind == MISSING_THINKING_COOLDOWN_KIND,
+                    AccountCooldown.status == COOLING_STATUS,
+                    AccountCooldown.cooldown_until.is_not(None),
+                    AccountCooldown.cooldown_until <= current,
+                )
+            ).all()
+            expired = 0
+            for row in rows:
+                row.status = EXPIRED_STATUS
+                row.expired_at = current
+                row.released_manually = False
+                row.updated_at = current
+                expired += 1
+            return expired
+
+    def mark_missing_thinking_cooldown_released(
+        self,
+        account_id: int,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        current = now or utc_now()
+        with self.database.transaction() as session:
+            value = session.scalar(
+                select(AccountCooldown).where(
+                    AccountCooldown.account_id == int(account_id),
+                    AccountCooldown.kind == MISSING_THINKING_COOLDOWN_KIND,
+                )
+            )
+            if value is None:
+                return None
+            value.status = EXPIRED_STATUS
+            value.expired_at = current
+            value.released_manually = True
+            value.updated_at = current
+            session.flush()
+            return model_dict(value)
+
+    def list_missing_thinking_cooldowns(
+        self,
+        *,
+        status: str = "",
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        with self.database.session() as session:
+            query = select(AccountCooldown).where(
+                AccountCooldown.kind == MISSING_THINKING_COOLDOWN_KIND
+            )
+            requested = str(status or "").strip().lower()
+            if requested in {COOLING_STATUS, EXPIRED_STATUS}:
+                query = query.where(AccountCooldown.status == requested)
+            if start is not None and end is not None:
+                query = query.where(
+                    func.coalesce(
+                        AccountCooldown.expired_at,
+                        AccountCooldown.cooled_at,
+                    )
+                    >= start,
+                    func.coalesce(
+                        AccountCooldown.expired_at,
+                        AccountCooldown.cooled_at,
+                    )
+                    < end,
+                )
+            query = query.order_by(
+                AccountCooldown.cooldown_until.asc(),
+                AccountCooldown.updated_at.desc(),
+                AccountCooldown.id.desc(),
+            )
+            return [model_dict(value) for value in session.scalars(query).all()]
 
     def create_alert(
         self,

@@ -18,16 +18,18 @@ from app.persistence.sso_report_repository import SsoReportRepository
 from app.services.account_timeline import build_account_timeline
 from app.services.cooldown_stats import (
     ALLOWED_STATUSES,
-    account_id_of,
+    GROK2API_COOLDOWN_SOURCE,
+    LOCAL_COOLDOWN_SOURCE,
     build_cooldown_zone_item,
-    build_missing_thinking_cooldown_item,
+    build_missing_thinking_cooldown_item_from_record,
     compute_cooldown_stats,
-    is_missing_thinking_cooling,
+    is_persisted_missing_thinking_cooling,
     matches_cooldown_search,
-    merge_cooldown_zone_items,
-    remaining_seconds,
+    missing_thinking_records_as_stat_rows,
+    normalize_cooldown_source,
     resolve_cooldown_list_range,
     select_cooldown_zone_rows,
+    sort_cooldown_zone_items,
 )
 from app.services.isolation_stats import compute_isolation_stats, resolve_stats_range
 
@@ -1195,34 +1197,22 @@ class AccountService:
             "pageSize": page_size,
         }
 
-    async def cooldown_stats(self, *, start: str = "", end: str = "") -> dict[str, Any]:
+    async def cooldown_stats(
+        self,
+        *,
+        start: str = "",
+        end: str = "",
+        source: str = LOCAL_COOLDOWN_SOURCE,
+    ) -> dict[str, Any]:
+        normalized_source = normalize_cooldown_source(source)
         range_start, range_end = resolve_stats_range(start, end)
+        if normalized_source == GROK2API_COOLDOWN_SOURCE:
+            return self._grok2api_cooldown_stats(start=range_start, end=range_end)
         rows = self.request_audits.tps_cooldown_verifications() if self.request_audits is not None else []
         account_ids = sorted(
             {int(row.get("account_id") or 0) for row in rows if int(row.get("account_id") or 0) > 0}
         )
-        grok_accounts = await self._list_missing_thinking_cooldown_accounts()
-        grok_ids = [account_id_of(item) for item in grok_accounts if account_id_of(item) > 0]
-        assessments = (
-            self.accounts.get_assessments(sorted(set(account_ids) | set(grok_ids)))
-            if account_ids or grok_ids
-            else {}
-        )
-        tps_cooling_ids = {
-            int(row.get("account_id") or 0)
-            for row in rows
-            if str(row.get("action_status") or "") == "cooled" and int(row.get("account_id") or 0) > 0
-        }
-        extra_cooling = [
-            {
-                "remainingSeconds": remaining_seconds(
-                    item.get("cooldownUntil") or item.get("cooldown_until")
-                ),
-                "disabledByCooldown": False,
-            }
-            for item in grok_accounts
-            if account_id_of(item) not in tps_cooling_ids
-        ]
+        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
         return compute_cooldown_stats(
             rows=rows,
             assessments=assessments,
@@ -1231,7 +1221,34 @@ class AccountService:
             min_count=int(self.settings.request_audit_tps_only_min_count),
             cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
             isolation_enabled=bool(self.settings.request_audit_isolation_enabled),
-            extra_cooling=extra_cooling,
+            source=LOCAL_COOLDOWN_SOURCE,
+        )
+
+    def _grok2api_cooldown_stats(
+        self,
+        *,
+        start,
+        end,
+    ) -> dict[str, Any]:
+        self.accounts.expire_due_missing_thinking_cooldowns()
+        records = self.accounts.list_missing_thinking_cooldowns()
+        account_ids = sorted(
+            {
+                int(item.get("account_id") or 0)
+                for item in records
+                if int(item.get("account_id") or 0) > 0
+            }
+        )
+        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
+        return compute_cooldown_stats(
+            rows=missing_thinking_records_as_stat_rows(records),
+            assessments=assessments,
+            start=start,
+            end=end,
+            min_count=0,
+            cooldown_minutes=0,
+            isolation_enabled=False,
+            source=GROK2API_COOLDOWN_SOURCE,
         )
 
     async def list_cooldown_zone(
@@ -1243,45 +1260,66 @@ class AccountService:
         status: str = "cooling",
         start: str = "",
         end: str = "",
+        source: str = LOCAL_COOLDOWN_SOURCE,
     ) -> dict[str, Any]:
         normalized_status = str(status or "cooling").strip().lower() or "cooling"
         if normalized_status not in ALLOWED_STATUSES:
             raise ValueError("冷却状态仅支持 cooling、expired 或 all")
+        normalized_source = normalize_cooldown_source(source)
         range_start = range_end = None
         if normalized_status in {"expired", "all"}:
             range_start, range_end = resolve_cooldown_list_range(start, end)
-        selected = (
-            select_cooldown_zone_rows(
-                self.request_audits.tps_cooldown_verifications(),
+        if normalized_source == GROK2API_COOLDOWN_SOURCE:
+            values = self._list_grok2api_cooldown_items(
                 status=normalized_status,
                 start=range_start,
                 end=range_end,
             )
+        else:
+            values = await self._list_local_cooldown_items(
+                status=normalized_status,
+                start=range_start,
+                end=range_end,
+            )
+        values = [
+            payload
+            for payload in values
+            if matches_cooldown_search(payload, search)
+        ]
+        offset = (page - 1) * page_size
+        return {
+            "items": values[offset : offset + page_size],
+            "total": len(values),
+            "page": page,
+            "pageSize": page_size,
+        }
+
+    async def _list_local_cooldown_items(
+        self,
+        *,
+        status: str,
+        start,
+        end,
+    ) -> list[dict[str, Any]]:
+        selected = (
+            select_cooldown_zone_rows(
+                self.request_audits.tps_cooldown_verifications(),
+                status=status,
+                start=start,
+                end=end,
+            )
             if self.request_audits is not None
             else []
         )
-        grok_accounts = (
-            await self._list_missing_thinking_cooldown_accounts()
-            if normalized_status in {"cooling", "all"}
-            else []
-        )
         account_ids = [int(item["account_id"]) for item in selected]
-        grok_ids = [account_id_of(item) for item in grok_accounts if account_id_of(item) > 0]
-        upstream_by_id: dict[int, dict[str, Any]] = {
-            account_id_of(item): item for item in grok_accounts if account_id_of(item) > 0
-        }
-        missing_local_ids = [account_id for account_id in account_ids if account_id not in upstream_by_id]
-        if missing_local_ids:
-            upstream_items = await self.client.get_accounts_by_ids(set(missing_local_ids))
+        upstream_by_id: dict[int, dict[str, Any]] = {}
+        if account_ids:
+            upstream_items = await self.client.get_accounts_by_ids(set(account_ids))
             upstream_by_id.update(
                 {int(item.get("id") or 0): item for item in upstream_items if int(item.get("id") or 0) > 0}
             )
-        assessments = (
-            self.accounts.get_assessments(sorted(set(account_ids) | set(grok_ids)))
-            if account_ids or grok_ids
-            else {}
-        )
-        local_values: list[dict[str, Any]] = []
+        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
+        values: list[dict[str, Any]] = []
         for item in selected:
             account_id = int(item["account_id"])
             upstream = upstream_by_id.get(account_id)
@@ -1289,7 +1327,7 @@ class AccountService:
             if missing_upstream:
                 upstream = self._missing_upstream_stub(account_id)
             assessment = assessments.get(account_id)
-            local_values.append(
+            values.append(
                 build_cooldown_zone_item(
                     account_id=account_id,
                     status=str(item["status"]),
@@ -1302,41 +1340,77 @@ class AccountService:
                     cooldown_minutes=int(self.settings.request_audit_tps_cooldown_minutes),
                 )
             )
-        grok_values = [
-            build_missing_thinking_cooldown_item(
-                item,
-                quarantined=self._is_quarantined(assessments.get(account_id_of(item))),
+        return sort_cooldown_zone_items(values)
+
+    def _list_grok2api_cooldown_items(
+        self,
+        *,
+        status: str,
+        start,
+        end,
+    ) -> list[dict[str, Any]]:
+        self.accounts.expire_due_missing_thinking_cooldowns()
+        records: list[dict[str, Any]] = []
+        if status in {"cooling", "all"}:
+            records.extend(self.accounts.list_missing_thinking_cooldowns(status="cooling"))
+        if status in {"expired", "all"}:
+            records.extend(
+                self.accounts.list_missing_thinking_cooldowns(
+                    status="expired",
+                    start=start,
+                    end=end,
+                )
             )
-            for item in grok_accounts
-            if account_id_of(item) > 0
+        account_ids = [
+            int(item.get("account_id") or 0)
+            for item in records
+            if int(item.get("account_id") or 0) > 0
         ]
-        values = [
-            payload
-            for payload in merge_cooldown_zone_items(local_values, grok_values)
-            if matches_cooldown_search(payload, search)
-        ]
-        offset = (page - 1) * page_size
-        return {
-            "items": values[offset : offset + page_size],
-            "total": len(values),
-            "page": page,
-            "pageSize": page_size,
-        }
+        assessments = self.accounts.get_assessments(sorted(set(account_ids))) if account_ids else {}
+        values: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for record in records:
+            account_id = int(record.get("account_id") or 0)
+            if account_id <= 0 or account_id in seen:
+                continue
+            cooling = is_persisted_missing_thinking_cooling(record)
+            if status == "cooling" and not cooling:
+                continue
+            if status == "expired" and cooling:
+                continue
+            seen.add(account_id)
+            values.append(
+                build_missing_thinking_cooldown_item_from_record(
+                    record,
+                    quarantined=self._is_quarantined(assessments.get(account_id)),
+                )
+            )
+        return sort_cooldown_zone_items(values)
 
     async def release_cooldown_zone(
         self,
         *,
         account_ids: list[int],
+        source: str = LOCAL_COOLDOWN_SOURCE,
     ) -> dict[str, Any]:
         unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
         if not unique_ids:
             raise ValueError("至少选择一个账号")
+        normalized_source = normalize_cooldown_source(source)
         latest = (
             self.request_audits.latest_tps_cooldowns_for_accounts(unique_ids)
-            if self.request_audits is not None
+            if self.request_audits is not None and normalized_source == LOCAL_COOLDOWN_SOURCE
             else {}
         )
-        grok_by_id = await self._missing_thinking_cooldown_by_ids(unique_ids)
+        grok_by_id: dict[int, dict[str, Any]] = {}
+        if normalized_source == GROK2API_COOLDOWN_SOURCE:
+            self.accounts.expire_due_missing_thinking_cooldowns()
+            grok_by_id = {
+                int(record.get("account_id") or 0): record
+                for record in self.accounts.list_missing_thinking_cooldowns(status="cooling")
+                if int(record.get("account_id") or 0) in unique_ids
+                and is_persisted_missing_thinking_cooling(record)
+            }
         not_cooling: list[int] = []
         eligible_ids: list[int] = []
         grok_eligible_ids: list[int] = []
@@ -1416,6 +1490,7 @@ class AccountService:
             except Exception as exc:
                 failures.append({"id": account_id, "error": str(exc)})
                 continue
+            self.accounts.mark_missing_thinking_cooldown_released(account_id, now=now)
             released_ids.add(account_id)
         return {
             "requested": len(unique_ids),
@@ -1622,45 +1697,6 @@ class AccountService:
         if requested in {"unbound", "none"}:
             return not str(item.get("egressNodeId") or "").strip()
         return str(item.get("egressNodeId") or "").strip() == requested
-
-    async def _list_missing_thinking_cooldown_accounts(self) -> list[dict[str, Any]]:
-        try:
-            accounts = await self.client.list_all_accounts(
-                status="missingThinking",
-                provider="grok_build",
-                degradeWindow="1h",
-                sortBy="updatedAt",
-                sortOrder="desc",
-            )
-        except IntegrationError as exc:
-            logger.warning("list grok2api missing-thinking cooldowns failed: %s", exc)
-            return []
-        now = utc_now()
-        return [
-            item for item in accounts if isinstance(item, dict) and is_missing_thinking_cooling(item, now=now)
-        ]
-
-    async def _missing_thinking_cooldown_by_ids(
-        self,
-        account_ids: list[int],
-    ) -> dict[int, dict[str, Any]]:
-        requested = [account_id for account_id in account_ids if account_id > 0]
-        if not requested:
-            return {}
-        try:
-            accounts = await self.client.get_accounts_by_ids(set(requested))
-        except IntegrationError as exc:
-            logger.warning("load grok2api missing-thinking cooldowns failed: %s", exc)
-            return {}
-        now = utc_now()
-        result: dict[int, dict[str, Any]] = {}
-        for item in accounts:
-            if not isinstance(item, dict) or not is_missing_thinking_cooling(item, now=now):
-                continue
-            account_id = account_id_of(item)
-            if account_id > 0:
-                result[account_id] = item
-        return result
 
     @staticmethod
     def _is_quarantined(assessment: dict[str, Any] | None) -> bool:

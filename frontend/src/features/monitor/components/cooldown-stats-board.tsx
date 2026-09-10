@@ -80,9 +80,11 @@ export function cooldownStatsRangeLabel(view: CooldownStatsView) {
 export function CooldownStatsBoard({
   view,
   onViewChange,
+  source = 'local',
 }: {
   view: CooldownStatsView
   onViewChange: (next: CooldownStatsView) => void
+  source?: 'local' | 'grok2api'
 }) {
   const { preset, from, to } = view
   const range = useMemo(
@@ -91,23 +93,32 @@ export function CooldownStatsBoard({
   )
   const fromIso = toIsoDateTime(range.from)
   const toIso = toIsoDateTime(range.to)
+  const grokSource = source === 'grok2api'
   const query = useQuery({
-    queryKey: ['accounts', 'cooldown-stats', fromIso, toIso],
+    queryKey: ['accounts', 'cooldown-stats', source, fromIso, toIso],
     queryFn: ({ signal }) =>
-      api.cooldownStats({ from: fromIso, to: toIso }, signal),
+      api.cooldownStats({ from: fromIso, to: toIso, source }, signal),
     enabled: Boolean(fromIso && toIso && fromIso <= toIso),
   })
   const data = query.data
   const invalidRange = Boolean(fromIso && toIso && fromIso > toIso)
-  const policy = data?.policy
+  const policy = grokSource ? undefined : data?.policy
 
   return (
     <TitledCard
       icon={<Timer />}
       iconTone='amber'
-      title='冷却看板'
-      description='看当前正在冷却的账号，以及所选时间内发生了多少次高速 TPS 冷却。'
-      hint='冷却是临时停用，到期自动恢复调度，不会进隔离区。冷却后再连续达到次数才会永久停用。'
+      title={grokSource ? '上游同步看板' : '本系统冷却看板'}
+      description={
+        grokSource
+          ? '看后台定时任务同步下来的 grok2api 缺思考冷却，以及所选时间内写入或结束了多少条。'
+          : '看当前正在冷却的账号，以及所选时间内发生了多少次高速 TPS 冷却。'
+      }
+      hint={
+        grokSource
+          ? '上游同步只读本地库，不会在打开页面时现拉 grok2api。提前结束会清除上游冷却，不会改启用状态。'
+          : '冷却是临时停用，到期自动恢复调度，不会进隔离区。冷却后再连续达到次数才会永久停用。'
+      }
       action={
         <div className='flex min-w-0 flex-col gap-2 sm:items-end'>
           <SegmentedControl
@@ -185,7 +196,9 @@ export function CooldownStatsBoard({
                 tone: 'amber',
                 label: '当前冷却中',
                 value: formatNumber(data?.zone.cooling ?? 0, 0),
-                hint: '当前仍在冷却窗口内、尚未到期恢复的账号，含 grok2api 降智冷却。',
+                hint: grokSource
+                  ? '当前仍在 grok2api 降智冷却窗口内、尚未到期的账号。'
+                  : '当前仍在本系统高速 TPS 冷却窗口内、尚未到期恢复的账号。',
               },
               {
                 icon: Clock3,
@@ -195,13 +208,17 @@ export function CooldownStatsBoard({
                 detail: '2 分钟内',
                 hint: '剩余不超过 2 分钟的冷却账号。',
               },
-              {
-                icon: PowerOff,
-                tone: 'violet',
-                label: '本次由系统停用',
-                value: formatNumber(data?.zone.disabledByCooldown ?? 0, 0),
-                hint: '冷却开始时由本系统停用上游、到期会自动重新启用的账号。',
-              },
+              ...(grokSource
+                ? []
+                : [
+                    {
+                      icon: PowerOff,
+                      tone: 'violet' as const,
+                      label: '本次由系统停用',
+                      value: formatNumber(data?.zone.disabledByCooldown ?? 0, 0),
+                      hint: '冷却开始时由本系统停用上游、到期会自动重新启用的账号。',
+                    },
+                  ]),
               {
                 icon: Hourglass,
                 tone: 'sky',
@@ -221,7 +238,9 @@ export function CooldownStatsBoard({
                 tone: 'amber',
                 label: '区间内冷却次数',
                 value: formatNumber(data?.events.cooled ?? 0, 0),
-                hint: '所选时间内发生的高速 TPS 冷却次数，同一账号可能多次冷却。',
+                hint: grokSource
+                  ? '所选时间内同步到本地的降智冷却次数，同一账号只保留最新一次。'
+                  : '所选时间内发生的高速 TPS 冷却次数，同一账号可能多次冷却。',
               },
               {
                 icon: UsersRound,
@@ -242,7 +261,9 @@ export function CooldownStatsBoard({
                 tone: 'rose',
                 label: '冷却后已隔离',
                 value: formatNumber(data?.events.isolatedAfter ?? 0, 0),
-                hint: '冷却结束后又连续高速 TPS，被永久停用并移入隔离区的账号。',
+                hint: grokSource
+                  ? '这些同步冷却账号当前已在隔离区。'
+                  : '冷却结束后又连续高速 TPS，被永久停用并移入隔离区的账号。',
               },
             ]}
           />

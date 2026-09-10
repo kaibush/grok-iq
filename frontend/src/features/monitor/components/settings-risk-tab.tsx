@@ -864,6 +864,30 @@ function IsolationZonePanel({
             </div>
           ) : null}
         </SettingListItem>
+        <SettingListItem
+          label='同步 grok2api 降智冷却'
+          description='开启后定期把 grok2api 因缺思考进入冷却的账号写入冷却区「上游同步」页。只读同步，不会停用上游。关闭后不再后台写入。'
+          checked={form.missingThinkingCooldownSyncEnabled}
+          onCheckedChange={(value) =>
+            set('missingThinkingCooldownSyncEnabled', value)
+          }
+        >
+          {form.missingThinkingCooldownSyncEnabled ? (
+            <div className='max-w-xs'>
+              <NumberField
+                label='同步间隔'
+                hint='15–600 秒。同步 grok2api 当前仍在降智冷却中的账号。'
+                value={form.missingThinkingCooldownSyncIntervalSeconds}
+                min={15}
+                max={600}
+                suffix='秒'
+                onChange={(value) =>
+                  set('missingThinkingCooldownSyncIntervalSeconds', value)
+                }
+              />
+            </div>
+          ) : null}
+        </SettingListItem>
       </SettingList>
     </SettingsCard>
   )

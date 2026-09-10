@@ -12,6 +12,7 @@ from app.web.schemas import (
     AccountBatchEgressInput,
     AccountBatchUpdateInput,
     AccountOperatorNoteInput,
+    CooldownReleaseInput,
 )
 
 
@@ -170,8 +171,9 @@ def build_accounts_router(service: AccountService) -> APIRouter:
     async def cooldown_stats(
         start: str = Query(default="", alias="from"),
         end: str = Query(default="", alias="to"),
+        source: str = Query(default="local"),
     ) -> dict[str, Any]:
-        return await service.cooldown_stats(start=start, end=end)
+        return await service.cooldown_stats(start=start, end=end, source=source)
 
     @router.get("/accounts/cooldowns")
     async def cooldown_zone(
@@ -181,6 +183,7 @@ def build_accounts_router(service: AccountService) -> APIRouter:
         status: str = Query(default="cooling"),
         start: str = Query(default="", alias="from"),
         end: str = Query(default="", alias="to"),
+        source: str = Query(default="local"),
     ) -> dict[str, Any]:
         return await service.list_cooldown_zone(
             page=page,
@@ -189,14 +192,16 @@ def build_accounts_router(service: AccountService) -> APIRouter:
             status=status,
             start=start,
             end=end,
+            source=source,
         )
 
     @router.post("/accounts/cooldowns/release")
     async def release_cooldown_zone(
-        payload: AccountBatchDeleteInput,
+        payload: CooldownReleaseInput,
     ) -> dict[str, Any]:
         return await service.release_cooldown_zone(
             account_ids=payload.account_ids,
+            source=payload.source,
         )
 
     @router.get("/accounts/{account_id}")

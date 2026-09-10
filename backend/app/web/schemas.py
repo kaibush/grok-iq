@@ -123,6 +123,11 @@ class AccountBatchDeleteInput(BaseModel):
     account_ids: list[int] = Field(min_length=1, max_length=100_000)
 
 
+class CooldownReleaseInput(BaseModel):
+    account_ids: list[int] = Field(min_length=1, max_length=100_000)
+    source: str = "local"
+
+
 class AccountOperatorNoteInput(BaseModel):
     note: str = Field(default="", max_length=2000)
 
@@ -630,6 +635,15 @@ class RuntimeSettingsInput(BaseModel):
     quality_retry_isolation_interval_seconds: int | None = Field(
         default=None,
         alias="qualityRetryIsolationIntervalSeconds",
+        ge=15,
+        le=600,
+    )
+    missing_thinking_cooldown_sync_enabled: bool | None = Field(
+        default=None, alias="missingThinkingCooldownSyncEnabled"
+    )
+    missing_thinking_cooldown_sync_interval_seconds: int | None = Field(
+        default=None,
+        alias="missingThinkingCooldownSyncIntervalSeconds",
         ge=15,
         le=600,
     )

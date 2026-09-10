@@ -356,6 +356,12 @@ class RuntimeSettingsService:
             "qualityRetryIsolationIntervalSeconds": (
                 s.quality_retry_isolation_interval_seconds
             ),
+            "missingThinkingCooldownSyncEnabled": (
+                s.missing_thinking_cooldown_sync_enabled
+            ),
+            "missingThinkingCooldownSyncIntervalSeconds": (
+                s.missing_thinking_cooldown_sync_interval_seconds
+            ),
             "quarantineMinutes": s.quarantine_minutes,
             "bootstrap": {
                 "host": s.host,

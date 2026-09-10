@@ -98,6 +98,39 @@ async def test_quarantine_recovery_can_be_disabled_independently(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_missing_thinking_cooldown_sync_runs_when_user_plans_are_disabled(
+    tmp_path: Path,
+):
+    repository = build_repository(tmp_path)
+    create_plan(repository, account_scope="fixed")
+    settings = Settings(
+        database_path=tmp_path / "grokiq.db",
+        scheduler_enabled=False,
+        missing_thinking_cooldown_sync_enabled=True,
+    )
+    scheduler = SchedulerService(
+        settings=settings,
+        repository=repository,
+        probes=AsyncMock(),  # type: ignore[arg-type]
+        recovery_callback=AsyncMock(return_value={"restored": 0, "guarded": 0}),
+        missing_thinking_cooldown_callback=AsyncMock(
+            return_value={"ok": True, "cooling": 0}
+        ),
+    )
+
+    await scheduler.start()
+    try:
+        job_ids = {job.id for job in scheduler.scheduler.get_jobs()}
+        assert "system:missing-thinking-cooldown" in job_ids
+        assert "system:quarantine-recovery" in job_ids
+        assert all(not job_id.startswith("plan:") for job_id in job_ids)
+        assert scheduler.status()["plansEnabled"] is False
+        assert scheduler.status()["missingThinkingCooldownSyncEnabled"] is True
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
 async def test_quality_retry_isolation_runs_when_user_plans_are_disabled(
     tmp_path: Path,
 ):

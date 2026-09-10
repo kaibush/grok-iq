@@ -653,6 +653,7 @@ export type CooldownAccount = {
 }
 
 export type CooldownStatsResponse = {
+  source?: 'local' | 'grok2api' | string
   range: { from?: string | null; to?: string | null }
   policy?: {
     minCount: number
@@ -1995,6 +1996,8 @@ export type RuntimeSettings = {
   autoIsolationMinStatus: AutoIsolationMinStatus
   qualityRetryIsolationEnabled: boolean
   qualityRetryIsolationIntervalSeconds: number
+  missingThinkingCooldownSyncEnabled: boolean
+  missingThinkingCooldownSyncIntervalSeconds: number
   quarantineMinutes: number
   bootstrap: {
     host: string
@@ -2125,6 +2128,8 @@ export type RuntimeSettingsUpdate = Partial<
     | 'autoIsolationMinStatus'
     | 'qualityRetryIsolationEnabled'
     | 'qualityRetryIsolationIntervalSeconds'
+    | 'missingThinkingCooldownSyncEnabled'
+    | 'missingThinkingCooldownSyncIntervalSeconds'
     | 'quarantineMinutes'
   >
 > & {
@@ -2179,6 +2184,8 @@ type RuntimeSettingsWire = Omit<
   | 'autoIsolationMinStatus'
   | 'qualityRetryIsolationEnabled'
   | 'qualityRetryIsolationIntervalSeconds'
+  | 'missingThinkingCooldownSyncEnabled'
+  | 'missingThinkingCooldownSyncIntervalSeconds'
   | 'requestAuditEnabled'
   | 'requestAuditAutoScanEnabled'
   | 'requestAuditAdaptiveScanEnabled'
@@ -2246,6 +2253,8 @@ type RuntimeSettingsWire = Omit<
   autoIsolationMinStatus?: AutoIsolationMinStatus
   qualityRetryIsolationEnabled?: boolean
   qualityRetryIsolationIntervalSeconds?: number
+  missingThinkingCooldownSyncEnabled?: boolean
+  missingThinkingCooldownSyncIntervalSeconds?: number
   requestAuditEnabled?: boolean
   requestAuditAutoScanEnabled?: boolean
   requestAuditAdaptiveScanEnabled?: boolean
@@ -2408,6 +2417,10 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     qualityRetryIsolationEnabled: value.qualityRetryIsolationEnabled ?? false,
     qualityRetryIsolationIntervalSeconds:
       value.qualityRetryIsolationIntervalSeconds ?? 60,
+    missingThinkingCooldownSyncEnabled:
+      value.missingThinkingCooldownSyncEnabled ?? true,
+    missingThinkingCooldownSyncIntervalSeconds:
+      value.missingThinkingCooldownSyncIntervalSeconds ?? 60,
     scheduledProbeRegisterCooldownMinutes:
       value.scheduledProbeRegisterCooldownMinutes ?? 360,
     requestAuditEnabled: value.requestAuditEnabled ?? true,
@@ -3670,14 +3683,14 @@ export const api = {
       signal,
     }),
   cooldownStats: (
-    params: { from?: string; to?: string } = {},
+    params: { from?: string; to?: string; source?: string } = {},
     signal?: AbortSignal
   ) =>
     request<CooldownStatsResponse>(
       `/accounts/cooldowns/stats${query(params)}`,
       { signal }
     ),
-  releaseCooldowns: (accountIds: number[]) =>
+  releaseCooldowns: (accountIds: number[], source = 'local') =>
     request<CooldownReleaseResult>('/accounts/cooldowns/release', {
       method: 'POST',
       body: JSON.stringify({
@@ -3688,6 +3701,7 @@ export const api = {
             )
           )
         ),
+        source,
       }),
     }),
   deleteQuarantineLocal,

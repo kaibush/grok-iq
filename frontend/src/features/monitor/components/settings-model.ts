@@ -113,6 +113,8 @@ export type SettingsForm = {
   autoIsolationMinStatus: AutoIsolationMinStatus
   qualityRetryIsolationEnabled: boolean
   qualityRetryIsolationIntervalSeconds: number
+  missingThinkingCooldownSyncEnabled: boolean
+  missingThinkingCooldownSyncIntervalSeconds: number
   quarantineMinutes: number
 }
 
@@ -519,6 +521,10 @@ export function toSettingsForm(
       settings.qualityRetryIsolationEnabled ?? false,
     qualityRetryIsolationIntervalSeconds:
       settings.qualityRetryIsolationIntervalSeconds ?? 60,
+    missingThinkingCooldownSyncEnabled:
+      settings.missingThinkingCooldownSyncEnabled ?? true,
+    missingThinkingCooldownSyncIntervalSeconds:
+      settings.missingThinkingCooldownSyncIntervalSeconds ?? 60,
     quarantineMinutes: settings.quarantineMinutes,
   }
 }
@@ -636,6 +642,9 @@ export function buildSettingsPayload(
     qualityRetryIsolationEnabled: form.qualityRetryIsolationEnabled,
     qualityRetryIsolationIntervalSeconds:
       form.qualityRetryIsolationIntervalSeconds,
+    missingThinkingCooldownSyncEnabled: form.missingThinkingCooldownSyncEnabled,
+    missingThinkingCooldownSyncIntervalSeconds:
+      form.missingThinkingCooldownSyncIntervalSeconds,
     quarantineMinutes: form.quarantineMinutes,
     clearSecrets,
   }

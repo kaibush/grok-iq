@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -79,13 +80,15 @@ import {
 } from '@/features/monitor/components/result-preview-gallery'
 
 type CooldownStatusFilter = 'cooling' | 'expired' | 'all'
+type CooldownSourceFilter = 'local' | 'grok2api'
 
-const COOLDOWN_VIEW_STORAGE_KEY = 'grokiq.monitor.cooldown-view.v1'
+const COOLDOWN_VIEW_STORAGE_KEY = 'grokiq.monitor.cooldown-view.v2'
 const defaultCooldownView = {
   page: 1,
   pageSize: 50,
   search: '',
   status: 'cooling' as CooldownStatusFilter,
+  source: 'local' as CooldownSourceFilter,
 }
 
 const statusOptions: Array<{ value: CooldownStatusFilter; label: string }> = [
@@ -98,6 +101,15 @@ const statusLabels: Record<CooldownStatusFilter, string> = {
   cooling: '冷却中',
   expired: '已结束',
   all: '全部状态',
+}
+
+const sourceLabels: Record<CooldownSourceFilter, string> = {
+  local: '本系统冷却',
+  grok2api: '上游同步',
+}
+
+function normalizeCooldownSource(value: string | undefined): CooldownSourceFilter {
+  return value === 'grok2api' ? 'grok2api' : 'local'
 }
 
 function canReleaseCooldown(account: CooldownAccount) {
@@ -168,6 +180,8 @@ export function CooldownPage() {
     defaultCooldownStatsView
   )
   const { page, pageSize, search, status = 'cooling' } = view.value
+  const source = normalizeCooldownSource(view.value.source)
+  const grokSource = source === 'grok2api'
   const updateView = (patch: Partial<typeof defaultCooldownView>) =>
     view.setValue((current) => ({ ...current, ...patch }))
   const statsRange = useMemo(
@@ -189,10 +203,19 @@ export function CooldownPage() {
       pageSize,
       search: deferredSearch,
       status,
+      source,
       from: historyRange.from ?? '',
       to: historyRange.to ?? '',
     }),
-    [deferredSearch, historyRange.from, historyRange.to, page, pageSize, status]
+    [
+      deferredSearch,
+      historyRange.from,
+      historyRange.to,
+      page,
+      pageSize,
+      source,
+      status,
+    ]
   )
   const tableQuery = usePaintDeferredValue(committedQuery)
   const [selected, setSelected] = useState<number[]>([])
@@ -219,6 +242,7 @@ export function CooldownPage() {
     tableQuery.pageSize !== committedQuery.pageSize ||
     tableQuery.search !== committedQuery.search ||
     tableQuery.status !== committedQuery.status ||
+    tableQuery.source !== committedQuery.source ||
     tableQuery.from !== committedQuery.from ||
     tableQuery.to !== committedQuery.to
   const query = useQuery({
@@ -229,6 +253,7 @@ export function CooldownPage() {
       tableQuery.pageSize,
       tableQuery.search,
       tableQuery.status,
+      tableQuery.source,
       tableQuery.from,
       tableQuery.to,
     ],
@@ -239,6 +264,7 @@ export function CooldownPage() {
           pageSize: tableQuery.pageSize,
           search: tableQuery.search,
           status: tableQuery.status,
+          source: tableQuery.source,
           ...(tableQuery.status === 'cooling'
             ? {}
             : {
@@ -248,7 +274,12 @@ export function CooldownPage() {
         },
         signal
       ),
-    placeholderData: (previous) => previous,
+    placeholderData: (previous) => {
+      if (!previous?.items.length) return previous
+      const expectedSource =
+        tableQuery.source === 'grok2api' ? 'grok2api' : 'request_audit'
+      return previous.items[0]?.source === expectedSource ? previous : undefined
+    },
     refetchInterval: (current) => {
       const items = current.state.data?.items ?? []
       return items.some((item) => item.status === 'cooling') ? 15_000 : false
@@ -263,6 +294,7 @@ export function CooldownPage() {
   const tableFilterKey = [
     tableQuery.search,
     tableQuery.status,
+    tableQuery.source,
     tableQuery.from,
     tableQuery.to,
   ].join('|')
@@ -396,6 +428,7 @@ export function CooldownPage() {
     releasableIds.every((id) => selectedIdSet.has(id))
   const hasActiveFilters = status !== 'cooling' || Boolean(search.trim())
   const viewSummary = [
+    sourceLabels[source],
     search.trim() ? `搜索“${search.trim()}”` : '',
     statusLabels[status],
     status === 'cooling' ? '' : statsRangeLabel,
@@ -409,7 +442,8 @@ export function CooldownPage() {
   }
 
   const releaseMutation = useMutation({
-    mutationFn: (accountIds: number[]) => api.releaseCooldowns(accountIds),
+    mutationFn: (accountIds: number[]) =>
+      api.releaseCooldowns(accountIds, source),
     onSuccess: (result) => {
       const toastResult = releaseToastMessage(result)
       setReleaseOpen(false)
@@ -460,10 +494,9 @@ export function CooldownPage() {
         description={
           <div className='space-y-2'>
             <p>
-              高速 TPS
-              连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。grok2api
-              因缺思考进入冷却的账号也会同步到这里；提前结束会清除上游冷却，不会改启用状态。冷却结束后如果再次连续高速
-              TPS，才会永久停用并移入隔离区。
+              {grokSource
+                ? '上游同步只显示后台定时任务写入数据库的 grok2api 缺思考冷却。提前结束会清除上游冷却，不会改启用状态。'
+                : '本系统冷却来自请求审计高速 TPS。连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。冷却结束后如果再次连续高速 TPS，才会永久停用并移入隔离区。'}
             </p>
           </div>
         }
@@ -506,7 +539,26 @@ export function CooldownPage() {
           </ActionToolbar>
         }
       />
+      <Tabs
+        value={source}
+        onValueChange={(value) => {
+          const next = normalizeCooldownSource(value)
+          if (next === source) return
+          beginTableInteraction()
+          setSelected([])
+          setReleaseOpen(false)
+          setReleaseIds([])
+          updateView({ source: next, page: 1 })
+        }}
+        className='gap-3'
+      >
+        <TabsList className='h-8 w-full justify-start overflow-x-auto sm:w-fit'>
+          <TabsTrigger value='local'>本系统冷却</TabsTrigger>
+          <TabsTrigger value='grok2api'>上游同步</TabsTrigger>
+        </TabsList>
+      </Tabs>
       <CooldownStatsBoard
+        source={source}
         view={statsView.value}
         onViewChange={(next) => {
           statsView.setValue(next)
@@ -530,7 +582,11 @@ export function CooldownPage() {
                   onChange={(event) =>
                     updateView({ search: event.target.value, page: 1 })
                   }
-                  placeholder='搜索名称、邮箱、账号 ID、请求 ID'
+                  placeholder={
+                    grokSource
+                      ? '搜索名称、邮箱、账号 ID'
+                      : '搜索名称、邮箱、账号 ID、请求 ID'
+                  }
                   className='h-8 pr-8 pl-8'
                 />
                 {showTableLoading && (
@@ -587,6 +643,7 @@ export function CooldownPage() {
         ) : accounts.length ? (
           <div className='relative min-h-40' aria-busy={showTableLoading}>
             <CooldownTable
+              grokSource={grokSource}
               accounts={accounts}
               selected={selected}
               allChecked={allChecked}
@@ -624,7 +681,9 @@ export function CooldownPage() {
                     ? `看板时间范围「${statsRangeLabel}」内没有冷却记录，请扩大时间范围或改回「冷却中」。`
                     : hasActiveFilters
                       ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
-                      : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。已结束的记录请切换到「已结束」，并确认上方看板时间范围覆盖冷却发生的时间。'
+                      : grokSource
+                        ? '后台定时任务会把 grok2api 缺思考冷却写入这里。当前没有同步到的冷却账号。'
+                        : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。已结束的记录请切换到「已结束」，并确认上方看板时间范围覆盖冷却发生的时间。'
               }
               action={
                 hasActiveFilters ? undefined : (
@@ -659,8 +718,9 @@ export function CooldownPage() {
         desc={
           <div className='space-y-2'>
             <p>
-              将提前结束 {releaseIds.length}{' '}
-              个账号的冷却并恢复调度。若冷却期间是本系统停用的上游，会重新启用。已进入隔离区的账号会跳过。
+              {grokSource
+                ? `将提前结束 ${releaseIds.length} 个账号的 grok2api 降智冷却。这会清除上游冷却，不会改启用状态。已进入隔离区的账号会跳过。`
+                : `将提前结束 ${releaseIds.length} 个账号的冷却并恢复调度。若冷却期间是本系统停用的上游，会重新启用。已进入隔离区的账号会跳过。`}
             </p>
           </div>
         }
@@ -745,6 +805,7 @@ export function CooldownPage() {
 }
 
 function CooldownTable({
+  grokSource = false,
   accounts,
   selected,
   allChecked,
@@ -760,6 +821,7 @@ function CooldownTable({
   onOpenSamples,
   onOpenLedger,
 }: {
+  grokSource?: boolean
   accounts: CooldownAccount[]
   selected: number[]
   allChecked: boolean
@@ -794,8 +856,14 @@ function CooldownTable({
           <TableHead>账号</TableHead>
           <TableHead>状态</TableHead>
           <TableHead>原因</TableHead>
-          <TableHead>连续次数</TableHead>
-          <TableHead>峰值 TPS</TableHead>
+          {grokSource ? (
+            <TableHead>次数</TableHead>
+          ) : (
+            <>
+              <TableHead>连续次数</TableHead>
+              <TableHead>峰值 TPS</TableHead>
+            </>
+          )}
           <TableHead>开始时间</TableHead>
           <TableHead>结束时间</TableHead>
           <TableHead>剩余</TableHead>
@@ -807,6 +875,7 @@ function CooldownTable({
         {accounts.map((account) => (
           <CooldownRow
             key={account.id}
+            grokSource={grokSource}
             account={account}
             selected={selectedIdSet.has(account.id)}
             nowMs={nowMs}
@@ -826,6 +895,7 @@ function CooldownTable({
 }
 
 function CooldownRow({
+  grokSource = false,
   account,
   selected,
   nowMs,
@@ -838,6 +908,7 @@ function CooldownRow({
   onOpenSamples,
   onOpenLedger,
 }: {
+  grokSource?: boolean
   account: CooldownAccount
   selected: boolean
   nowMs: number
@@ -883,17 +954,13 @@ function CooldownRow({
                   已进入隔离区
                 </Badge>
               ) : null}
-              {account.source === 'grok2api' ? (
-                <Badge variant='outline' className='h-5 px-1.5 text-[10px]'>
-                  grok2api 降智冷却
-                </Badge>
-              ) : null}
               {expiringSoon ? (
                 <Badge variant='warning' className='h-5 px-1.5 text-[10px]'>
                   即将结束
                 </Badge>
               ) : null}
-              {!account.quarantined &&
+              {!grokSource &&
+              !account.quarantined &&
               account.status === 'expired' &&
               account.nextAction === 'isolate' ? (
                 <Badge variant='outline' className='h-5 px-1.5 text-[10px]'>
@@ -927,14 +994,22 @@ function CooldownRow({
           {reason}
         </div>
       </TableCell>
-      <TableCell className='tabular-nums'>
-        {account.tpsStreak != null || account.tpsMinCount != null
-          ? `${formatNumber(account.tpsStreak ?? 0, 0)} / ${formatNumber(account.tpsMinCount ?? 0, 0)}`
-          : '—'}
-      </TableCell>
-      <TableCell className='tabular-nums'>
-        {peakTps == null ? '—' : formatNumber(peakTps)}
-      </TableCell>
+      {grokSource ? (
+        <TableCell className='tabular-nums'>
+          {formatNumber(account.cooldownCount ?? 0, 0)}
+        </TableCell>
+      ) : (
+        <>
+          <TableCell className='tabular-nums'>
+            {account.tpsStreak != null || account.tpsMinCount != null
+              ? `${formatNumber(account.tpsStreak ?? 0, 0)} / ${formatNumber(account.tpsMinCount ?? 0, 0)}`
+              : '—'}
+          </TableCell>
+          <TableCell className='tabular-nums'>
+            {peakTps == null ? '—' : formatNumber(peakTps)}
+          </TableCell>
+        </>
+      )}
       <TableCell>
         <TimeCell value={account.cooledAt} />
       </TableCell>

@@ -106,6 +106,43 @@ class AccountAssessment(Base):
     )
 
 
+class AccountCooldown(Base):
+    """Local projection of temporary grok2api cooldowns.
+
+    Request-audit TPS cooldowns stay on verification rows. grok2api missing-
+    thinking cooldowns are synced here so the cooldown zone can keep history
+    without attaching a fake request-audit record.
+    """
+
+    __tablename__ = "account_cooldowns"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "kind",
+            name="uq_account_cooldowns_account_kind",
+        ),
+        Index("ix_account_cooldowns_kind_status", "kind", "status"),
+        Index("ix_account_cooldowns_kind_until", "kind", "cooldown_until"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    cooled_at: Mapped[datetime] = mapped_column(AppDateTime(), nullable=False)
+    cooldown_until: Mapped[datetime | None] = mapped_column(AppDateTime())
+    expired_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    released_manually: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_error: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    degrade_hits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(AppDateTime(), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
 class ProbeProfile(Base):
     __tablename__ = "probe_profiles"
 
