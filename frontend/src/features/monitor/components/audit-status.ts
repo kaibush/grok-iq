@@ -19,6 +19,8 @@ const AUDIT_ERROR_LABELS: Record<string, string> = {
   upstream_error: '上游错误',
   upstream_forbidden_permission_denied: '上游拒绝访问',
   quality_degraded: '质量降级',
+  thinking_standby_probe_degraded: '思考备选探针降级',
+  thinking_standby_probe_error: '思考备选探针异常',
   request_canceled: '请求已取消',
   client_stream_interrupted: '客户端中断',
   client_key_account_scope_unavailable: 'Key 账号范围不可用',
@@ -32,7 +34,11 @@ export function auditErrorLabel(code: string) {
   return AUDIT_ERROR_LABELS[code] || code
 }
 
-const INTERNAL_AUDIT_ERROR_CODES = new Set(['quality_degraded'])
+const INTERNAL_AUDIT_ERROR_CODES = new Set([
+  'quality_degraded',
+  'thinking_standby_probe_degraded',
+  'thinking_standby_probe_error',
+])
 
 export function isInternalAuditError(code?: string | null) {
   return INTERNAL_AUDIT_ERROR_CODES.has((code || '').trim())

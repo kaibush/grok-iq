@@ -208,6 +208,18 @@ def test_recent_request_health_omits_internal_quality_intercepts(tmp_path: Path)
                 error_code="quality_degraded",
             ),
             _record(
+                now - timedelta(minutes=5),
+                upstream_id="5",
+                status_code=200,
+                error_code="thinking_standby_probe_degraded",
+            ),
+            _record(
+                now - timedelta(minutes=5, seconds=30),
+                upstream_id="6",
+                status_code=503,
+                error_code="thinking_standby_probe_error",
+            ),
+            _record(
                 now - timedelta(minutes=6),
                 upstream_id="4",
                 status_code=503,

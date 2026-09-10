@@ -81,9 +81,16 @@ REQUEST_HEALTH_SERIES_BUCKETS = 12
 # Audit scans are adaptive (seconds while busy, up to five minutes while
 # idle). Treat the board as stale only after the scan/rows fall far behind.
 REQUEST_HEALTH_STALE_AFTER_SECONDS = 600.0
-# grok2api records these for missing-thinking intercepts and account switches.
-# They belong on the internal audit ledger, not the public status board.
-REQUEST_HEALTH_INTERNAL_ERROR_CODES = frozenset({"quality_degraded"})
+# grok2api records these for missing-thinking intercepts, account switches,
+# and internal thinking-standby probes. They belong on the internal audit
+# ledger, not the public status board.
+REQUEST_HEALTH_INTERNAL_ERROR_CODES = frozenset(
+    {
+        "quality_degraded",
+        "thinking_standby_probe_degraded",
+        "thinking_standby_probe_error",
+    }
+)
 
 logger = logging.getLogger(__name__)
 
