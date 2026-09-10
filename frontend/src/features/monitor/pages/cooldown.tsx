@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Loader2, PowerOff, RefreshCw, Search, Timer, TimerOff } from 'lucide-react'
+import { Loader2, Play, PowerOff, RefreshCw, Search, Timer, TimerOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
@@ -558,6 +558,20 @@ export function CooldownPage() {
     setDisableOpen(true)
   }
 
+  const openSelectedProbe = () => {
+    const accountIds = uniqueIds(selected)
+    if (accountIds.length === 0) {
+      toast.error('没有可创建探针的账号')
+      return
+    }
+    setProbeAccountIds(accountIds)
+    setProbeDisabledCount(
+      accountIds.filter((id) => selectedDisabledSet.has(id)).length
+    )
+    setProbeOpen(true)
+    void refetchEgress()
+  }
+
   const toggleCurrentPageSelection = (checked: boolean) => {
     const pageDisabledIds = selectableAccounts
       .filter((item) => !item.enabled)
@@ -653,6 +667,13 @@ export function CooldownPage() {
               disabled={selectionActionPending}
               onClear={clearSelection}
             >
+              <ToolbarAction
+                label={`测试已选 ${selected.length} 个账号`}
+                disabled={selectionActionPending || selected.length === 0}
+                onClick={openSelectedProbe}
+              >
+                <Play />
+              </ToolbarAction>
               <ToolbarAction
                 label={
                   grokSource
