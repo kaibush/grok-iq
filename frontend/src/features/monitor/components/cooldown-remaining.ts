@@ -42,7 +42,7 @@ export function remainingForAccount(
   account: {
     status?: string
     cooldownUntil?: string | null
-    remainingSeconds?: number
+    remainingSeconds?: number | null
   },
   nowMs: number = Date.now()
 ): number | null {

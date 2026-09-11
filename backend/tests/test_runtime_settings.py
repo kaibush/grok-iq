@@ -312,33 +312,6 @@ def test_quality_retry_isolation_setting_is_persisted_and_exposed(tmp_path: Path
     assert reloaded_settings.quality_retry_isolation_interval_seconds == 45
 
 
-def test_missing_thinking_cooldown_sync_setting_is_persisted_and_exposed(tmp_path: Path):
-    database, settings, service = build_service(tmp_path)
-
-    changed = service.update({
-        "missing_thinking_cooldown_sync_enabled": False,
-        "missing_thinking_cooldown_sync_interval_seconds": 45,
-    })
-
-    assert changed == [
-        "missing_thinking_cooldown_sync_enabled",
-        "missing_thinking_cooldown_sync_interval_seconds",
-    ]
-    assert settings.missing_thinking_cooldown_sync_enabled is False
-    assert settings.missing_thinking_cooldown_sync_interval_seconds == 45
-    assert service.public_view()["missingThinkingCooldownSyncEnabled"] is False
-    assert service.public_view()["missingThinkingCooldownSyncIntervalSeconds"] == 45
-
-    reloaded_settings = Settings(database_path=tmp_path / "grokiq.db")
-    reloaded = RuntimeSettingsService(
-        reloaded_settings,
-        SettingsRepository(database, reloaded_settings),
-    )
-    reloaded.load()
-    assert reloaded_settings.missing_thinking_cooldown_sync_enabled is False
-    assert reloaded_settings.missing_thinking_cooldown_sync_interval_seconds == 45
-
-
 def test_should_auto_isolate_matches_min_status_and_more_severe():
     assert should_auto_isolate("high_risk", enabled=False, min_status="watch") is False
     assert should_auto_isolate("watch", enabled=True, min_status="high_risk") is False

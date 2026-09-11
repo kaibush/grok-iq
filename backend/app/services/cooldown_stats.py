@@ -17,15 +17,22 @@ COOLING_STATUS = "cooling"
 EXPIRED_STATUS = "expired"
 ALL_STATUS = "all"
 ALLOWED_STATUSES = {COOLING_STATUS, EXPIRED_STATUS, ALL_STATUS}
+ALLOWED_GROK_STATUSES = ALLOWED_STATUSES | {"permanent_disabled", "timed_disabled", "enabled", "deleted"}
 DEFAULT_LABEL = "高速 TPS 冷却"
 LOCAL_COOLDOWN_SOURCE = "local"
 GROK2API_COOLDOWN_SOURCE = "grok2api"
 ALLOWED_COOLDOWN_SOURCES = {LOCAL_COOLDOWN_SOURCE, GROK2API_COOLDOWN_SOURCE}
 MISSING_THINKING_ERROR = "missing_thinking"
-MISSING_THINKING_LABEL = "grok2api 降智冷却"
+MISSING_THINKING_LABEL = "grok2api 缺思考处理"
 MISSING_THINKING_SOURCE = GROK2API_COOLDOWN_SOURCE
 MISSING_THINKING_REASON = "grok2api 缺思考进入冷却"
 MISSING_THINKING_KIND = "missing_thinking_cooldown"
+MISSING_THINKING_REASON_LABELS = {
+    "missing_reasoning": "缺少有效思考内容",
+    "legacy_audit": "旧版缺思考请求记录",
+    "legacy_state": "旧版缺思考状态记录",
+}
+MISSING_THINKING_STATES = {"enabled", "timed_disabled", "permanent_disabled", "deleted"}
 EXPIRING_SOON_SECONDS = 120
 _FAR_FUTURE = datetime(9999, 12, 31, tzinfo=UTC)
 _FAR_PAST = datetime(1970, 1, 1, tzinfo=UTC)
@@ -47,6 +54,47 @@ def normalize_cooldown_source(source: str | None) -> str:
     if value in {GROK2API_COOLDOWN_SOURCE, "upstream", "missing_thinking"}:
         return GROK2API_COOLDOWN_SOURCE
     raise ValueError("冷却来源仅支持 local 或 grok2api")
+
+
+def cooldown_status_to_missing_thinking_state(status: str | None) -> str:
+    value = str(status or COOLING_STATUS).strip().lower() or COOLING_STATUS
+    if value in {COOLING_STATUS, "timed_disabled"}:
+        return "timed_disabled"
+    if value == "permanent_disabled":
+        return "permanent_disabled"
+    if value in {EXPIRED_STATUS, "enabled"}:
+        return "enabled"
+    if value == "deleted":
+        return "deleted"
+    if value == ALL_STATUS:
+        return ""
+    raise ValueError("冷却状态仅支持 cooling、permanent_disabled、expired 或 all")
+
+
+def missing_thinking_reason_label(value: Any) -> str:
+    key = str(value or "").strip()
+    if not key:
+        return MISSING_THINKING_REASON
+    return MISSING_THINKING_REASON_LABELS.get(key, key)
+
+
+def live_missing_thinking_account_id(record: dict[str, Any]) -> int:
+    for key in ("accountId", "account_id", "id"):
+        raw = record.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
+def missing_thinking_state_of(record: dict[str, Any]) -> str:
+    value = str(record.get("state") or "").strip().lower()
+    return value if value in MISSING_THINKING_STATES else "enabled"
 
 
 def compute_cooldown_stats(
@@ -395,6 +443,155 @@ def build_missing_thinking_cooldown_item(
     payload["auditTps"] = None
     payload["nextAction"] = ""
     return payload
+
+
+def build_missing_thinking_cooldown_item_from_live(
+    record: dict[str, Any],
+    *,
+    quarantined: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or utc_now()
+    account_id = live_missing_thinking_account_id(record)
+    state = missing_thinking_state_of(record)
+    cooling = state in {"timed_disabled", "permanent_disabled"}
+    disable_until = parse_optional_datetime(record.get("disableUntil") or record.get("disable_until"))
+    first_detected = parse_optional_datetime(record.get("firstDetectedAt") or record.get("first_detected_at"))
+    last_detected = parse_optional_datetime(record.get("lastDetectedAt") or record.get("last_detected_at"))
+    disabled_at = parse_optional_datetime(record.get("disabledAt") or record.get("disabled_at"))
+    last_restored = parse_optional_datetime(record.get("lastRestoredAt") or record.get("last_restored_at"))
+    last_action_at = parse_optional_datetime(record.get("lastActionAt") or record.get("last_action_at"))
+    last_reason = str(record.get("lastReason") or record.get("last_reason") or "").strip()
+    started = first_detected or disabled_at or last_detected or current
+    expired_at = None if cooling else (last_restored or last_action_at)
+    minutes = 0
+    if disable_until is not None:
+        minutes = max(1, int((disable_until - started).total_seconds() / 60))
+    total_hits = max(_as_int(record.get("totalHits") or record.get("total_hits"), 0), 0)
+    last_action = str(record.get("lastAction") or record.get("last_action") or "").strip().lower()
+    verification = {
+        "account_id": account_id,
+        "action_status": "cooled" if cooling else "cooldown_expired",
+        "action_error": "",
+        "audit_upstream_id": str(record.get("lastRequestId") or record.get("last_request_id") or ""),
+        "audit_created_at": started,
+        "audit_tps": 0,
+        "checked_at": last_detected or current,
+        "egress_recommendation": {
+            "kind": MISSING_THINKING_KIND,
+            "type": MISSING_THINKING_KIND,
+            "label": MISSING_THINKING_LABEL,
+            "reason": missing_thinking_reason_label(last_reason),
+            "source": MISSING_THINKING_SOURCE,
+            "cooledAt": started,
+            "cooldownUntil": disable_until,
+            "expiredAt": expired_at,
+            "minutes": minutes,
+            "tpsStreak": 0,
+            "tpsMinCount": 0,
+            "disabledByCooldown": state == "permanent_disabled",
+            "releasedManually": last_action in {"enable", "restore", "manual_enable"},
+            "nextAction": "",
+            "riskReasons": [last_reason or MISSING_THINKING_ERROR],
+        },
+    }
+    payload = build_cooldown_zone_item(
+        account_id=account_id,
+        status=COOLING_STATUS if cooling else EXPIRED_STATUS,
+        verification=verification,
+        cooldown_count=total_hits,
+        upstream={
+            "id": account_id,
+            "name": str(record.get("accountName") or record.get("account_name") or f"账号 #{account_id}"),
+            "email": "",
+            "enabled": state == "enabled",
+        },
+        missing_upstream=state == "deleted",
+        quarantined=quarantined,
+        tps_min_count=0,
+        cooldown_minutes=minutes,
+        now=current,
+    )
+    payload["tpsStreak"] = None
+    payload["tpsMinCount"] = None
+    payload["maxTps"] = None
+    payload["auditTps"] = None
+    payload["nextAction"] = ""
+    if state == "timed_disabled":
+        payload["remainingSeconds"] = remaining_seconds(disable_until, now=current)
+    elif state == "permanent_disabled":
+        payload["remainingSeconds"] = None
+    else:
+        payload["remainingSeconds"] = 0
+    payload["grokState"] = state
+    payload["restorePending"] = bool(record.get("restorePending") or record.get("restore_pending"))
+    payload["hits1h"] = _as_int(record.get("hits1h") or record.get("hits_1h"), 0)
+    payload["hits24h"] = _as_int(record.get("hits24h") or record.get("hits_24h"), 0)
+    payload["hits7d"] = _as_int(record.get("hits7d") or record.get("hits_7d"), 0)
+    payload["lastDetectedAt"] = _iso(last_detected)
+    return payload
+
+
+def compute_missing_thinking_live_stats(
+    *,
+    totals: dict[str, Any] | None,
+    timed_disabled_items: list[dict[str, Any]] | None = None,
+    now: datetime | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or utc_now()
+    payload = totals if isinstance(totals, dict) else {}
+    timed_disabled = _as_int(payload.get("timedDisabled") or payload.get("timed_disabled"), 0)
+    permanent_disabled = _as_int(
+        payload.get("permanentDisabled") or payload.get("permanent_disabled"), 0
+    )
+    enabled = _as_int(payload.get("enabled"), 0)
+    deleted = _as_int(payload.get("deleted"), 0)
+    accounts = _as_int(payload.get("accounts"), 0)
+    hits = _as_int(payload.get("hits"), 0)
+    remaining_values: list[int] = []
+    expiring_soon = 0
+    for item in timed_disabled_items or []:
+        until = parse_optional_datetime(item.get("disableUntil") or item.get("disable_until"))
+        remaining = remaining_seconds(until, now=current)
+        remaining_values.append(remaining)
+        restore_pending = bool(item.get("restorePending") or item.get("restore_pending"))
+        if restore_pending or remaining <= EXPIRING_SOON_SECONDS:
+            expiring_soon += 1
+    range_start = start
+    range_end = end
+    if range_start is None or range_end is None:
+        range_start, range_end = resolve_stats_range("", "")
+    return {
+        "source": GROK2API_COOLDOWN_SOURCE,
+        "range": {
+            "from": app_isoformat(range_start),
+            "to": app_isoformat(range_end),
+        },
+        "policy": {
+            "minCount": 0,
+            "cooldownMinutes": 0,
+            "isolationEnabled": False,
+        },
+        "zone": {
+            "cooling": timed_disabled,
+            "expiringSoon": expiring_soon,
+            "disabledByCooldown": permanent_disabled,
+            "avgRemainingSeconds": (
+                int(round(sum(remaining_values) / len(remaining_values))) if remaining_values else None
+            ),
+        },
+        "events": {
+            "cooled": hits,
+            "uniqueAccounts": accounts,
+            "expired": enabled,
+            "released": enabled,
+            "isolatedAfter": deleted,
+        },
+        "trend": [],
+        "generatedAt": app_isoformat(current),
+    }
 
 
 def build_missing_thinking_cooldown_item_from_record(

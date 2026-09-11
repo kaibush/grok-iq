@@ -255,10 +255,6 @@ class Settings(BaseSettings):
     quality_retry_isolation_interval_seconds: int = Field(
         default=60, ge=15, le=600
     )
-    missing_thinking_cooldown_sync_enabled: bool = True
-    missing_thinking_cooldown_sync_interval_seconds: int = Field(
-        default=60, ge=15, le=600
-    )
     quarantine_minutes: int = Field(default=30, ge=1, le=7 * 24 * 60)
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -371,8 +367,6 @@ class Settings(BaseSettings):
         "auto_isolation_min_status",
         "quality_retry_isolation_enabled",
         "quality_retry_isolation_interval_seconds",
-        "missing_thinking_cooldown_sync_enabled",
-        "missing_thinking_cooldown_sync_interval_seconds",
         "quarantine_minutes",
     )
     SECRET_RUNTIME_FIELDS: ClassVar[frozenset[str]] = frozenset(

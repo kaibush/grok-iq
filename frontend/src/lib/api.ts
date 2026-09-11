@@ -56,9 +56,7 @@ export type PublicClientKeyQuota = {
   usagePercent: number
 }
 
-export type PublicClientKeyQuotaLookup =
-  | { found: false }
-  | PublicClientKeyQuota
+export type PublicClientKeyQuotaLookup = { found: false } | PublicClientKeyQuota
 
 export type ClientKeyUsagePeriod = '24h' | '7d' | '30d' | '90d' | 'custom'
 
@@ -323,9 +321,7 @@ export type PublicClientKeyUsage = {
   usage: ClientKeyUsageTotals
 }
 
-export type PublicClientKeyUsageLookup =
-  | { found: false }
-  | PublicClientKeyUsage
+export type PublicClientKeyUsageLookup = { found: false } | PublicClientKeyUsage
 
 export type AuthSession = {
   accessToken: string
@@ -376,7 +372,10 @@ export type SystemVersionInfo = {
 export type SsoReportStatus = 'queued' | 'running' | 'completed' | 'failed'
 
 export type RegisterWebhookEventStatus =
-  'pending' | 'processing' | 'completed' | 'failed'
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
 
 export type RegisterPriorityHoldStatus =
   | 'none'
@@ -514,7 +513,8 @@ export type AccountSsoReportResult = SsoReportDetail & {
 }
 
 export type AuthenticationRequiredCode =
-  'authentication_required' | 'setup_required'
+  | 'authentication_required'
+  | 'setup_required'
 export const AUTH_REQUIRED_EVENT = 'grokiq-auth-required'
 const AUTH_REQUIRED_CODES = new Set<AuthenticationRequiredCode>([
   'authentication_required',
@@ -637,8 +637,19 @@ export type CooldownAccount = {
   cooledAt?: string | null
   cooldownUntil?: string | null
   expiredAt?: string | null
-  remainingSeconds?: number
+  remainingSeconds?: number | null
   cooldownMinutes?: number
+  grokState?:
+    | 'enabled'
+    | 'timed_disabled'
+    | 'permanent_disabled'
+    | 'deleted'
+    | string
+  restorePending?: boolean
+  hits1h?: number
+  hits24h?: number
+  hits7d?: number
+  lastDetectedAt?: string | null
   tpsStreak?: number
   tpsMinCount?: number
   maxTps?: number
@@ -935,7 +946,14 @@ export type EgressAccountDistributionResult = {
 
 export type RequestAuditRiskLevel = 'normal' | 'watch' | 'high'
 export type RequestAuditWindowPreset =
-  'today' | '1h' | '3h' | '6h' | '24h' | '7d' | '30d' | 'custom'
+  | 'today'
+  | '1h'
+  | '3h'
+  | '6h'
+  | '24h'
+  | '7d'
+  | '30d'
+  | 'custom'
 
 export type RequestAuditWindow = {
   preset: RequestAuditWindowPreset
@@ -1883,7 +1901,13 @@ export type ProbeTpsOverrideMode =
 
 export type TpsFuseSyncStatus = {
   ok: boolean
-  status?: 'idle' | 'synced' | 'failed' | 'drift_pushed' | 'skipped' | 'unsupported'
+  status?:
+    | 'idle'
+    | 'synced'
+    | 'failed'
+    | 'drift_pushed'
+    | 'skipped'
+    | 'unsupported'
   error?: string
 }
 
@@ -1996,8 +2020,6 @@ export type RuntimeSettings = {
   autoIsolationMinStatus: AutoIsolationMinStatus
   qualityRetryIsolationEnabled: boolean
   qualityRetryIsolationIntervalSeconds: number
-  missingThinkingCooldownSyncEnabled: boolean
-  missingThinkingCooldownSyncIntervalSeconds: number
   quarantineMinutes: number
   bootstrap: {
     host: string
@@ -2128,8 +2150,6 @@ export type RuntimeSettingsUpdate = Partial<
     | 'autoIsolationMinStatus'
     | 'qualityRetryIsolationEnabled'
     | 'qualityRetryIsolationIntervalSeconds'
-    | 'missingThinkingCooldownSyncEnabled'
-    | 'missingThinkingCooldownSyncIntervalSeconds'
     | 'quarantineMinutes'
   >
 > & {
@@ -2184,8 +2204,6 @@ type RuntimeSettingsWire = Omit<
   | 'autoIsolationMinStatus'
   | 'qualityRetryIsolationEnabled'
   | 'qualityRetryIsolationIntervalSeconds'
-  | 'missingThinkingCooldownSyncEnabled'
-  | 'missingThinkingCooldownSyncIntervalSeconds'
   | 'requestAuditEnabled'
   | 'requestAuditAutoScanEnabled'
   | 'requestAuditAdaptiveScanEnabled'
@@ -2253,8 +2271,6 @@ type RuntimeSettingsWire = Omit<
   autoIsolationMinStatus?: AutoIsolationMinStatus
   qualityRetryIsolationEnabled?: boolean
   qualityRetryIsolationIntervalSeconds?: number
-  missingThinkingCooldownSyncEnabled?: boolean
-  missingThinkingCooldownSyncIntervalSeconds?: number
   requestAuditEnabled?: boolean
   requestAuditAutoScanEnabled?: boolean
   requestAuditAdaptiveScanEnabled?: boolean
@@ -2278,7 +2294,6 @@ type RuntimeSettingsWire = Omit<
   requestAuditIsolationEnabled?: boolean
   requestAuditRetentionDays?: number
 }
-
 
 function normalizeAutoIsolationMinStatus(
   value: unknown
@@ -2417,10 +2432,6 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     qualityRetryIsolationEnabled: value.qualityRetryIsolationEnabled ?? false,
     qualityRetryIsolationIntervalSeconds:
       value.qualityRetryIsolationIntervalSeconds ?? 60,
-    missingThinkingCooldownSyncEnabled:
-      value.missingThinkingCooldownSyncEnabled ?? true,
-    missingThinkingCooldownSyncIntervalSeconds:
-      value.missingThinkingCooldownSyncIntervalSeconds ?? 60,
     scheduledProbeRegisterCooldownMinutes:
       value.scheduledProbeRegisterCooldownMinutes ?? 360,
     requestAuditEnabled: value.requestAuditEnabled ?? true,
@@ -2465,16 +2476,19 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     wechatKeyQualityEnabled: value.wechatKeyQualityEnabled ?? false,
     wechatKeyQualityThreshold: value.wechatKeyQualityThreshold ?? 90,
     wechatKeyQualityMinRequests: value.wechatKeyQualityMinRequests ?? 20,
-    wechatKeyQualityCooldownMinutes: value.wechatKeyQualityCooldownMinutes ?? 30,
+    wechatKeyQualityCooldownMinutes:
+      value.wechatKeyQualityCooldownMinutes ?? 30,
     wechatKeyQualityKeys: Array.isArray(value.wechatKeyQualityKeys)
       ? value.wechatKeyQualityKeys
       : [],
-    wechatUpstreamHealth15mEnabled: value.wechatUpstreamHealth15mEnabled ?? false,
+    wechatUpstreamHealth15mEnabled:
+      value.wechatUpstreamHealth15mEnabled ?? false,
     wechatUpstreamHealth15mThreshold:
       value.wechatUpstreamHealth15mThreshold ?? 80,
     wechatUpstreamHealth15mMinRequests:
       value.wechatUpstreamHealth15mMinRequests ?? 10,
-    wechatUpstreamHealth30mEnabled: value.wechatUpstreamHealth30mEnabled ?? false,
+    wechatUpstreamHealth30mEnabled:
+      value.wechatUpstreamHealth30mEnabled ?? false,
     wechatUpstreamHealth30mThreshold:
       value.wechatUpstreamHealth30mThreshold ?? 80,
     wechatUpstreamHealth30mMinRequests:
@@ -3111,9 +3125,7 @@ async function accountBatchAction(body: {
               account_ids: accountBatch,
               action: body.action,
               ...(body.note ? { note: body.note } : {}),
-              ...(body.propagate != null
-                ? { propagate: body.propagate }
-                : {}),
+              ...(body.propagate != null ? { propagate: body.propagate } : {}),
               ...(body.quarantine_minutes != null
                 ? { quarantine_minutes: body.quarantine_minutes }
                 : {}),
@@ -3494,7 +3506,10 @@ export const api = {
         referrer: body.referrer || '',
       }),
     }),
-  publicPageStats: (params?: { period?: PublicVisitPeriod; timezone?: string }) =>
+  publicPageStats: (params?: {
+    period?: PublicVisitPeriod
+    timezone?: string
+  }) =>
     request<PublicVisitOverview>(
       `/public/page-stats${query({
         period: params?.period,
@@ -3502,7 +3517,10 @@ export const api = {
       })}`,
       { skipAuth: true }
     ),
-  adminPageStats: (params?: { period?: PublicVisitPeriod; timezone?: string }) =>
+  adminPageStats: (params?: {
+    period?: PublicVisitPeriod
+    timezone?: string
+  }) =>
     request<AdminVisitDetails>(
       `/page-stats${query({
         period: params?.period,
@@ -3768,20 +3786,14 @@ export const api = {
     request<EgressNodeProbeResult>(`/egress-nodes/${nodeId}/test`, {
       method: 'POST',
     }),
-  distributeAccountsToEgress: (
-    nodeIds: number[],
-    accountsPerNode: number
-  ) =>
-    request<EgressAccountDistributionResult>(
-      '/egress-nodes/bind-accounts',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          node_ids: nodeIds,
-          accountsPerNode,
-        }),
-      }
-    ),
+  distributeAccountsToEgress: (nodeIds: number[], accountsPerNode: number) =>
+    request<EgressAccountDistributionResult>('/egress-nodes/bind-accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        node_ids: nodeIds,
+        accountsPerNode,
+      }),
+    }),
   profiles: () => request<ProbeProfile[]>('/probe-profiles'),
   createProfile: (body: Record<string, unknown>) =>
     request<{ id: string }>('/probe-profiles', {

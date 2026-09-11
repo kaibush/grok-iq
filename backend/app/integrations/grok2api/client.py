@@ -483,6 +483,23 @@ class Grok2APIClient:
         query = {"provider": "grok_build", "page": 1, "pageSize": 50} | params
         return await self.admin_request("GET", "/api/admin/v1/accounts", params=query)
 
+    async def list_missing_thinking(self, **params: Any) -> dict[str, Any]:
+        query = {
+            "page": 1,
+            "pageSize": 20,
+            "search": "",
+            "provider": "",
+            "state": "",
+            "sortBy": "lastDetectedAt",
+            "sortOrder": "desc",
+        } | params
+        payload = await self.admin_request(
+            "GET",
+            "/api/admin/v1/accounts/missing-thinking",
+            params=query,
+        )
+        return payload if isinstance(payload, dict) else {}
+
     async def list_all_accounts(
         self,
         account_ids: set[int] | None = None,

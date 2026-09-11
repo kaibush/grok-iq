@@ -638,15 +638,6 @@ class RuntimeSettingsInput(BaseModel):
         ge=15,
         le=600,
     )
-    missing_thinking_cooldown_sync_enabled: bool | None = Field(
-        default=None, alias="missingThinkingCooldownSyncEnabled"
-    )
-    missing_thinking_cooldown_sync_interval_seconds: int | None = Field(
-        default=None,
-        alias="missingThinkingCooldownSyncIntervalSeconds",
-        ge=15,
-        le=600,
-    )
     quarantine_minutes: int | None = Field(default=None, alias="quarantineMinutes", ge=1, le=7 * 24 * 60)
     clear_secrets: list[SecretSettingName] = Field(default_factory=list, alias="clearSecrets")
 

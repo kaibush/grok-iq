@@ -113,8 +113,6 @@ export type SettingsForm = {
   autoIsolationMinStatus: AutoIsolationMinStatus
   qualityRetryIsolationEnabled: boolean
   qualityRetryIsolationIntervalSeconds: number
-  missingThinkingCooldownSyncEnabled: boolean
-  missingThinkingCooldownSyncIntervalSeconds: number
   quarantineMinutes: number
 }
 
@@ -398,26 +396,35 @@ export function toSettingsForm(
     registerPriorityHold: settings.registerPriorityHold ?? -1_000_000,
     registerCallbackEnabled: settings.registerCallbackEnabled ?? false,
     registerCallbackUrl: settings.registerCallbackUrl ?? '',
-    registerCallbackTimeoutSeconds: settings.registerCallbackTimeoutSeconds ?? 10,
+    registerCallbackTimeoutSeconds:
+      settings.registerCallbackTimeoutSeconds ?? 10,
     wechatNotificationEnabled: settings.wechatNotificationEnabled,
     wechatAppId: settings.wechatAppId,
     wechatAppSecret: settings.wechatAppSecret,
     wechatOpenid: settings.wechatOpenid,
     wechatTemplateId: settings.wechatTemplateId,
     wechatKeyQualityTemplateId: settings.wechatKeyQualityTemplateId ?? '',
-    wechatUpstreamHealthTemplateId: settings.wechatUpstreamHealthTemplateId ?? '',
+    wechatUpstreamHealthTemplateId:
+      settings.wechatUpstreamHealthTemplateId ?? '',
     wechatAccountAlertEnabled: settings.wechatAccountAlertEnabled ?? false,
     wechatKeyQualityEnabled: settings.wechatKeyQualityEnabled ?? false,
     wechatKeyQualityThreshold: settings.wechatKeyQualityThreshold ?? 90,
     wechatKeyQualityMinRequests: settings.wechatKeyQualityMinRequests ?? 20,
-    wechatKeyQualityCooldownMinutes: settings.wechatKeyQualityCooldownMinutes ?? 30,
-    wechatKeyQualityKeys: normalizeWechatAlertKeys(settings.wechatKeyQualityKeys),
-    wechatUpstreamHealth15mEnabled: settings.wechatUpstreamHealth15mEnabled ?? false,
-    wechatUpstreamHealth15mThreshold: settings.wechatUpstreamHealth15mThreshold ?? 80,
+    wechatKeyQualityCooldownMinutes:
+      settings.wechatKeyQualityCooldownMinutes ?? 30,
+    wechatKeyQualityKeys: normalizeWechatAlertKeys(
+      settings.wechatKeyQualityKeys
+    ),
+    wechatUpstreamHealth15mEnabled:
+      settings.wechatUpstreamHealth15mEnabled ?? false,
+    wechatUpstreamHealth15mThreshold:
+      settings.wechatUpstreamHealth15mThreshold ?? 80,
     wechatUpstreamHealth15mMinRequests:
       settings.wechatUpstreamHealth15mMinRequests ?? 10,
-    wechatUpstreamHealth30mEnabled: settings.wechatUpstreamHealth30mEnabled ?? false,
-    wechatUpstreamHealth30mThreshold: settings.wechatUpstreamHealth30mThreshold ?? 80,
+    wechatUpstreamHealth30mEnabled:
+      settings.wechatUpstreamHealth30mEnabled ?? false,
+    wechatUpstreamHealth30mThreshold:
+      settings.wechatUpstreamHealth30mThreshold ?? 80,
     wechatUpstreamHealth30mMinRequests:
       settings.wechatUpstreamHealth30mMinRequests ?? 20,
     wechatUpstreamHealthCooldownMinutes:
@@ -453,8 +460,7 @@ export function toSettingsForm(
       settings.requestAuditLiveRefreshSeconds ?? 30,
     requestAuditRetentionDays: settings.requestAuditRetentionDays ?? 90,
     requestAuditRiskEnabled: settings.requestAuditRiskEnabled ?? true,
-    requestAuditIsolationEnabled:
-      settings.requestAuditIsolationEnabled ?? true,
+    requestAuditIsolationEnabled: settings.requestAuditIsolationEnabled ?? true,
     reasoningZeroRiskEnabled: settings.reasoningZeroRiskEnabled ?? true,
     reasoningModelPolicies: (settings.reasoningModelPolicies ?? []).map(
       (policy) => ({
@@ -521,10 +527,6 @@ export function toSettingsForm(
       settings.qualityRetryIsolationEnabled ?? false,
     qualityRetryIsolationIntervalSeconds:
       settings.qualityRetryIsolationIntervalSeconds ?? 60,
-    missingThinkingCooldownSyncEnabled:
-      settings.missingThinkingCooldownSyncEnabled ?? true,
-    missingThinkingCooldownSyncIntervalSeconds:
-      settings.missingThinkingCooldownSyncIntervalSeconds ?? 60,
     quarantineMinutes: settings.quarantineMinutes,
   }
 }
@@ -573,7 +575,8 @@ export function buildSettingsPayload(
     wechatUpstreamHealth30mEnabled: form.wechatUpstreamHealth30mEnabled,
     wechatUpstreamHealth30mThreshold: form.wechatUpstreamHealth30mThreshold,
     wechatUpstreamHealth30mMinRequests: form.wechatUpstreamHealth30mMinRequests,
-    wechatUpstreamHealthCooldownMinutes: form.wechatUpstreamHealthCooldownMinutes,
+    wechatUpstreamHealthCooldownMinutes:
+      form.wechatUpstreamHealthCooldownMinutes,
     probeWorkerConcurrency: form.probeWorkerConcurrency,
     probeQueueLimit: form.probeQueueLimit,
     probeStepDelaySeconds: form.probeStepDelaySeconds,
@@ -593,8 +596,7 @@ export function buildSettingsPayload(
       form.requestAuditNormalScanIntervalSeconds,
     requestAuditIdleScanIntervalSeconds:
       form.requestAuditIdleScanIntervalSeconds,
-    requestAuditBusyRequestsPerMinute:
-      form.requestAuditBusyRequestsPerMinute,
+    requestAuditBusyRequestsPerMinute: form.requestAuditBusyRequestsPerMinute,
     requestAuditLiveRefreshEnabled: form.requestAuditLiveRefreshEnabled,
     requestAuditLiveRefreshSeconds: form.requestAuditLiveRefreshSeconds,
     requestAuditRetentionDays: form.requestAuditRetentionDays,
@@ -642,9 +644,6 @@ export function buildSettingsPayload(
     qualityRetryIsolationEnabled: form.qualityRetryIsolationEnabled,
     qualityRetryIsolationIntervalSeconds:
       form.qualityRetryIsolationIntervalSeconds,
-    missingThinkingCooldownSyncEnabled: form.missingThinkingCooldownSyncEnabled,
-    missingThinkingCooldownSyncIntervalSeconds:
-      form.missingThinkingCooldownSyncIntervalSeconds,
     quarantineMinutes: form.quarantineMinutes,
     clearSecrets,
   }
@@ -762,11 +761,13 @@ export function validateSettings(form: SettingsForm) {
   if (form.degradationTps >= form.strongDegradationTps) {
     throw new Error('降智信号 TPS 下限必须小于强降智信号 TPS 下限')
   }
-  if (!(
-    form.riskWatchFloor <= form.riskSuspectFloor &&
-    form.riskSuspectFloor <= form.riskHighFloor &&
-    form.riskHighFloor <= form.riskScoreCap
-  )) {
+  if (
+    !(
+      form.riskWatchFloor <= form.riskSuspectFloor &&
+      form.riskSuspectFloor <= form.riskHighFloor &&
+      form.riskHighFloor <= form.riskScoreCap
+    )
+  ) {
     throw new Error('风险状态保底分必须满足观察 ≤ 疑似 ≤ 高风险 ≤ 总分上限')
   }
   const scoreFactors = [

@@ -5,7 +5,16 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Loader2, Play, PowerOff, RefreshCw, Search, ShieldBan, Timer, TimerOff } from 'lucide-react'
+import {
+  Loader2,
+  Play,
+  PowerOff,
+  RefreshCw,
+  Search,
+  ShieldBan,
+  Timer,
+  TimerOff,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
@@ -79,7 +88,7 @@ import {
   type ResultPreviewItem,
 } from '@/features/monitor/components/result-preview-gallery'
 
-type CooldownStatusFilter = 'cooling' | 'expired' | 'all'
+type CooldownStatusFilter = 'cooling' | 'expired' | 'all' | 'permanent_disabled'
 type CooldownSourceFilter = 'local' | 'grok2api'
 
 const COOLDOWN_VIEW_STORAGE_KEY = 'grokiq.monitor.cooldown-view.v2'
@@ -91,16 +100,35 @@ const defaultCooldownView = {
   source: 'local' as CooldownSourceFilter,
 }
 
-const statusOptions: Array<{ value: CooldownStatusFilter; label: string }> = [
+const localStatusOptions: Array<{
+  value: CooldownStatusFilter
+  label: string
+}> = [
   { value: 'cooling', label: '冷却中' },
   { value: 'expired', label: '已结束' },
   { value: 'all', label: '全部' },
 ]
 
-const statusLabels: Record<CooldownStatusFilter, string> = {
+const grokStatusOptions: Array<{ value: CooldownStatusFilter; label: string }> =
+  [
+    { value: 'cooling', label: '定时停用' },
+    { value: 'permanent_disabled', label: '永久停用' },
+    { value: 'expired', label: '已启用' },
+    { value: 'all', label: '全部' },
+  ]
+
+const localStatusLabels: Record<CooldownStatusFilter, string> = {
   cooling: '冷却中',
   expired: '已结束',
   all: '全部状态',
+  permanent_disabled: '永久停用',
+}
+
+const grokStatusLabels: Record<CooldownStatusFilter, string> = {
+  cooling: '定时停用',
+  expired: '已启用',
+  all: '全部状态',
+  permanent_disabled: '永久停用',
 }
 
 const sourceLabels: Record<CooldownSourceFilter, string> = {
@@ -108,12 +136,39 @@ const sourceLabels: Record<CooldownSourceFilter, string> = {
   grok2api: '上游同步',
 }
 
-function normalizeCooldownSource(value: string | undefined): CooldownSourceFilter {
+function normalizeCooldownSource(
+  value: string | undefined
+): CooldownSourceFilter {
   return value === 'grok2api' ? 'grok2api' : 'local'
+}
+
+function normalizeCooldownStatus(
+  value: string | undefined,
+  grokSource: boolean
+): CooldownStatusFilter {
+  if (value === 'cooling' || value === 'expired' || value === 'all')
+    return value
+  if (grokSource && value === 'permanent_disabled') return value
+  return 'cooling'
 }
 
 function canReleaseCooldown(account: CooldownAccount) {
   return account.status === 'cooling' && !account.quarantined
+}
+
+function grokStateLabel(account: CooldownAccount) {
+  switch (account.grokState) {
+    case 'timed_disabled':
+      return '定时停用'
+    case 'permanent_disabled':
+      return '永久停用'
+    case 'enabled':
+      return '已启用'
+    case 'deleted':
+      return '已删除'
+    default:
+      return account.status === 'cooling' ? '定时停用' : '已启用'
+  }
 }
 
 function canSelectCooldownAccount(
@@ -194,9 +249,10 @@ export function CooldownPage() {
     COOLDOWN_STATS_VIEW_KEY,
     defaultCooldownStatsView
   )
-  const { page, pageSize, search, status = 'cooling' } = view.value
+  const { page, pageSize, search } = view.value
   const source = normalizeCooldownSource(view.value.source)
   const grokSource = source === 'grok2api'
+  const status = normalizeCooldownStatus(view.value.status, grokSource)
   const updateView = (patch: Partial<typeof defaultCooldownView>) =>
     view.setValue((current) => ({ ...current, ...patch }))
   const statsRange = useMemo(
@@ -205,7 +261,7 @@ export function CooldownPage() {
   )
   const statsRangeLabel = cooldownStatsRangeLabel(statsView.value)
   const historyRange =
-    status === 'cooling'
+    grokSource || status === 'cooling'
       ? {}
       : {
           from: statsRange.from || undefined,
@@ -465,11 +521,12 @@ export function CooldownPage() {
     selectableIds.length > 0 &&
     selectableIds.every((id) => selectedIdSet.has(id))
   const hasActiveFilters = status !== 'cooling' || Boolean(search.trim())
+  const statusLabels = grokSource ? grokStatusLabels : localStatusLabels
   const viewSummary = [
     sourceLabels[source],
     search.trim() ? `搜索“${search.trim()}”` : '',
     statusLabels[status],
-    status === 'cooling' ? '' : statsRangeLabel,
+    grokSource || status === 'cooling' ? '' : statsRangeLabel,
     `第 ${page} 页 · 每页 ${pageSize} 条`,
   ]
     .filter(Boolean)
@@ -696,7 +753,7 @@ export function CooldownPage() {
           <div className='space-y-2'>
             <p>
               {grokSource
-                ? '上游同步只显示后台定时任务写入数据库的 grok2api 缺思考冷却。解除冷却会清除上游冷却，不会改启用状态；停用全部只改上游启用，不会移入隔离区。'
+                ? '上游同步实时读取 grok2api 缺思考记录。定时停用到期后由 grok2api 自动恢复；永久停用需手动启用。解除冷却会立即启用上游账号。停用全部只改上游启用，不会移入隔离区。'
                 : '本系统冷却来自请求审计高速 TPS。连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。冷却结束后如果再次连续高速 TPS，才会永久停用并移入隔离区。'}
             </p>
           </div>
@@ -791,7 +848,13 @@ export function CooldownPage() {
           setDisableIds([])
           setIsolateOpen(false)
           setIsolateIds([])
-          updateView({ source: next, page: 1 })
+          updateView({
+            source: next,
+            page: 1,
+            ...(next === 'local' && status === 'permanent_disabled'
+              ? { status: 'cooling' }
+              : {}),
+          })
         }}
         className='gap-3'
       >
@@ -816,7 +879,7 @@ export function CooldownPage() {
                 ariaLabel='冷却状态'
                 value={status}
                 onChange={(next) => updateView({ status: next, page: 1 })}
-                options={statusOptions}
+                options={grokSource ? grokStatusOptions : localStatusOptions}
               />
               <div className='relative min-w-0 flex-1'>
                 <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
@@ -827,7 +890,7 @@ export function CooldownPage() {
                   }
                   placeholder={
                     grokSource
-                      ? '搜索名称、邮箱、账号 ID'
+                      ? '搜索名称、账号 ID'
                       : '搜索名称、邮箱、账号 ID、请求 ID'
                   }
                   className='h-8 pr-8 pl-8'
@@ -837,7 +900,7 @@ export function CooldownPage() {
                 )}
               </div>
             </div>
-            {status !== 'cooling' ? (
+            {!grokSource && status !== 'cooling' ? (
               <p className='text-[11px] text-muted-foreground'>
                 已结束记录按看板时间范围筛选：{statsRangeLabel}
               </p>
@@ -915,17 +978,29 @@ export function CooldownPage() {
             <EmptyState
               icon={Timer}
               title={
-                hasActiveFilters ? '没有匹配的冷却记录' : '当前没有冷却中的账号'
+                hasActiveFilters
+                  ? '没有匹配的冷却记录'
+                  : grokSource
+                    ? '当前没有定时停用的账号'
+                    : '当前没有冷却中的账号'
               }
               description={
-                status === 'expired'
-                  ? `看板时间范围「${statsRangeLabel}」内没有已结束的冷却记录，请扩大时间范围后重试。`
-                  : status === 'all'
-                    ? `看板时间范围「${statsRangeLabel}」内没有冷却记录，请扩大时间范围或改回「冷却中」。`
-                    : hasActiveFilters
-                      ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
-                      : grokSource
-                        ? '后台定时任务会把 grok2api 缺思考冷却写入这里。当前没有同步到的冷却账号。'
+                grokSource
+                  ? status === 'expired'
+                    ? '当前没有已重新启用的缺思考账号。'
+                    : status === 'permanent_disabled'
+                      ? '当前没有永久停用的缺思考账号。'
+                      : status === 'all'
+                        ? '当前没有 grok2api 缺思考记录。'
+                        : hasActiveFilters
+                          ? '没有匹配当前筛选的缺思考记录，请调整条件后重试。'
+                          : '实时读取 grok2api 缺思考记录。当前没有定时停用的账号。'
+                  : status === 'expired'
+                    ? `看板时间范围「${statsRangeLabel}」内没有已结束的冷却记录，请扩大时间范围后重试。`
+                    : status === 'all'
+                      ? `看板时间范围「${statsRangeLabel}」内没有冷却记录，请扩大时间范围或改回「冷却中」。`
+                      : hasActiveFilters
+                        ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
                         : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。已结束的记录请切换到「已结束」，并确认上方看板时间范围覆盖冷却发生的时间。'
               }
               action={
@@ -934,7 +1009,7 @@ export function CooldownPage() {
                     variant='outline'
                     onClick={() => updateView({ status: 'expired', page: 1 })}
                   >
-                    查看已结束
+                    {grokSource ? '查看已启用' : '查看已结束'}
                   </Button>
                 )
               }
@@ -966,7 +1041,7 @@ export function CooldownPage() {
           <div className='space-y-2'>
             <p>
               {grokSource
-                ? `将调用 grok2api 解除 ${releaseIds.length} 个账号的降智冷却。这会清除上游冷却，不会改启用状态。已进入隔离区或不在冷却中的账号会跳过。`
+                ? `将通过 grok2api 立即启用所选 ${releaseIds.length} 个账号，解除缺思考停用。已进入隔离区、已启用或已删除的账号会跳过。`
                 : `将提前结束 ${releaseIds.length} 个账号的冷却并恢复调度。若冷却期间是本系统停用的上游，会重新启用。已进入隔离区的账号会跳过。`}
             </p>
           </div>
@@ -1194,9 +1269,7 @@ function CooldownTable({
               disabled={selectDisabled}
               onCheckedChange={(value) => onToggleCurrentPage(value === true)}
               aria-label={
-                grokSource
-                  ? '选择当前页账号'
-                  : '选择当前页可提前结束的冷却账号'
+                grokSource ? '选择当前页账号' : '选择当前页可提前结束的冷却账号'
               }
             />
           </TableHead>
@@ -1307,6 +1380,11 @@ function CooldownRow({
                   即将结束
                 </Badge>
               ) : null}
+              {grokSource && account.restorePending ? (
+                <Badge variant='warning' className='h-5 px-1.5 text-[10px]'>
+                  即将恢复
+                </Badge>
+              ) : null}
               {!grokSource &&
               !account.quarantined &&
               account.status === 'expired' &&
@@ -1331,10 +1409,20 @@ function CooldownRow({
       </TableCell>
       <TableCell>
         <Badge
-          variant={account.status === 'cooling' ? 'warning' : 'secondary'}
+          variant={
+            account.grokState === 'deleted'
+              ? 'outline'
+              : account.status === 'cooling'
+                ? 'warning'
+                : 'secondary'
+          }
           className='h-5 px-1.5 text-[11px]'
         >
-          {account.status === 'cooling' ? '冷却中' : '已结束'}
+          {grokSource
+            ? grokStateLabel(account)
+            : account.status === 'cooling'
+              ? '冷却中'
+              : '已结束'}
         </Badge>
       </TableCell>
       <TableCell>
@@ -1365,8 +1453,12 @@ function CooldownRow({
         <TimeCell value={endedAt} />
       </TableCell>
       <TableCell>
-        {account.status === 'expired' ? (
-          <span className='text-muted-foreground'>已结束</span>
+        {account.grokState === 'permanent_disabled' ? (
+          <span className='text-muted-foreground'>永久</span>
+        ) : account.status === 'expired' ? (
+          <span className='text-muted-foreground'>
+            {grokSource ? '已启用' : '已结束'}
+          </span>
         ) : (
           <span
             className={cn(

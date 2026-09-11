@@ -14,7 +14,6 @@ import type { AutoIsolationMinStatus, TpsFuseSyncStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { NumericInput } from '@/components/numeric-input'
 import {
   Select,
   SelectContent,
@@ -25,6 +24,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { InfoTooltip } from '@/components/info-tooltip'
+import { NumericInput } from '@/components/numeric-input'
 import {
   Field,
   NumberField,
@@ -610,7 +610,8 @@ function AuditRulesPanel({
         <p className='text-xs leading-5 text-muted-foreground'>
           例如 <span className='font-mono text-foreground'>10</span> 会先于{' '}
           <span className='font-mono text-foreground'>100</span>{' '}
-          执行；它们只控制规则先后，不会给账号加分。思考连续信号由聚合阶段单独累计，因此不会被 TPS 主分类遮蔽。
+          执行；它们只控制规则先后，不会给账号加分。思考连续信号由聚合阶段单独累计，因此不会被
+          TPS 主分类遮蔽。
         </p>
         <div className='overflow-hidden rounded-xl border'>
           {form.riskRules.length ? (
@@ -639,7 +640,9 @@ function AuditRulesPanel({
                   >
                     <div className='min-w-0'>
                       <div className='flex flex-wrap items-center gap-2'>
-                        <span className='text-sm font-medium'>{rule.label}</span>
+                        <span className='text-sm font-medium'>
+                          {rule.label}
+                        </span>
                         <Badge variant='outline'>
                           顺序 {override?.priority ?? rule.priority}
                         </Badge>
@@ -859,30 +862,6 @@ function IsolationZonePanel({
                 suffix='秒'
                 onChange={(value) =>
                   set('qualityRetryIsolationIntervalSeconds', value)
-                }
-              />
-            </div>
-          ) : null}
-        </SettingListItem>
-        <SettingListItem
-          label='同步 grok2api 降智冷却'
-          description='开启后定期把 grok2api 因缺思考进入冷却的账号写入冷却区「上游同步」页。只读同步，不会停用上游。关闭后不再后台写入。'
-          checked={form.missingThinkingCooldownSyncEnabled}
-          onCheckedChange={(value) =>
-            set('missingThinkingCooldownSyncEnabled', value)
-          }
-        >
-          {form.missingThinkingCooldownSyncEnabled ? (
-            <div className='max-w-xs'>
-              <NumberField
-                label='同步间隔'
-                hint='15–600 秒。同步 grok2api 当前仍在降智冷却中的账号。'
-                value={form.missingThinkingCooldownSyncIntervalSeconds}
-                min={15}
-                max={600}
-                suffix='秒'
-                onChange={(value) =>
-                  set('missingThinkingCooldownSyncIntervalSeconds', value)
                 }
               />
             </div>
