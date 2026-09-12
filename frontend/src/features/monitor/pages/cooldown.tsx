@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import {
+  Images,
   Loader2,
   Play,
   PowerOff,
@@ -22,7 +23,6 @@ import {
   type CooldownAccount,
   type CooldownReleaseResult,
 } from '@/lib/api'
-import { hasAccountPreviewSamples } from '@/lib/preview-payload'
 import {
   cn,
   formatDate,
@@ -84,8 +84,8 @@ import {
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
 import {
   previewItemFromAccount,
+  previewItemsFromAccounts,
   ResultPreviewGallery,
-  type ResultPreviewItem,
 } from '@/features/monitor/components/result-preview-gallery'
 
 type CooldownStatusFilter = 'cooling' | 'expired' | 'all' | 'permanent_disabled'
@@ -301,10 +301,12 @@ export function CooldownPage() {
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [upstreamAccount, setUpstreamAccount] =
     useState<CooldownAccount | null>(null)
-  const [previewItems, setPreviewItems] = useState<ResultPreviewItem[] | null>(
-    null
-  )
-  const [previewIndex, setPreviewIndex] = useState(0)
+  const [resultPreview, setResultPreview] = useState<{
+    page: number
+    index: number
+    land?: 'start' | 'end'
+    accountId?: number
+  } | null>(null)
   const [sampleAccount, setSampleAccount] = useState<CooldownAccount | null>(
     null
   )
@@ -443,46 +445,106 @@ export function CooldownPage() {
   const openAccountLedger = useCallback((account: CooldownAccount) => {
     setLedgerAccount(account)
   }, [])
+  const previewPage = resultPreview?.page ?? tableQuery.page
+  const previewAccountsQuery = useQuery({
+    queryKey: [
+      'accounts',
+      'cooldowns',
+      'preview',
+      previewPage,
+      tableQuery.pageSize,
+      tableQuery.search,
+      tableQuery.status,
+      tableQuery.source,
+      tableQuery.from,
+      tableQuery.to,
+    ],
+    queryFn: ({ signal }) =>
+      api.cooldownAccounts(
+        {
+          page: previewPage,
+          pageSize: tableQuery.pageSize,
+          search: tableQuery.search,
+          status: tableQuery.status,
+          source: tableQuery.source,
+          ...(tableQuery.status === 'cooling'
+            ? {}
+            : {
+                from: tableQuery.from || undefined,
+                to: tableQuery.to || undefined,
+              }),
+        },
+        signal
+      ),
+    enabled: resultPreview != null && resultPreview.accountId == null,
+  })
+  const previewSource =
+    resultPreview && resultPreview.page === tableQuery.page && query.data
+      ? query.data
+      : previewAccountsQuery.data?.page === previewPage
+        ? previewAccountsQuery.data
+        : undefined
+  const scopedAccountId = resultPreview?.accountId
+  const previewItems = useMemo(() => {
+    const items = previewItemsFromAccounts(previewSource?.items ?? [])
+    if (scopedAccountId == null) return items
+    const matched = items.filter((item) => item.accountId === scopedAccountId)
+    if (matched.length) return matched
+    const account = (previewSource?.items ?? []).find(
+      (item) => Number(item.id) === scopedAccountId
+    )
+    return account ? [previewItemFromAccount(account)] : []
+  }, [previewSource?.items, scopedAccountId])
+  const previewTotal =
+    scopedAccountId != null
+      ? previewItems.length
+      : (previewSource?.total ?? query.data?.total ?? 0)
+  const previewPageCount =
+    scopedAccountId != null
+      ? 1
+      : Math.max(1, Math.ceil(previewTotal / Math.max(tableQuery.pageSize, 1)))
+  const previewPageLoading =
+    resultPreview != null &&
+    scopedAccountId == null &&
+    previewSource?.page !== resultPreview.page &&
+    previewAccountsQuery.isFetching
+  if (
+    resultPreview?.land &&
+    previewItems.length > 0 &&
+    previewSource?.page === resultPreview.page
+  ) {
+    const nextIndex = resultPreview.land === 'end' ? previewItems.length - 1 : 0
+    setResultPreview((current) => {
+      if (!current?.land || current.page !== resultPreview.page) return current
+      return { ...current, index: nextIndex, land: undefined }
+    })
+  }
   const openAccountPreview = useCallback(
-    async (account: CooldownAccount) => {
-      try {
-        const data = await client.fetchQuery({
-          queryKey: ['account', account.id],
-          queryFn: () => api.account(account.id),
-        })
-        let samplePage:
-          | { total?: number; items?: typeof data.history.samples }
-          | undefined
-        if (!hasAccountPreviewSamples(data)) {
-          samplePage = await client.fetchQuery({
-            queryKey: ['account-samples-preview-check', account.id],
-            queryFn: () =>
-              api.accountSamples(account.id, { page: 1, pageSize: 1 }),
-          })
-        }
-        if (!hasAccountPreviewSamples(data, samplePage)) {
-          toast.error('该账号没有可预览的样本')
-          return
-        }
-        setPreviewItems([
-          previewItemFromAccount(data.account, {
-            sampleCount:
-              data.account.assessment.sample_count ||
-              data.history.samples.length ||
-              samplePage?.total ||
-              0,
-            latestSampleAt:
-              data.account.assessment.latest_sample_at ||
-              data.history.samples[0]?.created_at ||
-              samplePage?.items?.[0]?.created_at,
-          }),
-        ])
-        setPreviewIndex(0)
-      } catch (error) {
-        toast.error(getErrorMessage(error))
+    (accountId?: number, required = false) => {
+      const items = previewItemsFromAccounts(accounts)
+      if (!items.length && !(query.data?.total ?? 0)) {
+        toast.error('当前筛选没有可预览的账号')
+        return
       }
+      const matchedIndex =
+        accountId == null
+          ? 0
+          : items.findIndex((item) => item.accountId === accountId)
+      if (accountId != null && matchedIndex < 0 && required) {
+        setResultPreview({
+          page,
+          index: 0,
+          accountId,
+        })
+        return
+      }
+      setResultPreview({
+        page,
+        index: required ? 0 : Math.max(0, matchedIndex),
+        accountId: required ? accountId : undefined,
+      })
     },
-    [client]
+    [accounts, page, query.data?.total]
   )
   const openProbeDialog = useCallback(
     (account: CooldownAccount) => {
@@ -848,6 +910,7 @@ export function CooldownPage() {
           setDisableIds([])
           setIsolateOpen(false)
           setIsolateIds([])
+          setResultPreview(null)
           updateView({
             source: next,
             page: 1,
@@ -875,6 +938,25 @@ export function CooldownPage() {
         toolbar={
           <div className='space-y-2' aria-busy={showTableLoading}>
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+              <Tabs
+                value={resultPreview ? 'preview' : 'list'}
+                className='shrink-0 gap-0'
+                onValueChange={(value) => {
+                  if (value === 'list') {
+                    setResultPreview(null)
+                    return
+                  }
+                  openAccountPreview()
+                }}
+              >
+                <TabsList className='h-8'>
+                  <TabsTrigger value='list'>列表</TabsTrigger>
+                  <TabsTrigger value='preview'>
+                    <Images className='size-3.5' />
+                    预览
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
               <SegmentedControl
                 ariaLabel='冷却状态'
                 value={status}
@@ -960,7 +1042,7 @@ export function CooldownPage() {
               onToggleAccount={toggleAccountSelection}
               onRelease={(account) => openRelease([account.id])}
               onOpenUpstream={openAccountUpstream}
-              onPreview={(account) => void openAccountPreview(account)}
+              onPreview={(account) => openAccountPreview(account.id, true)}
               onProbe={openProbeDialog}
               onOpenSamples={openAccountSamples}
               onOpenLedger={openAccountLedger}
@@ -1188,13 +1270,37 @@ export function CooldownPage() {
         }}
       />
       <ResultPreviewGallery
-        open={previewItems != null}
+        open={resultPreview != null}
         onOpenChange={(open) => {
-          if (!open) setPreviewItems(null)
+          if (!open) setResultPreview(null)
         }}
-        items={previewItems ?? []}
-        index={previewIndex}
-        onIndexChange={setPreviewIndex}
+        items={previewItems}
+        index={resultPreview?.index ?? 0}
+        onIndexChange={(index) =>
+          setResultPreview((current) =>
+            current ? { ...current, index } : current
+          )
+        }
+        page={scopedAccountId != null ? 1 : (resultPreview?.page ?? page)}
+        pageCount={previewPageCount}
+        total={previewTotal}
+        pageLoading={previewPageLoading}
+        onPageChange={
+          scopedAccountId == null
+            ? (nextPage, land) =>
+                setResultPreview((current) =>
+                  current
+                    ? {
+                        ...current,
+                        page: nextPage,
+                        land,
+                        index: 0,
+                        accountId: undefined,
+                      }
+                    : current
+                )
+            : undefined
+        }
         perspective='account'
       />
       <ProbeDialog

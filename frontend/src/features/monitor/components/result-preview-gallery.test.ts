@@ -95,6 +95,20 @@ describe('previewItemsFromAccounts', () => {
     expect(items[0]?.accountId).toBe(7111)
     expect(items[0]?.source).toBe('account')
   })
+
+  it('maps cooldown-listed accounts that do not include assessment', () => {
+    const items = previewItemsFromAccounts([
+      {
+        id: 8821,
+        name: 'cooldown-account',
+        email: 'cooldown@example.com',
+      },
+    ])
+    expect(items).toHaveLength(1)
+    expect(items[0]?.accountId).toBe(8821)
+    expect(items[0]?.accountName).toBe('cooldown-account')
+    expect(items[0]?.source).toBe('account')
+  })
 })
 
 describe('previewThumbColumns', () => {

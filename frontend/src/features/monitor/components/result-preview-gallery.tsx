@@ -174,21 +174,32 @@ export function previewItemsFromSamples(
     }))
 }
 
+export type PreviewableAccount = {
+  id: number | string
+  name?: string | null
+  email?: string | null
+  createdAt?: string | null
+  assessment?: {
+    sample_count?: number | null
+    latest_sample_at?: string | null
+  } | null
+}
+
 export function previewItemFromAccount(
-  account: UpstreamAccount,
+  account: PreviewableAccount,
   extras?: { sampleCount?: number; latestSampleAt?: string | null }
 ): ResultPreviewItem {
   const accountId = Number(account.id)
   const sampleCount =
-    extras?.sampleCount ?? account.assessment.sample_count ?? 0
+    extras?.sampleCount ?? account.assessment?.sample_count ?? 0
   return {
     id: String(accountId),
     runId: '',
     accountId,
     accountName: account.name || account.email || `账号 ${accountId}`,
-    accountEmail: account.email,
+    accountEmail: account.email ?? undefined,
     accountCreatedAt: account.createdAt,
-    createdAt: extras?.latestSampleAt ?? account.assessment.latest_sample_at,
+    createdAt: extras?.latestSampleAt ?? account.assessment?.latest_sample_at,
     rounds: sampleCount || undefined,
     completedSteps: sampleCount
       ? Math.min(sampleCount, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
@@ -198,7 +209,7 @@ export function previewItemFromAccount(
 }
 
 export function previewItemsFromAccounts(
-  accounts: UpstreamAccount[]
+  accounts: PreviewableAccount[]
 ): ResultPreviewItem[] {
   return accounts.map((account) => previewItemFromAccount(account))
 }
