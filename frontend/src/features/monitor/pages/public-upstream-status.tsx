@@ -550,8 +550,7 @@ function LinuxDoLoginWall({ configured }: { configured: boolean }) {
             需要 Linux.do 登录后才能查看状态页
           </h1>
           <p className='text-sm leading-6 text-muted-foreground'>
-            管理员已限制访客访问。请使用 Linux.do Connect 登录后再查看上游看板。
-            已登录的管理员账号可以直接查看，不受此限制。
+            当前状态页已限制访问。请使用 Linux.do Connect 登录后再查看上游看板。
           </p>
         </div>
         {configured ? (
