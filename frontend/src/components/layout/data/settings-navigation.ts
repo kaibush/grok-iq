@@ -39,7 +39,7 @@ export const settingsSections = [
     value: 'connection',
     href: '/settings/connection',
     title: '连接与凭据',
-    description: '上游地址、管理鉴权、HTTP 指纹和 SSO 检测代理。',
+    description: '上游地址、管理鉴权、HTTP 指纹、SSO 检测代理和状态页登录。',
     icon: PlugZap,
   },
   {

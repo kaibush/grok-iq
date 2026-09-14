@@ -1,17 +1,30 @@
 import {
+  BookOpen,
   CheckCircle2,
+  Copy,
   Database,
+  ExternalLink,
+  KeyRound,
   Link2,
+  LogIn,
   Network,
+  Power,
   ShieldAlert,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import type { RuntimeSettings, SecretSettingName } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
+import { getErrorMessage } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   Boundary,
   Field,
   SecretField,
+  SettingList,
+  SettingListItem,
   SettingsCard,
 } from './settings-components'
 import type { SettingsForm, SettingsSetter } from './settings-model'
@@ -30,6 +43,13 @@ export function SettingsConnectionTab({
   set: SettingsSetter
   toggleSecretClear: (name: SecretSettingName) => void
 }) {
+  const linuxdoOauthEnabled = form.statusLinuxdoOauthEnabled
+  const linuxdoOauthConfigured = settings.linuxdoOauthConfigured
+  const linuxdoCallbackUrl = new URL(
+    '/api/public/linuxdo/callback',
+    window.location.origin
+  ).toString()
+
   return (
     <div className='space-y-4'>
       <SettingsCard
@@ -71,6 +91,144 @@ export function SettingsConnectionTab({
             onChange={(value) => set('grok2apiAdminPassword', value)}
             onToggleClear={() => toggleSecretClear('grok2apiAdminPassword')}
           />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        icon={LogIn}
+        title='状态页 Linux.do 登录'
+        description='默认关闭时 /status 仍可公开访问。打开后访客需先用 Linux.do Connect 登录才能查看看板；已登录管理员不受影响。'
+      >
+        <div className='space-y-4'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Badge variant={linuxdoOauthEnabled ? 'success' : 'secondary'}>
+              <Power />
+              {linuxdoOauthEnabled ? '已启用登录' : '状态页公开'}
+            </Badge>
+            <Badge
+              variant={
+                linuxdoOauthConfigured
+                  ? 'success'
+                  : linuxdoOauthEnabled
+                    ? 'warning'
+                    : 'secondary'
+              }
+            >
+              <KeyRound />
+              {linuxdoOauthConfigured ? '凭据已配置' : '凭据未配置'}
+            </Badge>
+          </div>
+
+          <div className='grid gap-2 md:grid-cols-2'>
+            <a
+              href='https://connect.linux.do/'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='group flex min-w-0 items-center gap-3 rounded-xl border bg-muted/15 p-3.5 transition-colors hover:border-primary/30 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+              aria-label='在新标签页打开 Linux.do Connect'
+            >
+              <div className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background'>
+                <LogIn className='size-4' />
+              </div>
+              <div className='min-w-0 flex-1'>
+                <div className='text-sm font-medium'>Linux.do Connect</div>
+                <div className='mt-0.5 truncate text-xs text-muted-foreground'>
+                  connect.linux.do
+                </div>
+              </div>
+              <ExternalLink className='size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground' />
+            </a>
+            <a
+              href='https://wiki.linux.do/Community/LinuxDoConnect'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='group flex min-w-0 items-center gap-3 rounded-xl border bg-muted/15 p-3.5 transition-colors hover:border-primary/30 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+              aria-label='在新标签页打开 Linux.do Connect 接入文档'
+            >
+              <div className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background'>
+                <BookOpen className='size-4' />
+              </div>
+              <div className='min-w-0 flex-1'>
+                <div className='text-sm font-medium'>查看接入文档</div>
+                <div className='mt-0.5 truncate text-xs text-muted-foreground'>
+                  wiki.linux.do/Community/LinuxDoConnect
+                </div>
+              </div>
+              <ExternalLink className='size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground' />
+            </a>
+          </div>
+
+          <SettingList>
+            <SettingListItem
+              label='启用 Linux.do 登录'
+              description='/status 默认公开。打开后访客必须先用 Linux.do Connect 登录才能查看；已登录管理员不受影响。关闭后立即恢复公开访问。即使尚未填写 Client ID/Secret 也可以打开开关，但登录会失败直到配置完成。'
+              checked={form.statusLinuxdoOauthEnabled}
+              onCheckedChange={(value) =>
+                set('statusLinuxdoOauthEnabled', value)
+              }
+            />
+          </SettingList>
+
+          <div className='grid gap-4 lg:grid-cols-2'>
+            <Field label='Client ID'>
+              <Input
+                value={form.linuxdoOauthClientId}
+                autoComplete='off'
+                onChange={(event) =>
+                  set('linuxdoOauthClientId', event.target.value)
+                }
+              />
+            </Field>
+            <SecretField
+              name='linuxdoOauthClientSecret'
+              value={form.linuxdoOauthClientSecret}
+              settings={settings}
+              clearing={clearSecrets.includes('linuxdoOauthClientSecret')}
+              onChange={(value) => set('linuxdoOauthClientSecret', value)}
+              onToggleClear={() =>
+                toggleSecretClear('linuxdoOauthClientSecret')
+              }
+            />
+          </div>
+          <Field
+            label='Redirect URI / 回调地址'
+            hint='必须和 Linux.do Connect 应用里登记的 Redirect URI 完全一致。'
+          >
+            <div className='flex gap-2'>
+              <Input
+                value={form.linuxdoOauthRedirectUri}
+                placeholder={linuxdoCallbackUrl}
+                autoComplete='off'
+                onChange={(event) =>
+                  set('linuxdoOauthRedirectUri', event.target.value)
+                }
+              />
+              <Button
+                type='button'
+                variant='outline'
+                className='shrink-0'
+                onClick={() => {
+                  const empty = !form.linuxdoOauthRedirectUri.trim()
+                  const value = empty
+                    ? linuxdoCallbackUrl
+                    : form.linuxdoOauthRedirectUri.trim()
+                  if (empty) {
+                    set('linuxdoOauthRedirectUri', linuxdoCallbackUrl)
+                  }
+                  void copyText(value)
+                    .then(() =>
+                      toast.success(
+                        empty ? '已填入并复制默认回调地址' : '已复制回调地址'
+                      )
+                    )
+                    .catch((error) => toast.error(getErrorMessage(error)))
+                }}
+              >
+                <Copy />
+                {form.linuxdoOauthRedirectUri.trim() ? '复制' : '填入默认'}
+              </Button>
+            </div>
+          </Field>
         </div>
       </SettingsCard>
 

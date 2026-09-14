@@ -19,7 +19,7 @@ GrokIQ 将日常账号巡检集中到一个界面中：从账号筛选、批量�
 - **聊天广场**：用于流式对话验证，支持多套模型配置、本地会话历史和 Markdown / HTML 预览。
 - **SSO 检测**：可按行导入 SSO，也可对注册联动已保存 SSO 的账号批量检查登录态和 Bot 标记；每次执行保存独立报告，支持回看、筛选和批量删除。
 - **密钥额度**：在公开上游状态页查询 grok2api Client Key 剩余额度和时间窗口使用量；不会回显密钥明文。
-- **状态页登录**：`/status` 默认公开。系统设置打开 Linux.do Connect 开关后，访客需先登录才能查看；管理员会话不受影响。
+- **状态页登录**：`/status` 默认公开。在“系统设置 → 连接与凭据”打开 Linux.do Connect 开关后，访客需先登录才能查看；管理员会话不受影响。
 
 ## 界面预览
 
@@ -166,7 +166,7 @@ GrokIQ 将日常账号巡检集中到一个界面中：从账号筛选、批量�
 
 ## Linux.do Connect 状态页登录
 
-`/status` 默认仍然公开。若要限制访客，在“系统设置 → 注册联动 / 状态页登录”打开开关，并填写 Linux.do Connect 的 Client ID、Client Secret。
+`/status` 默认仍然公开。若要限制访客，在“系统设置 → 连接与凭据”打开开关，并填写 Linux.do Connect 的 Client ID、Client Secret。
 
 回调地址默认是 `{站点 origin}/api/public/linuxdo/callback`，需要和 Linux.do Connect 应用里登记的 Redirect URI 一致。开关关闭后，状态页立即恢复公开访问，已保存的 OAuth 配置和登录过的用户记录仍会保留。
 
