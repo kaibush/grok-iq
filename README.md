@@ -19,6 +19,7 @@ GrokIQ 将日常账号巡检集中到一个界面中：从账号筛选、批量�
 - **聊天广场**：用于流式对话验证，支持多套模型配置、本地会话历史和 Markdown / HTML 预览。
 - **SSO 检测**：可按行导入 SSO，也可对注册联动已保存 SSO 的账号批量检查登录态和 Bot 标记；每次执行保存独立报告，支持回看、筛选和批量删除。
 - **密钥额度**：在公开上游状态页查询 grok2api Client Key 剩余额度和时间窗口使用量；不会回显密钥明文。
+- **状态页登录**：`/status` 默认公开。系统设置打开 Linux.do Connect 开关后，访客需先登录才能查看；管理员会话不受影响。
 
 ## 界面预览
 
@@ -160,6 +161,16 @@ GrokIQ 将日常账号巡检集中到一个界面中：从账号筛选、批量�
 - **注册联动**：接收 [grok-register](https://github.com/kaibush/grok-register) 的 Webhook，账号导入后可保存 SSO、记录注册风险，并可选自动创建探针任务；检测完成后可向注册机发送回调通知。
 - **SSO 报告**：仅 `bot=0` 记为正常，其他值记为风控标记；持久报告不保存 SSO、哈希或会话 ID。
 - **密钥额度**：公开上游状态页可查询 Client Key 剩余额度，并按 24 小时到 90 天或自定义窗口汇总使用量；不会回显明文。
+- **状态页 Linux.do 登录**：默认关闭时 `/status` 仍可公开访问。打开后，访客通过 [Linux.do Connect](https://connect.linux.do/) OAuth2 登录才能查看看板；已登录管理员不受影响。登录用户会出现在“页面访问”里，并可在该页的 Linux.do 用户页签管理。
+
+
+## Linux.do Connect 状态页登录
+
+`/status` 默认仍然公开。若要限制访客，在“系统设置 → 注册联动 / 状态页登录”打开开关，并填写 Linux.do Connect 的 Client ID、Client Secret。
+
+回调地址默认是 `{站点 origin}/api/public/linuxdo/callback`，需要和 Linux.do Connect 应用里登记的 Redirect URI 一致。开关关闭后，状态页立即恢复公开访问，已保存的 OAuth 配置和登录过的用户记录仍会保留。
+
+管理员使用控制台账号登录时可以直接看 `/status`，不必走 Linux.do。访客登录后，页面访问流水会带上用户名、头像和信任等级；“页面访问”页可切换到 Linux.do 用户页签查看注册登录过的账号。
 
 ## 风险因子怎么调
 

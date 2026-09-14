@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
   Compass,
   Loader2,
+  LogIn,
+  LogOut,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -16,7 +18,9 @@ import {
 import { IconGithub } from '@/assets/brand-icons'
 import { useAuthStore } from '@/stores/auth-store'
 import {
+  ApiError,
   api,
+  type LinuxDoPublicUser,
   type PublicUpstreamAccountSummary,
   type PublicUpstreamProvider,
   type PublicUpstreamUsagePeriod,
@@ -24,6 +28,7 @@ import {
 } from '@/lib/api'
 import { formatDate, formatNumber, getErrorMessage } from '@/lib/utils'
 import { usePersistedViewState } from '@/hooks/use-persisted-view-state'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -97,9 +102,20 @@ export function PublicUpstreamStatusPage() {
     ? visitPeriodView.value.period
     : '24h'
   const usageRefresh = useRef(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const accessQuery = useQuery({
+    queryKey: ['public', 'status-access', isAdmin],
+    queryFn: api.publicStatusAccess,
+    refetchInterval: 30_000,
+    retry: 1,
+  })
+  const access = accessQuery.data
+  const canView =
+    access != null && (!access.required || access.admin || Boolean(access.user))
   const query = useQuery({
     queryKey: ['public', 'upstream-accounts', isAdmin],
     queryFn: api.publicUpstreamAccounts,
+    enabled: canView,
     refetchInterval: 15_000,
     retry: 1,
   })
@@ -116,6 +132,7 @@ export function PublicUpstreamStatusPage() {
         refresh,
       })
     },
+    enabled: canView,
     refetchInterval: 30_000,
     retry: 1,
     placeholderData: (previous) => previous,
@@ -123,6 +140,7 @@ export function PublicUpstreamStatusPage() {
   const healthQuery = useQuery({
     queryKey: ['public', 'upstream-health'],
     queryFn: api.publicUpstreamHealth,
+    enabled: canView,
     refetchInterval: 20_000,
     retry: 1,
     placeholderData: (previous) => previous,
@@ -134,12 +152,13 @@ export function PublicUpstreamStatusPage() {
         period: visitPeriod,
         timezone: 'Asia/Shanghai',
       }),
+    enabled: canView,
     refetchInterval: 30_000,
     retry: 1,
     placeholderData: (previous) => previous,
   })
   useEffect(() => {
-    if (statusVisitRecorded) return
+    if (!canView || statusVisitRecorded) return
     statusVisitRecorded = true
     let cancelled = false
     void api
@@ -149,26 +168,74 @@ export function PublicUpstreamStatusPage() {
           void queryClient.invalidateQueries({ queryKey: ['public', 'page-stats'] })
         }
       })
-      .catch(() => {
+      .catch((error) => {
         statusVisitRecorded = false
+        if (isLinuxdoLoginRequired(error)) {
+          void queryClient.invalidateQueries({
+            queryKey: ['public', 'status-access'],
+          })
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [queryClient])
+  }, [canView, queryClient])
+  useEffect(() => {
+    const loginRequired =
+      isLinuxdoLoginRequired(query.error) ||
+      isLinuxdoLoginRequired(usageQuery.error) ||
+      isLinuxdoLoginRequired(healthQuery.error) ||
+      isLinuxdoLoginRequired(visitQuery.error)
+    if (!loginRequired) return
+    void queryClient.invalidateQueries({ queryKey: ['public', 'status-access'] })
+  }, [
+    healthQuery.error,
+    query.error,
+    queryClient,
+    usageQuery.error,
+    visitQuery.error,
+  ])
   const data = query.data ?? emptySummary
-  const usageErrorMessage = usageQuery.isError
-    ? getErrorMessage(usageQuery.error)
-    : ''
-  const errorMessage = query.isError ? getErrorMessage(query.error) : ''
-  const healthErrorMessage = healthQuery.isError
-    ? getErrorMessage(healthQuery.error)
-    : ''
-  const visitErrorMessage = visitQuery.isError
-    ? getErrorMessage(visitQuery.error)
-    : ''
+  const usageErrorMessage = isLinuxdoLoginRequired(usageQuery.error)
+    ? ''
+    : usageQuery.isError
+      ? getErrorMessage(usageQuery.error)
+      : ''
+  const errorMessage = isLinuxdoLoginRequired(query.error)
+    ? ''
+    : query.isError
+      ? getErrorMessage(query.error)
+      : ''
+  const healthErrorMessage = isLinuxdoLoginRequired(healthQuery.error)
+    ? ''
+    : healthQuery.isError
+      ? getErrorMessage(healthQuery.error)
+      : ''
+  const visitErrorMessage = isLinuxdoLoginRequired(visitQuery.error)
+    ? ''
+    : visitQuery.isError
+      ? getErrorMessage(visitQuery.error)
+      : ''
   const hasData = query.data != null
   const ready = hasData && data.reachable && !query.isError
+  const accessLoading = accessQuery.isPending && !accessQuery.data
+  const loginRequired =
+    Boolean(access?.required) && !access?.admin && !access?.user
+  const accessErrorMessage = accessQuery.isError
+    ? getErrorMessage(accessQuery.error)
+    : ''
+
+  async function logoutLinuxdo() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await api.publicLinuxdoLogout()
+      statusVisitRecorded = false
+      await queryClient.invalidateQueries({ queryKey: ['public'] })
+    } finally {
+      setLoggingOut(false)
+    }
+  }
 
   return (
     <div className='min-h-svh bg-background'>
@@ -188,6 +255,13 @@ export function PublicUpstreamStatusPage() {
             </span>
           </div>
           <div className='flex items-center gap-1'>
+            {access?.user ? (
+              <LinuxDoSessionChip
+                user={access.user}
+                loggingOut={loggingOut}
+                onLogout={() => void logoutLinuxdo()}
+              />
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -214,6 +288,31 @@ export function PublicUpstreamStatusPage() {
       </header>
 
       <main className='mx-auto w-full max-w-6xl space-y-6 px-4 py-6 md:py-8'>
+        {accessLoading ? (
+          <div className='flex min-h-[50vh] flex-col items-center justify-center gap-3 text-sm text-muted-foreground'>
+            <Loader2 className='size-5 animate-spin' />
+            正在确认访问权限
+          </div>
+        ) : accessErrorMessage ? (
+          <Card className='border-destructive/30 bg-destructive/5'>
+            <CardContent className='space-y-3 p-6'>
+              <p className='text-sm text-destructive'>
+                访问状态读取失败：{accessErrorMessage}
+              </p>
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                onClick={() => void accessQuery.refetch()}
+              >
+                重试
+              </Button>
+            </CardContent>
+          </Card>
+        ) : loginRequired ? (
+          <LinuxDoLoginWall configured={Boolean(access?.configured)} />
+        ) : (
+          <>
         <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
           <div>
             <p className='text-xs font-medium tracking-[0.16em] text-primary uppercase'>
@@ -432,9 +531,107 @@ export function PublicUpstreamStatusPage() {
           最近更新：{hasData ? formatDate(data.updatedAt) : '—'} · 每 15
           秒自动刷新
         </p>
+          </>
+        )}
       </main>
     </div>
   )
+}
+
+function LinuxDoLoginWall({ configured }: { configured: boolean }) {
+  return (
+    <Card className='mx-auto max-w-xl'>
+      <CardContent className='space-y-4 p-6 sm:p-8'>
+        <div className='flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
+          <LogIn className='size-5' />
+        </div>
+        <div className='space-y-1.5'>
+          <h1 className='text-xl font-semibold tracking-tight'>
+            需要 Linux.do 登录后才能查看状态页
+          </h1>
+          <p className='text-sm leading-6 text-muted-foreground'>
+            管理员已限制访客访问。请使用 Linux.do Connect 登录后再查看上游看板。
+            已登录的管理员账号可以直接查看，不受此限制。
+          </p>
+        </div>
+        {configured ? (
+          <Button
+            type='button'
+            onClick={() => {
+              window.location.assign(api.publicLinuxdoLoginUrl('/status'))
+            }}
+          >
+            <LogIn />
+            使用 Linux.do 登录
+          </Button>
+        ) : (
+          <div className='space-y-3'>
+            <Button type='button' disabled>
+              <LogIn />
+              使用 Linux.do 登录
+            </Button>
+            <p className='text-sm text-amber-800 dark:text-amber-300'>
+              管理员尚未配置 Linux.do OAuth2，暂时无法登录。请联系管理员在系统设置中填写 Client ID 和 Secret。
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function LinuxDoSessionChip({
+  user,
+  loggingOut,
+  onLogout,
+}: {
+  user: LinuxDoPublicUser
+  loggingOut: boolean
+  onLogout: () => void
+}) {
+  const displayName = user.name?.trim() || user.username || 'Linux.do'
+  const handle = user.username?.trim() || ''
+  const initials = displayName.slice(0, 1).toUpperCase()
+  return (
+    <div className='mr-1 flex min-w-0 items-center gap-2 rounded-full border bg-muted/30 py-1 pr-1 pl-1'>
+      <Avatar className='size-7'>
+        {user.avatarUrl ? (
+          <AvatarImage src={user.avatarUrl} alt={displayName} />
+        ) : null}
+        <AvatarFallback className='bg-primary/10 text-[10px] font-medium text-primary'>
+          {initials}
+        </AvatarFallback>
+      </Avatar>
+      <div className='min-w-0 pr-1'>
+        <div className='truncate text-xs font-medium' title={displayName}>
+          {displayName}
+        </div>
+        <div className='flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground'>
+          {handle ? <span className='truncate'>@{handle}</span> : null}
+          {user.trustLevel != null ? (
+            <Badge variant='outline' className='h-4 px-1 text-[10px]'>
+              TL{user.trustLevel}
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+      <Button
+        type='button'
+        size='sm'
+        variant='ghost'
+        className='h-7 px-2 text-xs'
+        disabled={loggingOut}
+        onClick={onLogout}
+      >
+        {loggingOut ? <Loader2 className='animate-spin' /> : <LogOut />}
+        退出
+      </Button>
+    </div>
+  )
+}
+
+function isLinuxdoLoginRequired(error: unknown) {
+  return error instanceof ApiError && error.code === 'linuxdo_login_required'
 }
 
 function StatusBadge({

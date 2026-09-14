@@ -276,6 +276,41 @@ export type PublicVisitRecent = {
   os?: string
   country?: string
   language?: string
+  linuxdoUserId?: number | null
+  linuxdoUsername?: string
+  linuxdoName?: string
+  linuxdoAvatarUrl?: string
+  linuxdoTrustLevel?: number | null
+}
+
+export type LinuxDoPublicUser = {
+  id: number
+  linuxdoId: string
+  username: string
+  name: string
+  email?: string
+  avatarUrl?: string
+  trustLevel?: number
+  active?: boolean
+  silenced?: boolean
+  loginCount?: number
+  lastLoginAt?: string | null
+  lastSeenAt?: string | null
+  createdAt?: string | null
+}
+
+export type PublicStatusAccess = {
+  required: boolean
+  configured: boolean
+  admin: boolean
+  user: LinuxDoPublicUser | null
+}
+
+export type LinuxDoUserLedger = {
+  items: LinuxDoPublicUser[]
+  total: number
+  page: number
+  pageSize: number
 }
 
 export type PublicVisitIpStat = {
@@ -1951,6 +1986,11 @@ export type RuntimeSettings = {
   wechatUpstreamHealth30mThreshold: number
   wechatUpstreamHealth30mMinRequests: number
   wechatUpstreamHealthCooldownMinutes: number
+  statusLinuxdoOauthEnabled: boolean
+  linuxdoOauthClientId: string
+  linuxdoOauthClientSecretConfigured: boolean
+  linuxdoOauthRedirectUri: string
+  linuxdoOauthConfigured: boolean
   schedulerEnabled: boolean
   quarantineRecoveryEnabled: boolean
   schedulerTimezone: string
@@ -2036,6 +2076,7 @@ export type EditableRuntimeSettings = RuntimeSettings & {
   grokRegisterWebhookToken: string
   ssoProxy: string
   wechatAppSecret: string
+  linuxdoOauthClientSecret: string
 }
 
 export type SecretSettingName =
@@ -2043,6 +2084,7 @@ export type SecretSettingName =
   | 'grokRegisterWebhookToken'
   | 'ssoProxy'
   | 'wechatAppSecret'
+  | 'linuxdoOauthClientSecret'
 
 export type RuntimeSettingsUpdate = Partial<
   Pick<
@@ -2082,6 +2124,9 @@ export type RuntimeSettingsUpdate = Partial<
     | 'wechatUpstreamHealth30mThreshold'
     | 'wechatUpstreamHealth30mMinRequests'
     | 'wechatUpstreamHealthCooldownMinutes'
+    | 'statusLinuxdoOauthEnabled'
+    | 'linuxdoOauthClientId'
+    | 'linuxdoOauthRedirectUri'
     | 'schedulerEnabled'
     | 'quarantineRecoveryEnabled'
     | 'schedulerTimezone'
@@ -2157,6 +2202,7 @@ export type RuntimeSettingsUpdate = Partial<
   grokRegisterWebhookToken?: string
   ssoProxy?: string
   wechatAppSecret?: string
+  linuxdoOauthClientSecret?: string
   clearSecrets?: SecretSettingName[]
 }
 
@@ -2464,6 +2510,12 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     requestAuditTpsCooldownMinutes: value.requestAuditTpsCooldownMinutes ?? 30,
     requestAuditIsolationEnabled: value.requestAuditIsolationEnabled ?? true,
     requestAuditRetentionDays: value.requestAuditRetentionDays ?? 90,
+    statusLinuxdoOauthEnabled: value.statusLinuxdoOauthEnabled ?? false,
+    linuxdoOauthClientId: value.linuxdoOauthClientId ?? '',
+    linuxdoOauthClientSecretConfigured:
+      value.linuxdoOauthClientSecretConfigured ?? false,
+    linuxdoOauthRedirectUri: value.linuxdoOauthRedirectUri ?? '',
+    linuxdoOauthConfigured: value.linuxdoOauthConfigured ?? false,
     wechatNotificationEnabled: value.wechatNotificationEnabled ?? false,
     wechatAppId: value.wechatAppId ?? '',
     wechatAppSecretConfigured: value.wechatAppSecretConfigured ?? false,
@@ -2533,8 +2585,13 @@ async function loadEditableRuntimeSettings(): Promise<EditableRuntimeSettings> {
   const settings = normalizeRuntimeSettings(
     await request<RuntimeSettingsWire>('/settings')
   )
-  const [adminPassword, registerToken, ssoProxy, wechatAppSecret] =
-    await Promise.all([
+  const [
+    adminPassword,
+    registerToken,
+    ssoProxy,
+    wechatAppSecret,
+    linuxdoSecret,
+  ] = await Promise.all([
       settings.grok2apiAdminPasswordConfigured
         ? request<{ value: string }>(
             '/settings/secrets/grok2apiAdminPassword',
@@ -2559,6 +2616,12 @@ async function loadEditableRuntimeSettings(): Promise<EditableRuntimeSettings> {
             cache: 'no-store',
           })
         : Promise.resolve({ value: '' }),
+      settings.linuxdoOauthClientSecretConfigured
+        ? request<{ value: string }>(
+            '/settings/secrets/linuxdoOauthClientSecret',
+            { cache: 'no-store' }
+          )
+        : Promise.resolve({ value: '' }),
     ])
   return {
     ...settings,
@@ -2566,6 +2629,7 @@ async function loadEditableRuntimeSettings(): Promise<EditableRuntimeSettings> {
     grokRegisterWebhookToken: registerToken.value,
     ssoProxy: ssoProxy.value,
     wechatAppSecret: wechatAppSecret.value,
+    linuxdoOauthClientSecret: linuxdoSecret.value,
   }
 }
 
@@ -3473,9 +3537,31 @@ export const api = {
       body: JSON.stringify(body),
     }),
   health: () => request<HealthResponse>('/health'),
+  publicStatusAccess: () =>
+    request<PublicStatusAccess>('/public/status-access', {
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
+    }),
+  publicLinuxdoLogout: () =>
+    request<{ loggedOut: boolean }>('/public/linuxdo/logout', {
+      method: 'POST',
+      skipAuth: true,
+      credentials: 'include',
+    }),
+  linuxdoUsers: (params?: { q?: string; page?: number; pageSize?: number }) =>
+    request<LinuxDoUserLedger>(
+      `/linuxdo-users${query({
+        q: params?.q,
+        page: params?.page,
+        page_size: params?.pageSize,
+      })}`
+    ),
+  publicLinuxdoLoginUrl: (returnTo = '/status') =>
+    `${API_BASE}/public/linuxdo/login${query({ return_to: returnTo })}`,
   publicUpstreamAccounts: () =>
     request<PublicUpstreamAccountSummary>('/public/upstream-accounts', {
       skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
     }),
   publicUpstreamUsage: (params?: {
     period?: PublicUpstreamUsagePeriod
@@ -3489,12 +3575,16 @@ export const api = {
     const suffix = query.toString() ? `?${query.toString()}` : ''
     return request<PublicUpstreamUsageOverview>(
       `/public/upstream-usage${suffix}`,
-      { skipAuth: true }
+      {
+        skipAuth: !authorizationHeaders().Authorization,
+        credentials: 'include',
+      }
     )
   },
   publicUpstreamHealth: () =>
     request<PublicUpstreamHealth>('/public/upstream-health', {
-      skipAuth: true,
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
     }),
   recordPublicPageVisit: (body: { path?: string; referrer?: string } = {}) =>
     request<{ recorded: boolean }>('/public/page-visits', {
@@ -3515,7 +3605,10 @@ export const api = {
         period: params?.period,
         timezone: params?.timezone || 'Asia/Shanghai',
       })}`,
-      { skipAuth: true }
+      {
+        skipAuth: !authorizationHeaders().Authorization,
+        credentials: 'include',
+      }
     ),
   adminPageStats: (params?: {
     period?: PublicVisitPeriod
@@ -3550,7 +3643,8 @@ export const api = {
   lookupPublicClientKeyQuota: (apiKey: string) =>
     request<PublicClientKeyQuotaLookup>('/public/client-key-quota', {
       method: 'POST',
-      skipAuth: true,
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
       body: JSON.stringify({ apiKey }),
     }),
   lookupPublicClientKeyUsage: (params: {
@@ -3561,7 +3655,8 @@ export const api = {
   }) =>
     request<PublicClientKeyUsageLookup>('/public/client-key-usage', {
       method: 'POST',
-      skipAuth: true,
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
       body: JSON.stringify({
         apiKey: params.apiKey,
         period: params.period,

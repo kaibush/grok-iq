@@ -913,3 +913,94 @@ def test_invalid_sso_proxy_is_rejected(tmp_path: Path):
     _database, _settings, service = build_service(tmp_path)
     with pytest.raises(ValueError, match="代理"):
         service.update({"sso_proxy": "not-a-proxy"})
+
+
+def test_linuxdo_oauth_settings_default_to_disabled(tmp_path: Path):
+    _, _settings, service = build_service(tmp_path)
+    public = service.public_view()
+    assert public["statusLinuxdoOauthEnabled"] is False
+    assert public["linuxdoOauthConfigured"] is False
+    assert public["linuxdoOauthClientId"] == ""
+    assert public["linuxdoOauthClientSecretConfigured"] is False
+    assert public["linuxdoOauthRedirectUri"] == ""
+
+
+def test_linuxdo_oauth_credentials_are_masked_in_public_view(tmp_path: Path):
+    _, settings, service = build_service(tmp_path)
+    changed = service.update(
+        {
+            "linuxdo_oauth_client_id": "linuxdo-client",
+            "linuxdo_oauth_client_secret": "linuxdo-secret",
+            "linuxdo_oauth_redirect_uri": "https://example.test/oauth/callback",
+        }
+    )
+    assert "linuxdo_oauth_client_id" in changed
+    assert "linuxdo_oauth_client_secret" in changed
+    assert settings.linuxdo_oauth_client_id == "linuxdo-client"
+    public = service.public_view()
+    assert public["linuxdoOauthClientId"] == "linuxdo-client"
+    assert public["linuxdoOauthClientSecretConfigured"] is True
+    assert public["linuxdoOauthConfigured"] is True
+    assert public["linuxdoOauthRedirectUri"] == "https://example.test/oauth/callback"
+    assert "linuxdo-secret" not in json.dumps(public)
+
+
+def test_linuxdo_oauth_secret_is_clearable():
+    keep = RuntimeSettingsInput(linuxdoOauthClientSecret="")
+    assert "linuxdo_oauth_client_secret" not in keep.runtime_changes()
+
+    clear = RuntimeSettingsInput(clearSecrets=["linuxdoOauthClientSecret"])
+    assert clear.runtime_changes()["linuxdo_oauth_client_secret"] == ""
+
+    emptied = RuntimeSettingsInput(
+        linuxdoOauthClientId="",
+        linuxdoOauthRedirectUri="",
+    )
+    assert emptied.runtime_changes()["linuxdo_oauth_client_id"] == ""
+    assert emptied.runtime_changes()["linuxdo_oauth_redirect_uri"] == ""
+
+
+def test_linuxdo_oauth_secret_clear_unconfigures(tmp_path: Path):
+    _, settings, service = build_service(tmp_path)
+    service.update(
+        {
+            "linuxdo_oauth_client_id": "linuxdo-client",
+            "linuxdo_oauth_client_secret": "linuxdo-secret",
+        }
+    )
+    service.update(
+        RuntimeSettingsInput(clearSecrets=["linuxdoOauthClientSecret"]).runtime_changes()
+    )
+    assert settings.linuxdo_oauth_client_secret == ""
+    public = service.public_view()
+    assert public["linuxdoOauthClientSecretConfigured"] is False
+    assert public["linuxdoOauthConfigured"] is False
+    assert public["linuxdoOauthClientId"] == "linuxdo-client"
+
+
+def test_linuxdo_oauth_enabled_switch_persists(tmp_path: Path):
+    database, settings, service = build_service(tmp_path)
+    changed = service.update({"status_linuxdo_oauth_enabled": True})
+    assert changed == ["status_linuxdo_oauth_enabled"]
+    assert settings.status_linuxdo_oauth_enabled is True
+    public = service.public_view()
+    assert public["statusLinuxdoOauthEnabled"] is True
+    assert public["linuxdoOauthConfigured"] is False
+
+    reloaded_settings = Settings(database_path=tmp_path / "grokiq.db")
+    reloaded = RuntimeSettingsService(
+        reloaded_settings, SettingsRepository(database, reloaded_settings)
+    )
+    reloaded.load()
+    assert reloaded_settings.status_linuxdo_oauth_enabled is True
+
+    reloaded.update({"status_linuxdo_oauth_enabled": False})
+    assert reloaded_settings.status_linuxdo_oauth_enabled is False
+    assert reloaded.public_view()["statusLinuxdoOauthEnabled"] is False
+
+
+def test_linuxdo_oauth_secret_can_be_revealed(tmp_path: Path):
+    _, _settings, service = build_service(tmp_path)
+    service.update({"linuxdo_oauth_client_secret": "linuxdo-secret"})
+    assert service.reveal_secret("linuxdoOauthClientSecret") == "linuxdo-secret"
+

@@ -74,6 +74,8 @@ class PageVisitRepository:
                     PageVisit.user_agent.contains(needle),
                     PageVisit.visitor_id.contains(needle),
                     PageVisit.country.contains(needle),
+                    PageVisit.linuxdo_username.contains(needle),
+                    PageVisit.linuxdo_name.contains(needle),
                 )
             )
         with self.database.session() as session:

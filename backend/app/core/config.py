@@ -147,6 +147,11 @@ class Settings(BaseSettings):
     wechat_upstream_health_30m_min_requests: int = Field(default=20, ge=1, le=10_000)
     wechat_upstream_health_cooldown_minutes: int = Field(default=15, ge=1, le=24 * 60)
 
+    status_linuxdo_oauth_enabled: bool = False
+    linuxdo_oauth_client_id: str = ""
+    linuxdo_oauth_client_secret: str = ""
+    linuxdo_oauth_redirect_uri: str = ""
+
     # User-created probe plans and GrokIQ-owned quarantine recovery are
     # independently configurable while sharing the same scheduler process.
     scheduler_enabled: bool = True
@@ -299,6 +304,10 @@ class Settings(BaseSettings):
         "wechat_upstream_health_30m_threshold",
         "wechat_upstream_health_30m_min_requests",
         "wechat_upstream_health_cooldown_minutes",
+        "status_linuxdo_oauth_enabled",
+        "linuxdo_oauth_client_id",
+        "linuxdo_oauth_client_secret",
+        "linuxdo_oauth_redirect_uri",
         "scheduler_enabled",
         "quarantine_recovery_enabled",
         "scheduler_timezone",
@@ -375,6 +384,7 @@ class Settings(BaseSettings):
             "grok_register_webhook_token",
             "sso_proxy",
             "wechat_app_secret",
+            "linuxdo_oauth_client_secret",
         }
     )
 

@@ -21,8 +21,14 @@ EXPECTED_ROUTES = {
     ("GET", "/api/public/upstream-usage"),
     ("POST", "/api/public/page-visits"),
     ("GET", "/api/public/page-stats"),
+    ("GET", "/api/public/status-access"),
+    ("GET", "/api/public/linuxdo/login"),
+    ("GET", "/api/public/linuxdo/callback"),
+    ("POST", "/api/public/linuxdo/logout"),
+    ("GET", "/api/public/linuxdo/me"),
     ("GET", "/api/page-stats"),
     ("GET", "/api/page-stats/visits"),
+    ("GET", "/api/linuxdo-users"),
     ("GET", "/api/system/version"),
     ("POST", "/api/system/update/check"),
     ("GET", "/api/dashboard"),
@@ -138,6 +144,11 @@ PUBLIC_PATHS = {
     "/api/public/upstream-usage",
     "/api/public/page-visits",
     "/api/public/page-stats",
+    "/api/public/status-access",
+    "/api/public/linuxdo/login",
+    "/api/public/linuxdo/callback",
+    "/api/public/linuxdo/logout",
+    "/api/public/linuxdo/me",
     "/api/integrations/grok-register/account-created",
     "/api/integrations/grok-register/account-imported",
 }
@@ -165,6 +176,7 @@ def build_test_router():
         updates=MagicMock(),
         request_audits=MagicMock(),
         page_visits=MagicMock(),
+        linuxdo_oauth=MagicMock(),
     )
 
 

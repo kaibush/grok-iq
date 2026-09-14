@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
 from app.integrations.grok2api.client import Grok2APIClient
@@ -10,6 +11,14 @@ from app.services.account_service import AccountService
 from app.services.auth_service import AuthenticationError, AuthService
 from app.services.client_key_quota_service import ClientKeyQuotaService
 from app.services.client_key_usage_service import ClientKeyUsageService
+from app.services.linuxdo_oauth_service import (
+    OAUTH_COOKIE_NAME,
+    OAUTH_STATE_TTL_SECONDS,
+    SESSION_COOKIE_NAME,
+    LinuxDoOAuthError,
+    LinuxDoOAuthService,
+    request_origin,
+)
 from app.services.page_visit_service import VISITOR_COOKIE_NAME, PageVisitService
 from app.services.request_audit_service import RequestAuditService
 from app.web.schemas import ClientKeyQuotaInput, ClientKeyUsageInput
@@ -30,10 +39,111 @@ def build_public_router(
     auth_service: AuthService,
     request_audits: RequestAuditService | None = None,
     page_visits: PageVisitService | None = None,
+    linuxdo_oauth: LinuxDoOAuthService | None = None,
 ) -> APIRouter:
     router = APIRouter()
     quota_service = ClientKeyQuotaService(client)
     usage_service = ClientKeyUsageService(client, quota_service=quota_service)
+
+    def require_status_access(request: Request) -> None:
+        if linuxdo_oauth is None:
+            return
+        linuxdo_oauth.require_status_access(
+            request.headers.get("authorization") or "",
+            request.cookies.get(SESSION_COOKIE_NAME) or "",
+            auth_service,
+        )
+
+    @router.get("/public/status-access")
+    async def public_status_access(
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        if linuxdo_oauth is None:
+            return {
+                "required": False,
+                "configured": False,
+                "admin": _has_admin_session(
+                    auth_service, request.headers.get("authorization") or ""
+                ),
+                "user": None,
+            }
+        return linuxdo_oauth.access_status(
+            request.headers.get("authorization") or "",
+            request.cookies.get(SESSION_COOKIE_NAME) or "",
+            auth_service,
+        )
+
+    @router.get("/public/linuxdo/login")
+    async def public_linuxdo_login(
+        request: Request,
+        return_to: str = Query(default="/status"),
+    ) -> RedirectResponse:
+        if linuxdo_oauth is None:
+            raise LinuxDoOAuthError("尚未配置 Linux.do OAuth2")
+        authorize_url, oauth_cookie = linuxdo_oauth.start_login(
+            return_to=return_to,
+            request_origin=request_origin(request),
+        )
+        redirect = RedirectResponse(url=authorize_url, status_code=302)
+        redirect.set_cookie(
+            key=OAUTH_COOKIE_NAME,
+            value=oauth_cookie,
+            max_age=OAUTH_STATE_TTL_SECONDS,
+            path="/",
+            httponly=True,
+            samesite="lax",
+            secure=_cookie_secure(request),
+        )
+        return redirect
+
+    @router.get("/public/linuxdo/callback")
+    async def public_linuxdo_callback(
+        request: Request,
+        code: str = Query(default=""),
+        state: str = Query(default=""),
+        error: str = Query(default=""),
+        error_description: str = Query(default=""),
+    ) -> RedirectResponse:
+        if linuxdo_oauth is None:
+            raise LinuxDoOAuthError("尚未配置 Linux.do OAuth2")
+        if error.strip():
+            raise LinuxDoOAuthError(error_description.strip() or error.strip())
+        _user, session_cookie, return_to = await linuxdo_oauth.complete_login(
+            code=code,
+            state=state,
+            oauth_cookie=request.cookies.get(OAUTH_COOKIE_NAME) or "",
+        )
+        redirect = RedirectResponse(url=return_to, status_code=302)
+        redirect.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=session_cookie,
+            max_age=int(getattr(linuxdo_oauth.settings, "jwt_ttl_seconds", 7 * 24 * 60 * 60)),
+            path="/",
+            httponly=True,
+            samesite="lax",
+            secure=_cookie_secure(request),
+        )
+        redirect.delete_cookie(OAUTH_COOKIE_NAME, path="/")
+        return redirect
+
+    @router.post("/public/linuxdo/logout")
+    async def public_linuxdo_logout(request: Request, response: Response) -> dict[str, bool]:
+        disable_client_cache(response)
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return {"loggedOut": True}
+
+    @router.get("/public/linuxdo/me")
+    async def public_linuxdo_me(request: Request, response: Response) -> dict[str, Any]:
+        disable_client_cache(response)
+        if linuxdo_oauth is None:
+            return {"user": None}
+        return {
+            "user": linuxdo_oauth.public_user(
+                linuxdo_oauth.user_from_cookie(request.cookies.get(SESSION_COOKIE_NAME) or "")
+            )
+        }
 
     @router.get("/public/upstream-accounts")
     async def public_upstream_accounts(
@@ -41,8 +151,11 @@ def build_public_router(
         response: Response,
     ) -> dict[str, Any]:
         disable_client_cache(response)
+        require_status_access(request)
         return await account_service.public_upstream_account_summary(
-            include_inventory=_has_admin_session(auth_service, request.headers.get("authorization") or "")
+            include_inventory=_has_admin_session(
+                auth_service, request.headers.get("authorization") or ""
+            )
         )
 
     @router.post("/public/client-key-quota")
@@ -52,6 +165,7 @@ def build_public_router(
         response: Response,
     ) -> dict[str, Any]:
         disable_client_cache(response)
+        require_status_access(request)
         return await quota_service.lookup(payload.api_key, client_ip=_client_ip(request))
 
     @router.post("/public/client-key-usage")
@@ -61,6 +175,7 @@ def build_public_router(
         response: Response,
     ) -> dict[str, Any]:
         disable_client_cache(response)
+        require_status_access(request)
         return await usage_service.lookup_public_usage(
             payload.api_key,
             client_ip=_client_ip(request),
@@ -71,12 +186,14 @@ def build_public_router(
 
     @router.get("/public/upstream-usage")
     async def public_upstream_usage(
+        request: Request,
         response: Response,
         period: str = Query(default="24h"),
         timezone: str = Query(default="Asia/Shanghai"),
         refresh: str = Query(default=""),
     ) -> dict[str, Any]:
         disable_client_cache(response)
+        require_status_access(request)
         return await usage_service.public_usage_overview(
             period=period,
             timezone=timezone,
@@ -86,8 +203,12 @@ def build_public_router(
     if request_audits is not None:
 
         @router.get("/public/upstream-health")
-        async def public_upstream_health(response: Response) -> dict[str, Any]:
+        async def public_upstream_health(
+            request: Request,
+            response: Response,
+        ) -> dict[str, Any]:
             disable_client_cache(response)
+            require_status_access(request)
             return request_audits.recent_request_health()
 
     if page_visits is not None:
@@ -99,6 +220,7 @@ def build_public_router(
             payload: PageVisitInput | None = None,
         ) -> dict[str, Any]:
             disable_client_cache(response)
+            require_status_access(request)
             body = payload or PageVisitInput()
             result = page_visits.record_visit(
                 path=body.path,
@@ -107,6 +229,7 @@ def build_public_router(
                 client_ip=_client_ip(request),
                 authorization=request.headers.get("authorization") or "",
                 visitor_cookie=request.cookies.get(VISITOR_COOKIE_NAME) or "",
+                linuxdo_cookie=request.cookies.get(SESSION_COOKIE_NAME) or "",
                 request_host=request.headers.get("host") or (request.base_url.hostname or ""),
                 country=request.headers.get("cf-ipcountry") or "",
                 language=request.headers.get("accept-language") or "",
@@ -125,11 +248,13 @@ def build_public_router(
 
         @router.get("/public/page-stats")
         async def public_page_stats(
+            request: Request,
             response: Response,
             period: str = Query(default="24h"),
             timezone: str = Query(default="Asia/Shanghai"),
         ) -> dict[str, Any]:
             disable_client_cache(response)
+            require_status_access(request)
             return page_visits.overview(period=period, timezone=timezone)
 
     return router

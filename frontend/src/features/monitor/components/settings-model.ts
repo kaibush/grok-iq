@@ -30,6 +30,10 @@ export type SettingsForm = {
   registerCallbackEnabled: boolean
   registerCallbackUrl: string
   registerCallbackTimeoutSeconds: number
+  statusLinuxdoOauthEnabled: boolean
+  linuxdoOauthClientId: string
+  linuxdoOauthClientSecret: string
+  linuxdoOauthRedirectUri: string
   wechatNotificationEnabled: boolean
   wechatAppId: string
   wechatAppSecret: string
@@ -191,6 +195,11 @@ export const secretMetadata: Record<
     label: '微信 AppSecret',
     placeholder: '留空保持当前 AppSecret',
     configuredKey: 'wechatAppSecretConfigured',
+  },
+  linuxdoOauthClientSecret: {
+    label: 'Linux.do Client Secret',
+    placeholder: '留空保持当前密钥',
+    configuredKey: 'linuxdoOauthClientSecretConfigured',
   },
 }
 
@@ -398,6 +407,10 @@ export function toSettingsForm(
     registerCallbackUrl: settings.registerCallbackUrl ?? '',
     registerCallbackTimeoutSeconds:
       settings.registerCallbackTimeoutSeconds ?? 10,
+    statusLinuxdoOauthEnabled: settings.statusLinuxdoOauthEnabled ?? false,
+    linuxdoOauthClientId: settings.linuxdoOauthClientId ?? '',
+    linuxdoOauthClientSecret: settings.linuxdoOauthClientSecret ?? '',
+    linuxdoOauthRedirectUri: settings.linuxdoOauthRedirectUri ?? '',
     wechatNotificationEnabled: settings.wechatNotificationEnabled,
     wechatAppId: settings.wechatAppId,
     wechatAppSecret: settings.wechatAppSecret,
@@ -557,6 +570,9 @@ export function buildSettingsPayload(
     registerCallbackEnabled: form.registerCallbackEnabled,
     registerCallbackUrl: form.registerCallbackUrl.trim(),
     registerCallbackTimeoutSeconds: form.registerCallbackTimeoutSeconds,
+    statusLinuxdoOauthEnabled: form.statusLinuxdoOauthEnabled,
+    linuxdoOauthClientId: form.linuxdoOauthClientId.trim(),
+    linuxdoOauthRedirectUri: form.linuxdoOauthRedirectUri.trim(),
     wechatNotificationEnabled: form.wechatNotificationEnabled,
     wechatAppId: form.wechatAppId.trim(),
     wechatOpenid: form.wechatOpenid.trim(),
@@ -675,6 +691,13 @@ export function buildSettingsPayload(
   ) {
     payload.wechatAppSecret = form.wechatAppSecret
   }
+  if (
+    !clearSecrets.includes('linuxdoOauthClientSecret') &&
+    form.linuxdoOauthClientSecret.trim() &&
+    form.linuxdoOauthClientSecret !== original.linuxdoOauthClientSecret
+  ) {
+    payload.linuxdoOauthClientSecret = form.linuxdoOauthClientSecret
+  }
   return payload
 }
 
@@ -695,6 +718,9 @@ export function mergeEditableSettings(
     wechatAppSecret: clearSecrets.includes('wechatAppSecret')
       ? ''
       : form.wechatAppSecret,
+    linuxdoOauthClientSecret: clearSecrets.includes('linuxdoOauthClientSecret')
+      ? ''
+      : form.linuxdoOauthClientSecret,
   }
 }
 

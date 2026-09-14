@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.clock import APP_TIMEZONE, APP_TIMEZONE_NAME, app_now, to_app_timezone, utc_now
 from app.persistence.page_visit_repository import PageVisitRepository
 from app.services.auth_service import AuthService
+from app.services.linuxdo_oauth_service import LinuxDoOAuthService
 
 VISITOR_COOKIE_NAME = "grokiq_vid"
 PERIODS = ("24h", "7d", "30d", "90d")
@@ -48,9 +49,11 @@ class PageVisitService:
         self,
         repository: PageVisitRepository,
         auth_service: AuthService | None = None,
+        linuxdo_oauth: LinuxDoOAuthService | None = None,
     ):
         self.repository = repository
         self.auth_service = auth_service
+        self.linuxdo_oauth = linuxdo_oauth
 
     def record_visit(
         self,
@@ -61,6 +64,7 @@ class PageVisitService:
         client_ip: str = "",
         authorization: str = "",
         visitor_cookie: str = "",
+        linuxdo_cookie: str = "",
         request_host: str = "",
         country: str = "",
         language: str = "",
@@ -86,6 +90,7 @@ class PageVisitService:
                 "visitor_id": visitor_id,
                 "set_cookie": set_cookie,
             }
+        linuxdo_user = self._linuxdo_user(linuxdo_cookie)
         self.repository.record(
             {
                 "visitor_id": visitor_id,
@@ -100,8 +105,15 @@ class PageVisitService:
                 "user_agent": (user_agent or "").strip()[:UA_MAX_LENGTH],
                 "country": _country(country),
                 "language": _language(language),
+                "linuxdo_user_id": None if linuxdo_user is None else int(linuxdo_user["id"]),
+                "linuxdo_username": "" if linuxdo_user is None else str(linuxdo_user.get("username") or ""),
+                "linuxdo_name": "" if linuxdo_user is None else str(linuxdo_user.get("name") or ""),
+                "linuxdo_avatar_url": "" if linuxdo_user is None else str(linuxdo_user.get("avatar_url") or ""),
+                "linuxdo_trust_level": None if linuxdo_user is None else linuxdo_user.get("trust_level"),
             }
         )
+        if linuxdo_user is not None and self.linuxdo_oauth is not None:
+            self.linuxdo_oauth.touch_seen(int(linuxdo_user["id"]))
         if random.randrange(PRUNE_EVERY) == 0:
             self.repository.prune_before(now - timedelta(days=RETENTION_DAYS))
         return {
@@ -242,6 +254,11 @@ class PageVisitService:
         except Exception:
             return False
         return True
+
+    def _linuxdo_user(self, linuxdo_cookie: str) -> dict[str, Any] | None:
+        if self.linuxdo_oauth is None or not (linuxdo_cookie or "").strip():
+            return None
+        return self.linuxdo_oauth.user_from_cookie(linuxdo_cookie)
 
 
 def _resolve_period(value: str) -> str:
@@ -590,6 +607,11 @@ def _visit_items(rows: list[dict[str, Any]], zone: Any) -> list[dict[str, Any]]:
                 "os": os_name,
                 "country": str(row.get("country") or ""),
                 "language": str(row.get("language") or ""),
+                "linuxdoUserId": row.get("linuxdo_user_id"),
+                "linuxdoUsername": str(row.get("linuxdo_username") or ""),
+                "linuxdoName": str(row.get("linuxdo_name") or ""),
+                "linuxdoAvatarUrl": str(row.get("linuxdo_avatar_url") or ""),
+                "linuxdoTrustLevel": row.get("linuxdo_trust_level"),
             }
         )
     return items

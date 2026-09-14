@@ -11,6 +11,7 @@ from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.egress_service import EgressService
 from app.services.export_service import ExportService
+from app.services.linuxdo_oauth_service import LinuxDoOAuthService
 from app.services.page_visit_service import PageVisitService
 from app.services.probe_manager import ProbeManager
 from app.services.register_integration import RegisterIntegrationService
@@ -33,6 +34,7 @@ from .routes.integrations import (
     build_integrations_router,
     build_register_events_router,
 )
+from .routes.linuxdo_users import build_linuxdo_users_router
 from .routes.page_stats import build_page_stats_router
 from .routes.probes import build_probes_router
 from .routes.public import build_public_router
@@ -62,6 +64,7 @@ def build_router(
     request_audits: RequestAuditService | None = None,
     page_visits: PageVisitService | None = None,
     tps_fuse_sync: TpsFuseSyncService | None = None,
+    linuxdo_oauth: LinuxDoOAuthService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     require_admin = build_admin_auth_dependency(auth_service)
@@ -84,6 +87,7 @@ def build_router(
             auth_service,
             request_audits=request_audits,
             page_visits=page_visits,
+            linuxdo_oauth=linuxdo_oauth,
         )
     )
     router.include_router(
@@ -129,6 +133,8 @@ def build_router(
         protected.include_router(build_request_audits_router(request_audits))
     if page_visits is not None:
         protected.include_router(build_page_stats_router(page_visits))
+    if linuxdo_oauth is not None:
+        protected.include_router(build_linuxdo_users_router(linuxdo_oauth))
     protected.include_router(build_sso_reports_router(sso_reports))
     protected.include_router(build_register_events_router(register_integration))
     protected.include_router(build_system_router(updates))

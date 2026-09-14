@@ -12,6 +12,7 @@ from app.persistence.auth_repository import AdminAlreadyExistsError
 from app.persistence.probe_repository import QueueFullError, RunStateError
 from app.services.auth_service import AuthenticationError
 from app.services.chat_service import ChatUpstreamError
+from app.services.linuxdo_oauth_service import LinuxDoOAuthError, StatusLoginRequired
 from app.services.sso_report_service import SsoReportNotFoundError
 
 from .auth import AdminAuthenticationRequired
@@ -61,6 +62,25 @@ def install_exception_handlers(app: FastAPI) -> None:
         exc: AuthenticationError,
     ) -> JSONResponse:
         return _error_response(401, exc, headers=NO_STORE_HEADERS)
+
+    @app.exception_handler(StatusLoginRequired)
+    async def status_login_required(
+        _: Request,
+        exc: StatusLoginRequired,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=401,
+            headers=NO_STORE_HEADERS,
+            content={"detail": exc.message, "code": exc.code},
+        )
+
+    @app.exception_handler(LinuxDoOAuthError)
+    async def linuxdo_oauth_error(
+        _: Request,
+        exc: LinuxDoOAuthError,
+    ) -> JSONResponse:
+        status_code = exc.status_code if 400 <= exc.status_code < 600 else 400
+        return _error_response(status_code, exc, headers=NO_STORE_HEADERS)
 
     @app.exception_handler(AdminAlreadyExistsError)
     @app.exception_handler(RunStateError)

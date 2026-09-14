@@ -316,6 +316,26 @@ COMPATIBILITY_COLUMNS = {
             "language",
             "ALTER TABLE page_visits ADD COLUMN language VARCHAR(32) NOT NULL DEFAULT ''",
         ),
+        (
+            "linuxdo_user_id",
+            "ALTER TABLE page_visits ADD COLUMN linuxdo_user_id INTEGER",
+        ),
+        (
+            "linuxdo_username",
+            "ALTER TABLE page_visits ADD COLUMN linuxdo_username VARCHAR(80) NOT NULL DEFAULT ''",
+        ),
+        (
+            "linuxdo_name",
+            "ALTER TABLE page_visits ADD COLUMN linuxdo_name VARCHAR(120) NOT NULL DEFAULT ''",
+        ),
+        (
+            "linuxdo_avatar_url",
+            "ALTER TABLE page_visits ADD COLUMN linuxdo_avatar_url VARCHAR(400) NOT NULL DEFAULT ''",
+        ),
+        (
+            "linuxdo_trust_level",
+            "ALTER TABLE page_visits ADD COLUMN linuxdo_trust_level INTEGER",
+        ),
     ],
     "request_audit_account_verifications": [
         (
@@ -368,6 +388,11 @@ COMPATIBILITY_INDEXES = {
         (
             "ix_page_visits_client_ip",
             "CREATE INDEX IF NOT EXISTS ix_page_visits_client_ip ON page_visits (client_ip)",
+        ),
+        (
+            "ix_page_visits_linuxdo_user_id",
+            "CREATE INDEX IF NOT EXISTS ix_page_visits_linuxdo_user_id "
+            "ON page_visits (linuxdo_user_id)",
         ),
     ],
     "register_webhook_events": [

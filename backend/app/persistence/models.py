@@ -705,6 +705,36 @@ class RegisterCallbackDelivery(Base):
     completed_at: Mapped[datetime | None] = mapped_column(AppDateTime())
 
 
+class LinuxDoUser(Base):
+    """Linux.do Connect identities attached to status-page visits."""
+
+    __tablename__ = "linuxdo_users"
+    __table_args__ = (
+        Index("ix_linuxdo_users_linuxdo_id", "linuxdo_id", unique=True),
+        Index("ix_linuxdo_users_username", "username"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    linuxdo_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    username: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    email: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    avatar_url: Mapped[str] = mapped_column(String(400), default="", nullable=False)
+    trust_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    silenced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    last_seen_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    created_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class PageVisit(Base):
     """Status-page visit events for public totals and admin inspection."""
 
@@ -715,6 +745,7 @@ class PageVisit(Base):
         Index("ix_page_visits_day_key_visitor_id", "day_key", "visitor_id"),
         Index("ix_page_visits_day_key_path", "day_key", "path"),
         Index("ix_page_visits_client_ip", "client_ip"),
+        Index("ix_page_visits_linuxdo_user_id", "linuxdo_user_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -730,6 +761,11 @@ class PageVisit(Base):
     user_agent: Mapped[str] = mapped_column(String(400), default="", nullable=False)
     country: Mapped[str] = mapped_column(String(8), default="", nullable=False)
     language: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    linuxdo_user_id: Mapped[int | None] = mapped_column(Integer)
+    linuxdo_username: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    linuxdo_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    linuxdo_avatar_url: Mapped[str] = mapped_column(String(400), default="", nullable=False)
+    linuxdo_trust_level: Mapped[int | None] = mapped_column(Integer)
 
 
 def model_dict(value: Any) -> dict[str, Any]:

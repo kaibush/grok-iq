@@ -35,10 +35,28 @@ def _record(service: PageVisitService, **values):
         "client_ip": "203.0.113.10",
         "authorization": "",
         "visitor_cookie": VISITOR_A,
+        "linuxdo_cookie": "",
         "request_host": "status.example.com",
     }
     payload.update(values)
     return service.record_visit(**payload)
+
+
+class FakeLinuxdoOauth:
+    def user_from_cookie(self, cookie: str):
+        if cookie != "ok":
+            return None
+        return {
+            "id": 1,
+            "linuxdo_id": "42",
+            "username": "alice",
+            "name": "Alice",
+            "avatar_url": "https://cdn.example/alice.png",
+            "trust_level": 2,
+        }
+
+    def touch_seen(self, user_id: int) -> None:
+        self.last_seen = user_id
 
 
 def test_same_visitor_two_visits_count_as_one_uv(tmp_path: Path, monkeypatch):
@@ -347,3 +365,22 @@ def test_visit_ledger_includes_client_ip_and_search(tmp_path: Path, monkeypatch)
     assert item["language"] == "en-US"
     assert item["browser"] == "Chrome"
     assert item["os"] == "Windows"
+
+
+
+def test_linuxdo_cookie_attaches_identity_to_visit_ledger(tmp_path: Path):
+    database = Database(tmp_path / "grokiq.db")
+    database.initialize()
+    repository = PageVisitRepository(database)
+    oauth = FakeLinuxdoOauth()
+    service = PageVisitService(repository, linuxdo_oauth=oauth)
+    assert _record(service, linuxdo_cookie="ok")["recorded"] is True
+    item = service.visit_ledger()["items"][0]
+    assert item["linuxdoUserId"] == 1
+    assert item["linuxdoUsername"] == "alice"
+    assert item["linuxdoName"] == "Alice"
+    assert item["linuxdoAvatarUrl"] == "https://cdn.example/alice.png"
+    assert item["linuxdoTrustLevel"] == 2
+    assert oauth.last_seen == 1
+    matched = service.visit_ledger(q="alice")
+    assert matched["total"] == 1
