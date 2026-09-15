@@ -122,6 +122,7 @@ export type ResultPreviewItem = {
   heading?: string
   source?: 'run' | 'account'
   roundNumber?: number
+  isolated?: boolean
 }
 
 export function previewItemsFromRuns(
@@ -179,10 +180,24 @@ export type PreviewableAccount = {
   name?: string | null
   email?: string | null
   createdAt?: string | null
+  quarantined?: boolean
   assessment?: {
     sample_count?: number | null
     latest_sample_at?: string | null
+    monitor_status?: string | null
+    quarantine_until?: string | null
   } | null
+}
+
+export function isPreviewableAccountIsolated(
+  account?: PreviewableAccount | null
+) {
+  if (!account) return false
+  if (account.quarantined) return true
+  return (
+    account.assessment?.monitor_status === 'quarantined' &&
+    !account.assessment.quarantine_until
+  )
 }
 
 export function previewItemFromAccount(
@@ -205,6 +220,7 @@ export function previewItemFromAccount(
       ? Math.min(sampleCount, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
       : undefined,
     source: 'account' as const,
+    isolated: isPreviewableAccountIsolated(account) || undefined,
   }
 }
 
@@ -527,6 +543,7 @@ export function ResultPreviewGallery({
   const pagerRef = useRef<HTMLDivElement>(null)
   const skipPageCommitRef = useRef(false)
   const [isolateOpen, setIsolateOpen] = useState(false)
+  const [isolatedAccountIds, setIsolatedAccountIds] = useState<number[]>([])
   const [compareExpected, setCompareExpected] = useState(false)
   const previewPrefs = usePersistedViewState(
     PREVIEW_VIEW_STORAGE_KEY,
@@ -908,7 +925,10 @@ export function ResultPreviewGallery({
   const profileName =
     resolvedItem?.profileName || runQuery.data?.profile?.name || ''
   const canCompare = Boolean(expectedOutput || expectedImageUrl)
-  const alreadyIsolated = isIsolatedAccount(account)
+  const alreadyIsolated =
+    isIsolatedAccount(account) ||
+    Boolean(item?.isolated) ||
+    (item != null && isolatedAccountIds.includes(item.accountId))
   const isolateMutation = useMutation({
     mutationFn: (accountId: number) =>
       api.accountAction(accountId, {
@@ -916,21 +936,27 @@ export function ResultPreviewGallery({
         note: PREVIEW_ISOLATE_NOTE,
         propagate: true,
       }),
-    onSuccess: () => {
+    onSuccess: (_result, accountId) => {
       setIsolateOpen(false)
+      setIsolatedAccountIds((current) =>
+        current.includes(accountId) ? current : [...current, accountId]
+      )
       toast.success('已移入隔离区')
-      if (item?.accountId) {
-        void client.invalidateQueries({ queryKey: ['account', item.accountId] })
-        void client.invalidateQueries({ queryKey: ['accounts'] })
-        void client.invalidateQueries({ queryKey: ['runs'] })
-        void client.invalidateQueries({ queryKey: ['dashboard'] })
-      }
+      void client.invalidateQueries({ queryKey: ['account', accountId] })
+      void client.invalidateQueries({
+        queryKey: ['account-preview', accountId],
+      })
+      void client.invalidateQueries({ queryKey: ['accounts'] })
+      void client.invalidateQueries({ queryKey: ['runs'] })
+      void client.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
 
   useEffect(() => {
     if (open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsolatedAccountIds((current) => (current.length ? [] : current))
     client.removeQueries({ queryKey: ['run-preview'] })
     client.removeQueries({ queryKey: ['run-preview-samples'] })
     client.removeQueries({ queryKey: ['account-preview'] })
@@ -1191,7 +1217,7 @@ export function ResultPreviewGallery({
                 </Tabs>
                 <InfoTooltip
                   label='预览操作'
-                  content='单击选中卡片，双击进入阅读模式查看详情。'
+                  content='单击选中某个账号的预览卡片，即可把它移入隔离区；双击进入阅读模式查看详情。'
                 />
               </div>
               {showGroupToggle ? (
@@ -1362,27 +1388,29 @@ export function ResultPreviewGallery({
                   对照预期
                 </Button>
               ) : null}
-              {accountPerspective ? null : alreadyIsolated ? (
-                <Button
-                  type='button'
-                  size='sm'
-                  variant='outline'
-                  className='shrink-0 whitespace-nowrap'
-                  onClick={() => {
-                    onOpenChange(false)
-                    onOpenQuarantine?.()
-                  }}
-                >
-                  <ShieldBan />
-                  查看隔离区
-                </Button>
+              {alreadyIsolated ? (
+                onOpenQuarantine ? (
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    className='shrink-0 whitespace-nowrap'
+                    onClick={() => {
+                      onOpenChange(false)
+                      onOpenQuarantine()
+                    }}
+                  >
+                    <ShieldBan />
+                    查看隔离区
+                  </Button>
+                ) : null
               ) : (
                 <Button
                   type='button'
                   size='sm'
                   variant='outline'
                   className='shrink-0 whitespace-nowrap'
-                  disabled={!item}
+                  disabled={!item || isolateMutation.isPending}
                   onClick={() => setIsolateOpen(true)}
                 >
                   <ShieldBan />
@@ -1885,7 +1913,7 @@ export function ResultPreviewGallery({
         onOpenChange={(nextOpen) => {
           if (!nextOpen && !isolateMutation.isPending) setIsolateOpen(false)
         }}
-        title='将账号移入隔离区？'
+        title={`将 ${item?.accountName || '账号'} 移入隔离区？`}
         desc={
           <div className='space-y-2'>
             <p>

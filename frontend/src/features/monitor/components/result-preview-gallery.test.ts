@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProbeRun, UpstreamAccount } from '@/lib/api'
 import type { AccountPreviewPayload } from '@/lib/preview-payload'
 import {
+  isPreviewableAccountIsolated,
   previewItemsFromAccountPreview,
   previewItemsFromAccounts,
   previewItemsFromRuns,
@@ -108,6 +109,49 @@ describe('previewItemsFromAccounts', () => {
     expect(items[0]?.accountId).toBe(8821)
     expect(items[0]?.accountName).toBe('cooldown-account')
     expect(items[0]?.source).toBe('account')
+    expect(items[0]?.isolated).toBeUndefined()
+  })
+
+  it('marks quarantined accounts so preview isolate can switch to view-only', () => {
+    const items = previewItemsFromAccounts([
+      {
+        id: 9001,
+        name: 'isolated-account',
+        quarantined: true,
+      },
+      {
+        id: 9002,
+        name: 'zone-account',
+        assessment: {
+          monitor_status: 'quarantined',
+          quarantine_until: null,
+        },
+      },
+    ])
+    expect(items.map((item) => item.isolated)).toEqual([true, true])
+  })
+})
+
+describe('isPreviewableAccountIsolated', () => {
+  it('treats permanent isolation as isolated and timed quarantine as not', () => {
+    expect(
+      isPreviewableAccountIsolated({
+        id: 1,
+        assessment: { monitor_status: 'quarantined' },
+      })
+    ).toBe(true)
+    expect(
+      isPreviewableAccountIsolated({
+        id: 2,
+        assessment: {
+          monitor_status: 'quarantined',
+          quarantine_until: '2026-09-16T00:00:00Z',
+        },
+      })
+    ).toBe(false)
+    expect(isPreviewableAccountIsolated({ id: 3, quarantined: true })).toBe(
+      true
+    )
   })
 })
 

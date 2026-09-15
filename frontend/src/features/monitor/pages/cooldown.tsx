@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import {
   Images,
   Loader2,
@@ -239,6 +240,7 @@ function releaseToastMessage(
 
 export function CooldownPage() {
   const client = useQueryClient()
+  const navigate = useNavigate()
   const statsFetching =
     useIsFetching({ queryKey: ['accounts', 'cooldown-stats'] }) > 0
   const view = usePersistedViewState(
@@ -1302,6 +1304,9 @@ export function CooldownPage() {
             : undefined
         }
         perspective='account'
+        onOpenQuarantine={() => {
+          void navigate({ to: '/quarantine' } as never)
+        }}
       />
       <ProbeDialog
         open={probeOpen}
