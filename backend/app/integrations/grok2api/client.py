@@ -13,7 +13,7 @@ from typing import Any
 from curl_cffi.requests import AsyncSession as CurlAsyncSession
 
 from app.core.config import Settings
-from app.integrations.grok2api.chat_probe import ChatProbeRunner
+from app.integrations.grok2api.chat_probe import ChatProbeRunner, probe_iq_headers
 from app.integrations.grok2api.http_session import open_curl_session
 
 
@@ -1181,6 +1181,7 @@ class Grok2APIClient:
             "POST",
             f"/api/admin/v1/egress-nodes/{egress_node_id}/quality-test",
             json=request_body,
+            headers=probe_iq_headers(),
             timeout=300,
         )
         result = self._quality_result_from_payload(payload, extra_usage=extra_usage)
@@ -1208,6 +1209,7 @@ class Grok2APIClient:
                     f"{egress_node_id}/test"
                 ),
                 json={"accountId": str(account_id)},
+                headers=probe_iq_headers(),
                 timeout=300,
             )
         except IntegrationError as exc:

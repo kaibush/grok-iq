@@ -206,6 +206,7 @@ async def test_chat_probe_only_sends_explicit_output_limit(
     assert request_body.get("input") == [{"role": "user", "content": "prompt"}]
     assert request_body.get("store") is False
     assert request_body.get("reasoning") == {"summary": "auto"}
+    assert request_body.get("_headers", {}).get("X-Grok2API-IQ") == "off"
     assert "X-Thread-ID" not in request_body.get("_headers", {})
     assert "messages" not in request_body
     assert "max_tokens" not in request_body
@@ -423,6 +424,7 @@ async def test_quality_probe_only_sends_explicit_output_limit(
 
     async def admin_request(_: str, __: str, **kwargs: Any) -> dict[str, Any]:
         request_body.update(kwargs["json"])
+        request_body["_headers"] = dict(kwargs.get("headers") or {})
         return {
             "requestId": "request-1",
             "statusCode": 200,
@@ -453,6 +455,7 @@ async def test_quality_probe_only_sends_explicit_output_limit(
 
     assert request_body.get("maxOutputTokens") == expected
     assert "accountId" not in request_body
+    assert request_body.get("_headers", {}).get("X-Grok2API-IQ") == "off"
 
 
 @pytest.mark.asyncio
@@ -554,6 +557,7 @@ async def test_quality_guard_probe_pins_account_and_verifies_audit(
         captured["method"] = method
         captured["path"] = path
         captured["json"] = kwargs["json"]
+        captured["headers"] = dict(kwargs.get("headers") or {})
         return {
             "requestId": "guard-1",
             "statusCode": 200,
@@ -580,6 +584,7 @@ async def test_quality_guard_probe_pins_account_and_verifies_audit(
         "/api/admin/v1/egress-quality-guard/nodes/110/test"
     )
     assert captured["json"] == {"accountId": "4725"}
+    assert captured["headers"].get("X-Grok2API-IQ") == "off"
     assert result.request_id == "guard-1"
     assert result.verified_account_id == 4725
     assert result.verified_egress_node_id == 110

@@ -30,6 +30,14 @@ class ChatProbeStreamState:
         self.usage = {}
 
 
+PROBE_IQ_HEADER = "X-Grok2API-IQ"
+PROBE_IQ_HEADER_VALUE = "off"
+
+
+def probe_iq_headers() -> dict[str, str]:
+    return {PROBE_IQ_HEADER: PROBE_IQ_HEADER_VALUE}
+
+
 class ChatProbeRunner:
     """Runs and verifies one streamed chat probe."""
 
@@ -141,6 +149,7 @@ class ChatProbeRunner:
             "Accept": "text/event-stream",
             "Accept-Encoding": "identity",
             "X-Request-ID": request_id,
+            **probe_iq_headers(),
         }
         try:
             async with self.session_factory() as client:
