@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export const MAX_LIVE_HTML_THUMBS = 8
+export const MAX_LIVE_HTML_THUMBS = 24
 export const HTML_THUMB_FRAME_WIDTH = 720
 export const HTML_THUMB_FRAME_HEIGHT = 450
 

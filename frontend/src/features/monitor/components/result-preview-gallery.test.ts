@@ -7,6 +7,7 @@ import {
   previewItemsFromAccounts,
   previewItemsFromRuns,
   previewThumbColumns,
+  previewThumbWindow,
 } from './result-preview-gallery'
 
 const run = (overrides: Partial<ProbeRun> = {}): ProbeRun =>
@@ -174,5 +175,51 @@ describe('previewThumbColumns', () => {
     expect(previewThumbColumns(640)).toBe(2)
     expect(previewThumbColumns(1280)).toBe(4)
     expect(previewThumbColumns(1600)).toBe(5)
+  })
+})
+
+describe('previewThumbWindow', () => {
+  it('keeps the first row mounted when padded scroll is still inside it', () => {
+    const window = previewThumbWindow({
+      itemCount: 40,
+      columns: 5,
+      rowHeight: 200,
+      scrollTop: 200,
+      viewportHeight: 400,
+      offsetTop: 16,
+      overscanRows: 0,
+    })
+    expect(window.visibleStartIndex).toBe(0)
+    expect(window.startIndex).toBe(0)
+  })
+
+  it('includes the last cards when scrolled to the bottom', () => {
+    const window = previewThumbWindow({
+      itemCount: 47,
+      columns: 5,
+      rowHeight: 200,
+      scrollTop: 1616,
+      viewportHeight: 400,
+      offsetTop: 16,
+      overscanRows: 0,
+    })
+    expect(window.visibleEndIndex).toBe(47)
+    expect(window.endIndex).toBe(47)
+  })
+
+  it('overscans extra rows without expanding the live iframe window', () => {
+    const window = previewThumbWindow({
+      itemCount: 50,
+      columns: 5,
+      rowHeight: 200,
+      scrollTop: 416,
+      viewportHeight: 600,
+      offsetTop: 16,
+      overscanRows: 2,
+    })
+    expect(window.visibleStartIndex).toBe(10)
+    expect(window.visibleEndIndex).toBe(25)
+    expect(window.startIndex).toBe(0)
+    expect(window.endIndex).toBe(35)
   })
 })

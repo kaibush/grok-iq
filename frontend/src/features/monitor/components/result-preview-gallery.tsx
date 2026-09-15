@@ -89,6 +89,65 @@ export function previewThumbColumns(width: number) {
   if (width >= 640) return 2
   return 1
 }
+
+const THUMB_OVERSCAN_ROWS = 2
+
+export function previewThumbWindow({
+  itemCount,
+  columns,
+  scrollTop,
+  viewportHeight,
+  rowHeight,
+  offsetTop = 0,
+  overscanRows = THUMB_OVERSCAN_ROWS,
+}: {
+  itemCount: number
+  columns: number
+  scrollTop: number
+  viewportHeight: number
+  rowHeight: number
+  offsetTop?: number
+  overscanRows?: number
+}) {
+  const cols = Math.max(1, columns)
+  const count = Math.max(0, itemCount)
+  const rowCount = Math.max(1, Math.ceil(count / cols) || 1)
+  const rowSize = Math.max(rowHeight, 1)
+  const overscan = Math.max(0, overscanRows)
+  const localTop = Math.max(0, scrollTop - offsetTop)
+  const localBottom = Math.max(
+    localTop,
+    scrollTop + Math.max(viewportHeight, 0) - offsetTop
+  )
+  const visibleStartRow = Math.min(
+    Math.max(rowCount - 1, 0),
+    Math.max(0, Math.floor(localTop / rowSize))
+  )
+  const visibleEndRow = Math.min(
+    rowCount,
+    Math.max(visibleStartRow + 1, Math.ceil(localBottom / rowSize))
+  )
+  const startRow = Math.max(0, visibleStartRow - overscan)
+  const endRow = Math.min(rowCount, visibleEndRow + overscan)
+  return {
+    rowCount,
+    startRow,
+    endRow,
+    startIndex: startRow * cols,
+    endIndex: Math.min(count, endRow * cols),
+    visibleStartIndex: visibleStartRow * cols,
+    visibleEndIndex: Math.min(count, visibleEndRow * cols),
+  }
+}
+
+function previewThumbPlainText(content: string) {
+  return content
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 220)
+}
+
 const PREVIEW_VIEW_STORAGE_KEY = 'grokiq.monitor.result-preview.v1'
 const defaultPreviewView: {
   view: 'split' | 'grid'
@@ -1511,6 +1570,7 @@ export function ResultPreviewGallery({
                                 accountItem={accountItem}
                                 accountIndex={Math.max(0, accountIndex)}
                                 expandRounds={expandRounds}
+                                scrollRoot={gridRef}
                                 selected={group.accountId === item.accountId}
                                 selectedRunId={
                                   group.accountId === item.accountId
@@ -1586,6 +1646,7 @@ export function ResultPreviewGallery({
                                         index={index}
                                         active={selected}
                                         sampleLeaves={Boolean(entry.sampleId)}
+                                        scrollRoot={gridRef}
                                         heading={
                                           entry.heading || entry.profileName
                                         }
@@ -2215,6 +2276,7 @@ function AccountPreviewGroupSection({
   sampleOverrideId,
   sampleOverrideRound,
   profileNames,
+  scrollRoot,
   onSelect,
   onOpen,
 }: {
@@ -2226,10 +2288,11 @@ function AccountPreviewGroupSection({
   sampleOverrideId?: string
   sampleOverrideRound?: number
   profileNames: Record<string, string>
+  scrollRoot?: { readonly current: HTMLElement | null }
   onSelect: (entry: ResultPreviewItem) => void
   onOpen: (entry: ResultPreviewItem) => void
 }) {
-  const { ref, inView } = useInView<HTMLElement>()
+  const { ref, inView } = useInView<HTMLElement>(scrollRoot)
   const query = useQuery({
     queryKey: ['account-preview', accountItem.accountId],
     queryFn: async () =>
@@ -2311,6 +2374,7 @@ function AccountPreviewGroupSection({
                 index={accountIndex}
                 active={active}
                 sampleLeaves={Boolean(entry.sampleId && expandRounds)}
+                scrollRoot={scrollRoot}
                 heading={
                   entry.heading || entry.profileName || entry.accountName
                 }
@@ -2344,13 +2408,22 @@ function VirtualizedThumbGrid({
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
+  const [offsetTop, setOffsetTop] = useState(0)
   const [viewport, setViewport] = useState({ width: 0, height: 0 })
   useLayoutEffect(() => {
     const host = hostRef.current
     const scroller = scrollRef.current
     if (!host) return
     const update = () => {
-      setScrollTop(scroller?.scrollTop ?? 0)
+      const nextScrollTop = scroller?.scrollTop ?? 0
+      const scrollerRect = scroller?.getBoundingClientRect()
+      const hostRect = host.getBoundingClientRect()
+      setScrollTop(nextScrollTop)
+      setOffsetTop(
+        scrollerRect
+          ? hostRect.top - scrollerRect.top + nextScrollTop
+          : 0
+      )
       setViewport({
         width: host.clientWidth,
         height: scroller?.clientHeight || host.clientHeight,
@@ -2358,7 +2431,14 @@ function VirtualizedThumbGrid({
     }
     update()
     const raf = requestAnimationFrame(update)
-    const onScroll = () => setScrollTop(scroller?.scrollTop ?? 0)
+    const onScroll = () => {
+      const nextScrollTop = scroller?.scrollTop ?? 0
+      setScrollTop(nextScrollTop)
+      if (!scroller) return
+      const scrollerRect = scroller.getBoundingClientRect()
+      const hostRect = host.getBoundingClientRect()
+      setOffsetTop(hostRect.top - scrollerRect.top + nextScrollTop)
+    }
     scroller?.addEventListener('scroll', onScroll, { passive: true })
     const observer = new ResizeObserver(update)
     observer.observe(host)
@@ -2378,22 +2458,19 @@ function VirtualizedThumbGrid({
     cols > 1 ? (viewport.width - gap * (cols - 1)) / cols : viewport.width
   const thumbHeight = cellWidth * (THUMB_FRAME_HEIGHT / THUMB_FRAME_WIDTH)
   const rowHeight = thumbHeight + gap
-  const rows = Math.ceil(items.length / cols) || 1
   const measured = viewport.width > 0 && cellWidth > 0
-  const startRow = measured
-    ? Math.max(0, Math.floor(scrollTop / Math.max(rowHeight, 1)))
-    : 0
-  const endRow = measured
-    ? Math.min(
-        rows,
-        Math.ceil(
-          (scrollTop + Math.max(viewport.height, rowHeight)) /
-            Math.max(rowHeight, 1)
-        )
-      )
-    : 0
-  const startIndex = startRow * cols
-  const endIndex = Math.min(items.length, endRow * cols)
+  const windowed = previewThumbWindow({
+    itemCount: items.length,
+    columns: cols,
+    scrollTop,
+    viewportHeight: measured
+      ? Math.max(viewport.height, rowHeight)
+      : rowHeight,
+    rowHeight,
+    offsetTop,
+  })
+  const startIndex = measured ? windowed.startIndex : 0
+  const endIndex = measured ? windowed.endIndex : 0
   const visibleItems = measured ? items.slice(startIndex, endIndex) : []
   return (
     <div
@@ -2401,7 +2478,7 @@ function VirtualizedThumbGrid({
       className='relative w-full'
       style={
         measured
-          ? { height: Math.max(rowHeight, rows * rowHeight) }
+          ? { height: Math.max(rowHeight, windowed.rowCount * rowHeight) }
           : {
               display: 'grid',
               gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
@@ -2413,6 +2490,9 @@ function VirtualizedThumbGrid({
         const index = measured ? startIndex + offset : offset
         const row = Math.floor(index / cols)
         const col = index % cols
+        const live =
+          index >= windowed.visibleStartIndex &&
+          index < windowed.visibleEndIndex
         return (
           <div
             key={entry.id}
@@ -2434,6 +2514,9 @@ function VirtualizedThumbGrid({
               active={entry.id === activeId}
               sampleLeaves={sampleLeaves}
               heading={entry.heading}
+              scrollRoot={scrollRef}
+              eager
+              allowHtmlThumb={live}
               onSelect={onSelect}
               onOpen={onOpen}
             />
@@ -2450,6 +2533,9 @@ function PreviewThumbCard({
   active,
   sampleLeaves,
   heading,
+  scrollRoot,
+  eager = false,
+  allowHtmlThumb,
   onSelect,
   onOpen,
 }: {
@@ -2458,10 +2544,14 @@ function PreviewThumbCard({
   active: boolean
   sampleLeaves: boolean
   heading?: string
+  scrollRoot?: { readonly current: HTMLElement | null }
+  eager?: boolean
+  allowHtmlThumb?: boolean
   onSelect: (index: number) => void
   onOpen: (index: number) => void
 }) {
-  const { ref, inView } = useInView<HTMLButtonElement>()
+  const { ref, inView } = useInView<HTMLButtonElement>(scrollRoot)
+  const queryReady = eager || inView
   const sampleMatchesRun =
     !item.runId || !item.sample?.run_id || item.sample.run_id === item.runId
   const hasLocal = Boolean((item.content || item.sample) && sampleMatchesRun)
@@ -2469,7 +2559,7 @@ function PreviewThumbCard({
   const runQuery = useQuery({
     queryKey: ['run-preview', item.runId],
     queryFn: async () => slimRunPreview(await api.run(item.runId)),
-    enabled: inView && !hasLocal && Boolean(item.runId) && !isAccountItem,
+    enabled: queryReady && !hasLocal && Boolean(item.runId) && !isAccountItem,
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
@@ -2482,7 +2572,8 @@ function PreviewThumbCard({
       slimAccountPreview(
         await api.account(item.accountId, ACCOUNT_PREVIEW_SAMPLE_LIMIT)
       ),
-    enabled: inView && !hasLocal && isAccountItem && Boolean(item.accountId),
+    enabled:
+      queryReady && !hasLocal && isAccountItem && Boolean(item.accountId),
     staleTime: 30_000,
     gcTime: RUN_PREVIEW_GC_TIME,
     refetchOnWindowFocus: false,
@@ -2499,10 +2590,12 @@ function PreviewThumbCard({
   const html = extractHtmlPreviews(content)[0]
   const status = runQuery.data?.status || item.status
   const loading =
-    inView &&
+    queryReady &&
     !hasLocal &&
     (isAccountItem ? accountPreviewQuery.isLoading : runQuery.isLoading) &&
     !content
+  const showHtmlThumb = Boolean(html && (allowHtmlThumb ?? inView))
+  const previewText = previewThumbPlainText(content)
   const statusChip = previewStatusChip(status)
   const inspectSample = sample || item.sample
   const title =
@@ -2540,18 +2633,18 @@ function PreviewThumbCard({
           <div className='flex h-full w-full items-center justify-center text-muted-foreground'>
             <Loader2 className='size-4 animate-spin' />
           </div>
-        ) : inView && html ? (
-          <ScaledHtmlThumb html={html} />
-        ) : inView && content.trim() ? (
+        ) : html && showHtmlThumb ? (
+          <ScaledHtmlThumb html={html} fallbackText={previewText} />
+        ) : queryReady && previewText ? (
           <div className='h-full w-full overflow-hidden p-3 text-[11px] leading-5 text-muted-foreground'>
-            {content.replace(/\s+/g, ' ').slice(0, 220)}
+            {previewText}
           </div>
         ) : (
           <div className='flex h-full w-full flex-col items-center justify-center gap-1.5 text-xs text-muted-foreground'>
-            {inView && isActivePreviewRun(status) ? (
+            {queryReady && isActivePreviewRun(status) ? (
               <Loader2 className='size-4 animate-spin' />
             ) : null}
-            <span>{previewPlaceholderLabel(status, inView)}</span>
+            <span>{previewPlaceholderLabel(status, queryReady)}</span>
           </div>
         )}
       </div>
@@ -2660,11 +2753,18 @@ function ThumbInspectMeta({
   )
 }
 
-function ScaledHtmlThumb({ html }: { html: string }) {
+function ScaledHtmlThumb({
+  html,
+  fallbackText,
+}: {
+  html: string
+  fallbackText?: string
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const slotReady = useHtmlThumbSlot(true)
   const htmlDocument = useMemo(() => buildHtmlDocument(html), [html])
+  const snippet = fallbackText || previewThumbPlainText(html)
   useLayoutEffect(() => {
     const node = ref.current
     if (!node) return
@@ -2693,28 +2793,53 @@ function ScaledHtmlThumb({ html }: { html: string }) {
             transform: `scale(${scale})`,
           }}
         />
-      ) : (
-        <div className='flex h-full w-full items-center justify-center text-muted-foreground'>
-          <Loader2 className='size-4 animate-spin' />
+      ) : snippet ? (
+        <div className='h-full w-full overflow-hidden p-3 text-[11px] leading-5 text-muted-foreground'>
+          {snippet}
         </div>
+      ) : (
+        <div className='h-full w-full bg-white' />
       )}
     </div>
   )
 }
 
-function useInView<T extends HTMLElement>() {
+function useInView<T extends HTMLElement>(
+  rootRef?: { readonly current: HTMLElement | null } | null
+) {
   const ref = useRef<T>(null)
   const [inView, setInView] = useState(false)
   useEffect(() => {
     const node = ref.current
     if (!node) return
+    const root = rootRef?.current ?? null
+    const rootRect = () =>
+      root
+        ? root.getBoundingClientRect()
+        : new DOMRect(0, 0, window.innerWidth, window.innerHeight)
+    const intersects = () => {
+      const bounds = rootRect()
+      const rect = node.getBoundingClientRect()
+      const margin = 160
+      return (
+        rect.bottom >= bounds.top - margin &&
+        rect.top <= bounds.bottom + margin &&
+        rect.right >= bounds.left &&
+        rect.left <= bounds.right
+      )
+    }
+    if (intersects()) setInView(true)
     const observer = new IntersectionObserver(
       ([entry]) => setInView(Boolean(entry?.isIntersecting)),
-      { rootMargin: '80px 0px', threshold: 0.01 }
+      {
+        root,
+        rootMargin: '160px 0px',
+        threshold: 0,
+      }
     )
     observer.observe(node)
     return () => observer.disconnect()
-  }, [])
+  }, [rootRef])
   return { ref, inView }
 }
 
