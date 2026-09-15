@@ -28,6 +28,37 @@ class ClientKeyUsageInput(ClientKeyQuotaInput):
     end: str = ""
 
 
+class StatusAccountRegisterInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    username: str = ""
+    password: str = ""
+    confirm_password: str = Field(default="", alias="confirmPassword")
+    invite_code: str = Field(default="", alias="inviteCode")
+
+
+class StatusAccountLoginInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    username: str = ""
+    password: str = ""
+
+
+class StatusInviteCreateInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    note: str = ""
+    max_uses: int = Field(default=1, alias="maxUses")
+
+
+class StatusInviteUpdateInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    note: str | None = None
+    max_uses: int | None = Field(default=None, alias="maxUses")
+    enabled: bool | None = None
+
+
 class ChatProviderCreateInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

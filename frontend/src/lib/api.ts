@@ -299,11 +299,64 @@ export type LinuxDoPublicUser = {
   createdAt?: string | null
 }
 
+export type StatusAccountPublicUser = {
+  id: number
+  username: string
+  enabled?: boolean
+  loginCount?: number
+  lastLoginAt?: string | null
+  lastSeenAt?: string | null
+  createdAt?: string | null
+  inviteCode?: string
+  inviteCodeId?: number
+}
+
+export type StatusAccountSession = {
+  account: StatusAccountPublicUser
+  expiresAt: string
+}
+
+export type StatusInvitedUser = {
+  id: number
+  username: string
+  createdAt?: string | null
+  lastLoginAt?: string | null
+  enabled?: boolean
+}
+
+export type StatusInviteCode = {
+  id: number
+  code: string
+  note?: string | null
+  maxUses: number
+  usedCount: number
+  remaining: number
+  enabled: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+  invitedUsers: StatusInvitedUser[]
+}
+
+export type StatusInviteCodeLedger = {
+  items: StatusInviteCode[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export type StatusAccountLedger = {
+  items: StatusAccountPublicUser[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 export type PublicStatusAccess = {
   required: boolean
   configured: boolean
   admin: boolean
   user: LinuxDoPublicUser | null
+  account: StatusAccountPublicUser | null
 }
 
 export type LinuxDoUserLedger = {
@@ -2592,37 +2645,34 @@ async function loadEditableRuntimeSettings(): Promise<EditableRuntimeSettings> {
     wechatAppSecret,
     linuxdoSecret,
   ] = await Promise.all([
-      settings.grok2apiAdminPasswordConfigured
-        ? request<{ value: string }>(
-            '/settings/secrets/grok2apiAdminPassword',
-            {
-              cache: 'no-store',
-            }
-          )
-        : Promise.resolve({ value: '' }),
-      settings.grokRegisterWebhookTokenConfigured
-        ? request<{ value: string }>(
-            '/settings/secrets/grokRegisterWebhookToken',
-            { cache: 'no-store' }
-          )
-        : Promise.resolve({ value: '' }),
-      settings.ssoProxyConfigured
-        ? request<{ value: string }>('/settings/secrets/ssoProxy', {
-            cache: 'no-store',
-          })
-        : Promise.resolve({ value: '' }),
-      settings.wechatAppSecretConfigured
-        ? request<{ value: string }>('/settings/secrets/wechatAppSecret', {
-            cache: 'no-store',
-          })
-        : Promise.resolve({ value: '' }),
-      settings.linuxdoOauthClientSecretConfigured
-        ? request<{ value: string }>(
-            '/settings/secrets/linuxdoOauthClientSecret',
-            { cache: 'no-store' }
-          )
-        : Promise.resolve({ value: '' }),
-    ])
+    settings.grok2apiAdminPasswordConfigured
+      ? request<{ value: string }>('/settings/secrets/grok2apiAdminPassword', {
+          cache: 'no-store',
+        })
+      : Promise.resolve({ value: '' }),
+    settings.grokRegisterWebhookTokenConfigured
+      ? request<{ value: string }>(
+          '/settings/secrets/grokRegisterWebhookToken',
+          { cache: 'no-store' }
+        )
+      : Promise.resolve({ value: '' }),
+    settings.ssoProxyConfigured
+      ? request<{ value: string }>('/settings/secrets/ssoProxy', {
+          cache: 'no-store',
+        })
+      : Promise.resolve({ value: '' }),
+    settings.wechatAppSecretConfigured
+      ? request<{ value: string }>('/settings/secrets/wechatAppSecret', {
+          cache: 'no-store',
+        })
+      : Promise.resolve({ value: '' }),
+    settings.linuxdoOauthClientSecretConfigured
+      ? request<{ value: string }>(
+          '/settings/secrets/linuxdoOauthClientSecret',
+          { cache: 'no-store' }
+        )
+      : Promise.resolve({ value: '' }),
+  ])
   return {
     ...settings,
     grok2apiAdminPassword: adminPassword.value,
@@ -3548,9 +3598,77 @@ export const api = {
       skipAuth: true,
       credentials: 'include',
     }),
+  publicStatusAccountRegister: (body: {
+    username: string
+    password: string
+    confirmPassword: string
+    inviteCode: string
+  }) =>
+    request<StatusAccountSession>('/public/status-account/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
+    }),
+  publicStatusAccountLogin: (body: { username: string; password: string }) =>
+    request<StatusAccountSession>('/public/status-account/login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      skipAuth: !authorizationHeaders().Authorization,
+      credentials: 'include',
+    }),
+  publicStatusAccountLogout: () =>
+    request<{ loggedOut: boolean }>('/public/status-account/logout', {
+      method: 'POST',
+      skipAuth: true,
+      credentials: 'include',
+    }),
+  publicStatusAccountMe: () =>
+    request<{ account: StatusAccountPublicUser | null }>(
+      '/public/status-account/me',
+      {
+        skipAuth: !authorizationHeaders().Authorization,
+        credentials: 'include',
+      }
+    ),
   linuxdoUsers: (params?: { q?: string; page?: number; pageSize?: number }) =>
     request<LinuxDoUserLedger>(
       `/linuxdo-users${query({
+        q: params?.q,
+        page: params?.page,
+        page_size: params?.pageSize,
+      })}`
+    ),
+  statusInviteCodes: (params?: {
+    q?: string
+    page?: number
+    pageSize?: number
+  }) =>
+    request<StatusInviteCodeLedger>(
+      `/status-invite-codes${query({
+        q: params?.q,
+        page: params?.page,
+        page_size: params?.pageSize,
+      })}`
+    ),
+  createStatusInviteCode: (body: { note?: string; maxUses: number }) =>
+    request<StatusInviteCode>('/status-invite-codes', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  statusInviteCode: (id: number) =>
+    request<StatusInviteCode>(`/status-invite-codes/${id}`),
+  updateStatusInviteCode: (
+    id: number,
+    body: { note?: string; maxUses?: number; enabled?: boolean }
+  ) =>
+    request<StatusInviteCode>(`/status-invite-codes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  statusAccounts: (params?: { q?: string; page?: number; pageSize?: number }) =>
+    request<StatusAccountLedger>(
+      `/status-accounts${query({
         q: params?.q,
         page: params?.page,
         page_size: params?.pageSize,

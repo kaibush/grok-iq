@@ -768,6 +768,58 @@ class PageVisit(Base):
     linuxdo_trust_level: Mapped[int | None] = mapped_column(Integer)
 
 
+class StatusInviteCode(Base):
+    """Invite codes that gate local /status account registration."""
+
+    __tablename__ = "status_invite_codes"
+    __table_args__ = (Index("ix_status_invite_codes_code", "code", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_admin_id: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class StatusAccount(Base):
+    """Local username/password identities for the public /status page."""
+
+    __tablename__ = "status_accounts"
+    __table_args__ = (
+        Index("ix_status_accounts_username", "username", unique=True),
+        Index("ix_status_accounts_invite_code_id", "invite_code_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    password_salt: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_iterations: Mapped[int] = mapped_column(Integer, default=310_000, nullable=False)
+    token_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    invite_code_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("status_invite_codes.id"), nullable=False
+    )
+    invite_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    last_seen_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    created_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
 def model_dict(value: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:

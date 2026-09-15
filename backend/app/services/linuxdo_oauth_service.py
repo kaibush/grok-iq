@@ -36,7 +36,7 @@ class LinuxDoOAuthError(ValueError):
 
 
 class StatusLoginRequired(Exception):
-    def __init__(self, message: str = "请先使用 Linux.do 登录"):
+    def __init__(self, message: str = "请先登录后再查看状态页"):
         super().__init__(message)
         self.message = message
         self.code = "linuxdo_login_required"

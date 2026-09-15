@@ -19,6 +19,7 @@ from app.services.request_audit_service import RequestAuditService
 from app.services.scheduler import SchedulerService
 from app.services.settings_service import RuntimeSettingsService
 from app.services.sso_report_service import SsoReportService
+from app.services.status_account_service import StatusAccountService
 from app.services.tps_fuse_sync import TpsFuseSyncService
 from app.services.update_check import UpdateCheckService
 from app.services.wechat_notification import WeChatAccountNotificationService
@@ -41,6 +42,7 @@ from .routes.public import build_public_router
 from .routes.request_audits import build_request_audits_router
 from .routes.settings import build_settings_router
 from .routes.sso_reports import build_sso_reports_router
+from .routes.status_accounts import build_status_accounts_router
 from .routes.system import build_system_router
 
 
@@ -65,6 +67,7 @@ def build_router(
     page_visits: PageVisitService | None = None,
     tps_fuse_sync: TpsFuseSyncService | None = None,
     linuxdo_oauth: LinuxDoOAuthService | None = None,
+    status_accounts: StatusAccountService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     require_admin = build_admin_auth_dependency(auth_service)
@@ -88,6 +91,7 @@ def build_router(
             request_audits=request_audits,
             page_visits=page_visits,
             linuxdo_oauth=linuxdo_oauth,
+            status_accounts=status_accounts,
         )
     )
     router.include_router(
@@ -135,6 +139,8 @@ def build_router(
         protected.include_router(build_page_stats_router(page_visits))
     if linuxdo_oauth is not None:
         protected.include_router(build_linuxdo_users_router(linuxdo_oauth))
+    if status_accounts is not None:
+        protected.include_router(build_status_accounts_router(status_accounts))
     protected.include_router(build_sso_reports_router(sso_reports))
     protected.include_router(build_register_events_router(register_integration))
     protected.include_router(build_system_router(updates))

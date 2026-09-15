@@ -34,6 +34,7 @@ import { Route as AuthenticatedProbeProfilesIndexRouteImport } from './routes/_a
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
 import { Route as AuthenticatedPageVisitsIndexRouteImport } from './routes/_authenticated/page-visits/index'
+import { Route as AuthenticatedStatusInvitesIndexRouteImport } from './routes/_authenticated/status-invites/index'
 import { Route as AuthenticatedGuideIndexRouteImport } from './routes/_authenticated/guide/index'
 import { Route as AuthenticatedEgressNodesIndexRouteImport } from './routes/_authenticated/egress-nodes/index'
 import { Route as AuthenticatedCooldownIndexRouteImport } from './routes/_authenticated/cooldown/index'
@@ -185,6 +186,12 @@ const AuthenticatedPageVisitsIndexRoute =
     path: '/page-visits/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedStatusInvitesIndexRoute =
+  AuthenticatedStatusInvitesIndexRouteImport.update({
+    id: '/status-invites/',
+    path: '/status-invites/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedGuideIndexRoute = AuthenticatedGuideIndexRouteImport.update({
   id: '/guide/',
   path: '/guide/',
@@ -320,6 +327,7 @@ export interface FileRoutesByFullPath {
   '/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/guide/': typeof AuthenticatedGuideIndexRoute
   '/page-visits/': typeof AuthenticatedPageVisitsIndexRoute
+  '/status-invites/': typeof AuthenticatedStatusInvitesIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/probe-profiles/': typeof AuthenticatedProbeProfilesIndexRoute
@@ -362,6 +370,7 @@ export interface FileRoutesByTo {
   '/egress-nodes': typeof AuthenticatedEgressNodesIndexRoute
   '/guide': typeof AuthenticatedGuideIndexRoute
   '/page-visits': typeof AuthenticatedPageVisitsIndexRoute
+  '/status-invites': typeof AuthenticatedStatusInvitesIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/probe-profiles': typeof AuthenticatedProbeProfilesIndexRoute
@@ -407,6 +416,7 @@ export interface FileRoutesById {
   '/_authenticated/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/_authenticated/guide/': typeof AuthenticatedGuideIndexRoute
   '/_authenticated/page-visits/': typeof AuthenticatedPageVisitsIndexRoute
+  '/_authenticated/status-invites/': typeof AuthenticatedStatusInvitesIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/probe-profiles/': typeof AuthenticatedProbeProfilesIndexRoute
@@ -452,6 +462,7 @@ export interface FileRouteTypes {
     | '/egress-nodes/'
     | '/guide/'
     | '/page-visits/'
+    | '/status-invites/'
     | '/plans/'
     | '/playground/'
     | '/probe-profiles/'
@@ -494,6 +505,7 @@ export interface FileRouteTypes {
     | '/egress-nodes'
     | '/guide'
     | '/page-visits'
+    | '/status-invites'
     | '/plans'
     | '/playground'
     | '/probe-profiles'
@@ -538,6 +550,7 @@ export interface FileRouteTypes {
     | '/_authenticated/egress-nodes/'
     | '/_authenticated/guide/'
     | '/_authenticated/page-visits/'
+    | '/_authenticated/status-invites/'
     | '/_authenticated/plans/'
     | '/_authenticated/playground/'
     | '/_authenticated/probe-profiles/'
@@ -742,6 +755,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPageVisitsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/status-invites/': {
+      id: '/_authenticated/status-invites/'
+      path: '/status-invites'
+      fullPath: '/status-invites/'
+      preLoaderRoute: typeof AuthenticatedStatusInvitesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/guide/': {
       id: '/_authenticated/guide/'
       path: '/guide'
@@ -910,6 +930,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedEgressNodesIndexRoute: typeof AuthenticatedEgressNodesIndexRoute
   AuthenticatedGuideIndexRoute: typeof AuthenticatedGuideIndexRoute
   AuthenticatedPageVisitsIndexRoute: typeof AuthenticatedPageVisitsIndexRoute
+  AuthenticatedStatusInvitesIndexRoute: typeof AuthenticatedStatusInvitesIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProbeProfilesIndexRoute: typeof AuthenticatedProbeProfilesIndexRoute
@@ -936,6 +957,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEgressNodesIndexRoute: AuthenticatedEgressNodesIndexRoute,
   AuthenticatedGuideIndexRoute: AuthenticatedGuideIndexRoute,
   AuthenticatedPageVisitsIndexRoute: AuthenticatedPageVisitsIndexRoute,
+  AuthenticatedStatusInvitesIndexRoute: AuthenticatedStatusInvitesIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProbeProfilesIndexRoute: AuthenticatedProbeProfilesIndexRoute,

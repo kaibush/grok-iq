@@ -153,8 +153,8 @@ export function SettingsConnectionTab({
       <TabsContent value='status-login' className='mt-0 space-y-4'>
         <SettingsCard
           icon={LogIn}
-          title='状态页 Linux.do 登录'
-          description='默认关闭时 /status 仍可公开访问。打开后需先用 Linux.do Connect 登录才能查看看板。'
+          title='状态页登录'
+          description='打开后需先登录才能查看 /status，支持 Linux.do Connect 或邀请码注册的本地账号。邀请码和注册账号在侧栏『状态账号』中管理。'
         >
           <div className='space-y-4'>
             <div className='flex flex-wrap items-center gap-2'>
@@ -217,8 +217,8 @@ export function SettingsConnectionTab({
 
             <SettingList>
               <SettingListItem
-                label='启用 Linux.do 登录'
-                description='/status 默认公开。打开后必须先用 Linux.do Connect 登录才能查看。关闭后立即恢复公开访问。即使尚未填写 Client ID/Secret 也可以打开开关，但登录会失败直到配置完成。'
+                label='启用状态页登录'
+                description='/status 默认公开。打开后需先登录才能查看，支持 Linux.do Connect 或邀请码注册的本地账号。关闭后立即恢复公开访问。即使尚未填写 Linux.do Client ID/Secret 也可以打开开关；未配置时仍可用邀请码账号登录。'
                 checked={form.statusLinuxdoOauthEnabled}
                 onCheckedChange={(value) =>
                   set('statusLinuxdoOauthEnabled', value)
@@ -283,9 +283,7 @@ export function SettingsConnectionTab({
                     void copyText(value)
                       .then(() =>
                         toast.success(
-                          empty
-                            ? '已填入并复制默认回调地址'
-                            : '已复制回调地址'
+                          empty ? '已填入并复制默认回调地址' : '已复制回调地址'
                         )
                       )
                       .catch((error) => toast.error(getErrorMessage(error)))

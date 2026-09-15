@@ -17,11 +17,21 @@ from app.services.linuxdo_oauth_service import (
     SESSION_COOKIE_NAME,
     LinuxDoOAuthError,
     LinuxDoOAuthService,
+    StatusLoginRequired,
     request_origin,
 )
 from app.services.page_visit_service import VISITOR_COOKIE_NAME, PageVisitService
 from app.services.request_audit_service import RequestAuditService
-from app.web.schemas import ClientKeyQuotaInput, ClientKeyUsageInput
+from app.services.status_account_service import (
+    STATUS_ACCOUNT_COOKIE_NAME,
+    StatusAccountService,
+)
+from app.web.schemas import (
+    ClientKeyQuotaInput,
+    ClientKeyUsageInput,
+    StatusAccountLoginInput,
+    StatusAccountRegisterInput,
+)
 
 from ._shared import disable_client_cache
 
@@ -40,18 +50,20 @@ def build_public_router(
     request_audits: RequestAuditService | None = None,
     page_visits: PageVisitService | None = None,
     linuxdo_oauth: LinuxDoOAuthService | None = None,
+    status_accounts: StatusAccountService | None = None,
 ) -> APIRouter:
     router = APIRouter()
     quota_service = ClientKeyQuotaService(client)
     usage_service = ClientKeyUsageService(client, quota_service=quota_service)
 
     def require_status_access(request: Request) -> None:
-        if linuxdo_oauth is None:
-            return
-        linuxdo_oauth.require_status_access(
+        authorize_status_request(
+            linuxdo_oauth,
+            status_accounts,
+            auth_service,
             request.headers.get("authorization") or "",
             request.cookies.get(SESSION_COOKIE_NAME) or "",
-            auth_service,
+            request.cookies.get(STATUS_ACCOUNT_COOKIE_NAME) or "",
         )
 
     @router.get("/public/status-access")
@@ -60,6 +72,7 @@ def build_public_router(
         response: Response,
     ) -> dict[str, Any]:
         disable_client_cache(response)
+        account = _status_account_from_cookie(status_accounts, request)
         if linuxdo_oauth is None:
             return {
                 "required": False,
@@ -68,12 +81,15 @@ def build_public_router(
                     auth_service, request.headers.get("authorization") or ""
                 ),
                 "user": None,
+                "account": account,
             }
-        return linuxdo_oauth.access_status(
+        payload = linuxdo_oauth.access_status(
             request.headers.get("authorization") or "",
             request.cookies.get(SESSION_COOKIE_NAME) or "",
             auth_service,
         )
+        payload["account"] = account
+        return payload
 
     @router.get("/public/linuxdo/login")
     async def public_linuxdo_login(
@@ -144,6 +160,66 @@ def build_public_router(
                 linuxdo_oauth.user_from_cookie(request.cookies.get(SESSION_COOKIE_NAME) or "")
             )
         }
+
+    @router.post("/public/status-account/register")
+    async def public_status_account_register(
+        payload: StatusAccountRegisterInput,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        if status_accounts is None:
+            raise ValueError("状态账号功能未启用")
+        result = status_accounts.register(
+            payload.username,
+            payload.password,
+            payload.confirm_password,
+            payload.invite_code,
+            client_ip=_client_ip(request),
+        )
+        token = str(result.pop("sessionToken") or "")
+        _set_status_account_cookie(request, response, token, status_accounts)
+        return result
+
+    @router.post("/public/status-account/login")
+    async def public_status_account_login(
+        payload: StatusAccountLoginInput,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        if status_accounts is None:
+            raise ValueError("状态账号功能未启用")
+        result = status_accounts.login(
+            payload.username,
+            payload.password,
+            client_ip=_client_ip(request),
+        )
+        token = str(result.pop("sessionToken") or "")
+        _set_status_account_cookie(request, response, token, status_accounts)
+        return result
+
+    @router.post("/public/status-account/logout")
+    async def public_status_account_logout(
+        request: Request,
+        response: Response,
+    ) -> dict[str, bool]:
+        disable_client_cache(response)
+        cookie = request.cookies.get(STATUS_ACCOUNT_COOKIE_NAME) or ""
+        if status_accounts is not None:
+            account = status_accounts.user_from_cookie(cookie)
+            if account is not None:
+                status_accounts.logout_account(account)
+        response.delete_cookie(STATUS_ACCOUNT_COOKIE_NAME, path="/")
+        return {"loggedOut": True}
+
+    @router.get("/public/status-account/me")
+    async def public_status_account_me(
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        return {"account": _status_account_from_cookie(status_accounts, request)}
 
     @router.get("/public/upstream-accounts")
     async def public_upstream_accounts(
@@ -258,6 +334,53 @@ def build_public_router(
             return page_visits.overview(period=period, timezone=timezone)
 
     return router
+
+
+def authorize_status_request(
+    linuxdo_oauth: LinuxDoOAuthService | None,
+    status_accounts: StatusAccountService | None,
+    auth_service: AuthService,
+    authorization: str,
+    linuxdo_cookie: str,
+    status_cookie: str,
+) -> None:
+    if linuxdo_oauth is None:
+        return
+    if linuxdo_oauth.is_status_authorized(authorization, linuxdo_cookie, auth_service):
+        return
+    if status_accounts is not None and status_accounts.user_from_cookie(status_cookie):
+        return
+    raise StatusLoginRequired("请先登录后再查看状态页")
+
+
+def _status_account_from_cookie(
+    status_accounts: StatusAccountService | None,
+    request: Request,
+) -> dict[str, Any] | None:
+    if status_accounts is None:
+        return None
+    return status_accounts.public_account(
+        status_accounts.user_from_cookie(
+            request.cookies.get(STATUS_ACCOUNT_COOKIE_NAME) or ""
+        )
+    )
+
+
+def _set_status_account_cookie(
+    request: Request,
+    response: Response,
+    token: str,
+    status_accounts: StatusAccountService,
+) -> None:
+    response.set_cookie(
+        key=STATUS_ACCOUNT_COOKIE_NAME,
+        value=token,
+        max_age=int(getattr(status_accounts.settings, "jwt_ttl_seconds", 7 * 24 * 60 * 60)),
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_secure(request),
+    )
 
 
 def _cookie_secure(request: Request) -> bool:
