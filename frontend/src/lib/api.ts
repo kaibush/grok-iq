@@ -281,6 +281,8 @@ export type PublicVisitRecent = {
   linuxdoName?: string
   linuxdoAvatarUrl?: string
   linuxdoTrustLevel?: number | null
+  statusAccountId?: number | null
+  statusAccountUsername?: string
 }
 
 export type LinuxDoPublicUser = {

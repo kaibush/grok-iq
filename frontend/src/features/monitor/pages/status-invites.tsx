@@ -50,6 +50,11 @@ import { EmptyState, LoadingState, Page, PageHeader } from '@/components/page'
 import { ServerPagination } from '@/components/server-pagination'
 import { StatCard } from '@/components/stat-card'
 import { TablePanel } from '@/components/table-panel'
+import {
+  LinuxDoIdentityCell,
+  LinuxDoStatusBadges,
+  LinuxDoTrustCell,
+} from '@/features/monitor/components/status-user-identity'
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
 const MIN_MAX_USES = 1
@@ -57,7 +62,7 @@ const MAX_MAX_USES = 1000
 
 export function StatusInvitesPage() {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'invites' | 'accounts'>('invites')
+  const [tab, setTab] = useState<'invites' | 'accounts' | 'linuxdo'>('invites')
   const [draftQuery, setDraftQuery] = useState('')
   const [appliedQuery, setAppliedQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -71,6 +76,10 @@ export function StatusInvitesPage() {
     null
   )
   const [invitedCode, setInvitedCode] = useState<StatusInviteCode | null>(null)
+  const [draftLinuxdoQuery, setDraftLinuxdoQuery] = useState('')
+  const [appliedLinuxdoQuery, setAppliedLinuxdoQuery] = useState('')
+  const [linuxdoPage, setLinuxdoPage] = useState(1)
+  const [linuxdoPageSize, setLinuxdoPageSize] = useState(50)
 
   const codesQuery = useQuery({
     queryKey: ['status-invite-codes', appliedQuery, page, pageSize],
@@ -102,6 +111,21 @@ export function StatusInvitesPage() {
     queryFn: () => api.statusInviteCode(invitedCode!.id),
     enabled: invitedCode != null,
   })
+  const linuxdoUsersQuery = useQuery({
+    queryKey: [
+      'linuxdo-users',
+      appliedLinuxdoQuery,
+      linuxdoPage,
+      linuxdoPageSize,
+    ],
+    queryFn: () =>
+      api.linuxdoUsers({
+        q: appliedLinuxdoQuery,
+        page: linuxdoPage,
+        pageSize: linuxdoPageSize,
+      }),
+    placeholderData: (previous) => previous,
+  })
 
   const codes = codesQuery.data
   const codeRows = codes?.items ?? []
@@ -117,6 +141,12 @@ export function StatusInvitesPage() {
     : ''
   const codesLoading = codesQuery.isPending && !codesQuery.data
   const accountsLoading = accountsQuery.isPending && !accountsQuery.data
+  const linuxdoUsers = linuxdoUsersQuery.data
+  const linuxdoRows = linuxdoUsers?.items ?? []
+  const linuxdoError = linuxdoUsersQuery.isError
+    ? getErrorMessage(linuxdoUsersQuery.error)
+    : ''
+  const linuxdoLoading = linuxdoUsersQuery.isPending && !linuxdoUsersQuery.data
   const invitedUsers =
     invitedQuery.data?.invitedUsers ?? invitedCode?.invitedUsers ?? []
 
@@ -178,13 +208,18 @@ export function StatusInvitesPage() {
     setAccountsPage(1)
   }
 
+  function submitLinuxdoSearch() {
+    setAppliedLinuxdoQuery(draftLinuxdoQuery.trim())
+    setLinuxdoPage(1)
+  }
+
   return (
     <Page>
       <PageHeader
-        title='状态账号'
-        description='生成 /status 邀请码，查看注册账号和使用次数。账号登录有效期 7 天。'
+        title='状态用户'
+        description='统一管理 /status 的邀请码、本地账号和 Linux.do 用户。账号登录有效期 7 天。'
         actions={
-          <ActionToolbar label='状态账号操作'>
+          <ActionToolbar label='状态用户操作'>
             <ToolbarAction
               label='生成邀请码'
               onClick={() =>
@@ -198,11 +233,16 @@ export function StatusInvitesPage() {
               <Plus />
             </ToolbarAction>
             <ToolbarAction
-              label='刷新状态账号'
-              pending={codesQuery.isFetching || accountsQuery.isFetching}
+              label='刷新状态用户'
+              pending={
+                codesQuery.isFetching ||
+                accountsQuery.isFetching ||
+                linuxdoUsersQuery.isFetching
+              }
               onClick={() => {
                 void codesQuery.refetch()
                 void accountsQuery.refetch()
+                void linuxdoUsersQuery.refetch()
               }}
             >
               <RefreshCw />
@@ -211,7 +251,7 @@ export function StatusInvitesPage() {
         }
       />
 
-      <div className='grid gap-4 sm:grid-cols-3'>
+      <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
         <StatCard
           compact
           label='邀请码'
@@ -246,18 +286,35 @@ export function StatusInvitesPage() {
           loading={accountsLoading}
           index={2}
         />
+        <StatCard
+          compact
+          label='Linux.do 用户'
+          value={linuxdoUsers ? formatNumber(linuxdoUsers.total, 0) : '—'}
+          detail='状态页 Linux.do 登录用户'
+          icon={Users}
+          tone='violet'
+          loading={linuxdoLoading}
+          index={3}
+        />
       </div>
 
       <Tabs
         value={tab}
         onValueChange={(value) => {
-          if (value === 'invites' || value === 'accounts') setTab(value)
+          if (
+            value === 'invites' ||
+            value === 'accounts' ||
+            value === 'linuxdo'
+          ) {
+            setTab(value)
+          }
         }}
         className='gap-4'
       >
         <TabsList className='h-8 w-full justify-start overflow-x-auto sm:w-fit'>
           <TabsTrigger value='invites'>邀请码</TabsTrigger>
           <TabsTrigger value='accounts'>注册账号</TabsTrigger>
+          <TabsTrigger value='linuxdo'>Linux.do 用户</TabsTrigger>
         </TabsList>
 
         <TabsContent value='invites' className='mt-0'>
@@ -487,6 +544,7 @@ export function StatusInvitesPage() {
                       <TableHead>邀请码</TableHead>
                       <TableHead>注册时间</TableHead>
                       <TableHead>最近登录</TableHead>
+                      <TableHead>最近访问</TableHead>
                       <TableHead>状态</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -509,8 +567,127 @@ export function StatusInvitesPage() {
                         <TableCell className='whitespace-nowrap text-muted-foreground'>
                           {formatDate(row.lastLoginAt)}
                         </TableCell>
+                        <TableCell className='whitespace-nowrap text-muted-foreground'>
+                          {formatDate(row.lastSeenAt)}
+                        </TableCell>
                         <TableCell>
                           <AccountStatusBadge account={row} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TablePanel>
+        </TabsContent>
+        <TabsContent value='linuxdo' className='mt-0'>
+          <TablePanel
+            toolbar={
+              <form
+                className='flex min-w-0 items-center gap-2'
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  submitLinuxdoSearch()
+                }}
+              >
+                <div className='relative min-w-0 flex-1'>
+                  <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
+                  <Input
+                    value={draftLinuxdoQuery}
+                    onChange={(event) =>
+                      setDraftLinuxdoQuery(event.target.value)
+                    }
+                    placeholder='用户名、昵称、邮箱或 ID，回车搜索'
+                    aria-label='搜索 Linux.do 用户'
+                    className='ps-9'
+                  />
+                </div>
+                <Button type='submit' variant='outline' size='sm'>
+                  搜索
+                </Button>
+              </form>
+            }
+            footer={
+              <ServerPagination
+                page={linuxdoPage}
+                pageSize={linuxdoPageSize}
+                total={linuxdoUsers?.total ?? 0}
+                disabled={linuxdoLoading}
+                loading={linuxdoUsersQuery.isFetching}
+                itemLabel='位用户'
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onPageChange={setLinuxdoPage}
+                onPageSizeChange={(size) => {
+                  setLinuxdoPageSize(size)
+                  setLinuxdoPage(1)
+                }}
+              />
+            }
+          >
+            {linuxdoError ? (
+              <p className='px-1 py-3 text-sm text-destructive'>
+                Linux.do 用户读取失败：{linuxdoError}
+              </p>
+            ) : linuxdoLoading ? (
+              <LoadingState label='正在加载 Linux.do 用户' />
+            ) : linuxdoRows.length === 0 ? (
+              <EmptyState
+                compact
+                icon={Users}
+                title='没有匹配的用户'
+                description='还没有 Linux.do 登录记录，或搜索词没有命中。'
+                className='border-0 bg-transparent'
+              />
+            ) : (
+              <div className='overflow-x-auto'>
+                <Table>
+                  <TableHeader>
+                    <TableRow className='hover:bg-transparent'>
+                      <TableHead>用户</TableHead>
+                      <TableHead>信任等级</TableHead>
+                      <TableHead>邮箱</TableHead>
+                      <TableHead>登录次数</TableHead>
+                      <TableHead>最近登录</TableHead>
+                      <TableHead>最近访问</TableHead>
+                      <TableHead>状态</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {linuxdoRows.map((user) => (
+                      <TableRow key={user.id} className='hover:bg-transparent'>
+                        <TableCell>
+                          <LinuxDoIdentityCell
+                            name={user.name}
+                            username={user.username}
+                            avatarUrl={user.avatarUrl}
+                          />
+                        </TableCell>
+                        <TableCell className='whitespace-nowrap'>
+                          <LinuxDoTrustCell level={user.trustLevel} />
+                        </TableCell>
+                        <TableCell
+                          className='max-w-[16rem] truncate'
+                          title={user.email}
+                        >
+                          {user.email?.trim() || '—'}
+                        </TableCell>
+                        <TableCell className='tabular-nums'>
+                          {user.loginCount == null
+                            ? '—'
+                            : formatNumber(user.loginCount, 0)}
+                        </TableCell>
+                        <TableCell className='whitespace-nowrap text-muted-foreground'>
+                          {formatDate(user.lastLoginAt)}
+                        </TableCell>
+                        <TableCell className='whitespace-nowrap text-muted-foreground'>
+                          {formatDate(user.lastSeenAt)}
+                        </TableCell>
+                        <TableCell>
+                          <LinuxDoStatusBadges
+                            active={user.active}
+                            silenced={user.silenced}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}

@@ -306,6 +306,7 @@ def build_public_router(
                 authorization=request.headers.get("authorization") or "",
                 visitor_cookie=request.cookies.get(VISITOR_COOKIE_NAME) or "",
                 linuxdo_cookie=request.cookies.get(SESSION_COOKIE_NAME) or "",
+                status_cookie=request.cookies.get(STATUS_ACCOUNT_COOKIE_NAME) or "",
                 request_host=request.headers.get("host") or (request.base_url.hostname or ""),
                 country=request.headers.get("cf-ipcountry") or "",
                 language=request.headers.get("accept-language") or "",

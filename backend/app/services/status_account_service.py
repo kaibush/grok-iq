@@ -142,6 +142,9 @@ class StatusAccountService:
             return None
         return account
 
+    def touch_seen(self, account_id: int) -> None:
+        self.repository.touch_seen(account_id, utc_now())
+
     def encode_session(self, account: dict[str, Any]) -> str:
         token, _expires_at = self._encode_session(account)
         return token

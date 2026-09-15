@@ -137,6 +137,7 @@ page_visit_service = PageVisitService(
     page_visit_repository,
     auth_service=auth_service,
     linuxdo_oauth=linuxdo_oauth_service,
+    status_accounts=status_account_service,
 )
 quality_retry_isolation_service = QualityRetryIsolationService(
     settings=settings,

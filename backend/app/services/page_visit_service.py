@@ -13,6 +13,7 @@ from app.core.clock import APP_TIMEZONE, APP_TIMEZONE_NAME, app_now, to_app_time
 from app.persistence.page_visit_repository import PageVisitRepository
 from app.services.auth_service import AuthService
 from app.services.linuxdo_oauth_service import LinuxDoOAuthService
+from app.services.status_account_service import StatusAccountService
 
 VISITOR_COOKIE_NAME = "grokiq_vid"
 PERIODS = ("24h", "7d", "30d", "90d")
@@ -50,10 +51,12 @@ class PageVisitService:
         repository: PageVisitRepository,
         auth_service: AuthService | None = None,
         linuxdo_oauth: LinuxDoOAuthService | None = None,
+        status_accounts: StatusAccountService | None = None,
     ):
         self.repository = repository
         self.auth_service = auth_service
         self.linuxdo_oauth = linuxdo_oauth
+        self.status_accounts = status_accounts
 
     def record_visit(
         self,
@@ -65,6 +68,7 @@ class PageVisitService:
         authorization: str = "",
         visitor_cookie: str = "",
         linuxdo_cookie: str = "",
+        status_cookie: str = "",
         request_host: str = "",
         country: str = "",
         language: str = "",
@@ -91,6 +95,7 @@ class PageVisitService:
                 "set_cookie": set_cookie,
             }
         linuxdo_user = self._linuxdo_user(linuxdo_cookie)
+        status_account = self._status_account(status_cookie)
         self.repository.record(
             {
                 "visitor_id": visitor_id,
@@ -110,10 +115,16 @@ class PageVisitService:
                 "linuxdo_name": "" if linuxdo_user is None else str(linuxdo_user.get("name") or ""),
                 "linuxdo_avatar_url": "" if linuxdo_user is None else str(linuxdo_user.get("avatar_url") or ""),
                 "linuxdo_trust_level": None if linuxdo_user is None else linuxdo_user.get("trust_level"),
+                "status_account_id": None if status_account is None else int(status_account["id"]),
+                "status_account_username": ""
+                if status_account is None
+                else str(status_account.get("username") or ""),
             }
         )
         if linuxdo_user is not None and self.linuxdo_oauth is not None:
             self.linuxdo_oauth.touch_seen(int(linuxdo_user["id"]))
+        if status_account is not None and self.status_accounts is not None:
+            self.status_accounts.touch_seen(int(status_account["id"]))
         if random.randrange(PRUNE_EVERY) == 0:
             self.repository.prune_before(now - timedelta(days=RETENTION_DAYS))
         return {
@@ -259,6 +270,11 @@ class PageVisitService:
         if self.linuxdo_oauth is None or not (linuxdo_cookie or "").strip():
             return None
         return self.linuxdo_oauth.user_from_cookie(linuxdo_cookie)
+
+    def _status_account(self, status_cookie: str) -> dict[str, Any] | None:
+        if self.status_accounts is None or not (status_cookie or "").strip():
+            return None
+        return self.status_accounts.user_from_cookie(status_cookie)
 
 
 def _resolve_period(value: str) -> str:
@@ -612,6 +628,8 @@ def _visit_items(rows: list[dict[str, Any]], zone: Any) -> list[dict[str, Any]]:
                 "linuxdoName": str(row.get("linuxdo_name") or ""),
                 "linuxdoAvatarUrl": str(row.get("linuxdo_avatar_url") or ""),
                 "linuxdoTrustLevel": row.get("linuxdo_trust_level"),
+                "statusAccountId": row.get("status_account_id"),
+                "statusAccountUsername": str(row.get("status_account_username") or ""),
             }
         )
     return items

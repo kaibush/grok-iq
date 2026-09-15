@@ -36,6 +36,7 @@ def _record(service: PageVisitService, **values):
         "authorization": "",
         "visitor_cookie": VISITOR_A,
         "linuxdo_cookie": "",
+        "status_cookie": "",
         "request_host": "status.example.com",
     }
     payload.update(values)
@@ -57,6 +58,20 @@ class FakeLinuxdoOauth:
 
     def touch_seen(self, user_id: int) -> None:
         self.last_seen = user_id
+
+
+class FakeStatusAccounts:
+    def user_from_cookie(self, cookie: str):
+        if cookie != "ok":
+            return None
+        return {
+            "id": 9,
+            "username": "bob",
+            "enabled": True,
+        }
+
+    def touch_seen(self, account_id: int) -> None:
+        self.last_seen = account_id
 
 
 def test_same_visitor_two_visits_count_as_one_uv(tmp_path: Path, monkeypatch):
@@ -384,3 +399,32 @@ def test_linuxdo_cookie_attaches_identity_to_visit_ledger(tmp_path: Path):
     assert oauth.last_seen == 1
     matched = service.visit_ledger(q="alice")
     assert matched["total"] == 1
+
+def test_status_account_cookie_attaches_identity_to_visit_ledger(tmp_path: Path):
+    database = Database(tmp_path / "grokiq.db")
+    database.initialize()
+    repository = PageVisitRepository(database)
+    accounts = FakeStatusAccounts()
+    service = PageVisitService(repository, status_accounts=accounts)
+    assert _record(service, status_cookie="ok")["recorded"] is True
+    item = service.visit_ledger()["items"][0]
+    assert item["statusAccountId"] == 9
+    assert item["statusAccountUsername"] == "bob"
+    assert accounts.last_seen == 9
+    matched = service.visit_ledger(q="bob")
+    assert matched["total"] == 1
+    both = PageVisitService(
+        repository,
+        linuxdo_oauth=FakeLinuxdoOauth(),
+        status_accounts=FakeStatusAccounts(),
+    )
+    assert _record(
+        both,
+        visitor_cookie=VISITOR_B,
+        linuxdo_cookie="ok",
+        status_cookie="ok",
+    )["recorded"] is True
+    both_item = both.visit_ledger(q="bob")["items"][0]
+    assert both_item["linuxdoUsername"] == "alice"
+    assert both_item["statusAccountUsername"] == "bob"
+

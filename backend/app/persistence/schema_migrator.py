@@ -336,6 +336,14 @@ COMPATIBILITY_COLUMNS = {
             "linuxdo_trust_level",
             "ALTER TABLE page_visits ADD COLUMN linuxdo_trust_level INTEGER",
         ),
+        (
+            "status_account_id",
+            "ALTER TABLE page_visits ADD COLUMN status_account_id INTEGER",
+        ),
+        (
+            "status_account_username",
+            "ALTER TABLE page_visits ADD COLUMN status_account_username VARCHAR(64) NOT NULL DEFAULT ''",
+        ),
     ],
     "request_audit_account_verifications": [
         (
@@ -393,6 +401,11 @@ COMPATIBILITY_INDEXES = {
             "ix_page_visits_linuxdo_user_id",
             "CREATE INDEX IF NOT EXISTS ix_page_visits_linuxdo_user_id "
             "ON page_visits (linuxdo_user_id)",
+        ),
+        (
+            "ix_page_visits_status_account_id",
+            "CREATE INDEX IF NOT EXISTS ix_page_visits_status_account_id "
+            "ON page_visits (status_account_id)",
         ),
     ],
     "register_webhook_events": [

@@ -191,3 +191,21 @@ def test_invite_search_matches_invited_username(tmp_path: Path):
     assert missed["total"] == 1
     assert missed["items"][0]["id"] == other["id"]
     database.dispose()
+
+def test_touch_seen_updates_last_seen_without_login_count(tmp_path: Path):
+    database, service = _build(tmp_path)
+    invite = service.create_invite(note="seen", max_uses=1, admin_id=1)
+    registered = service.register("alice", "password123", "password123", invite["code"])
+    account_id = int(registered["account"]["id"])
+    before = service.repository.get_account(account_id)
+    assert before is not None
+    login_count = int(before["login_count"] or 0)
+    last_login = before.get("last_login_at")
+    service.touch_seen(account_id)
+    after = service.repository.get_account(account_id)
+    assert after is not None
+    assert int(after["login_count"] or 0) == login_count
+    assert after.get("last_login_at") == last_login
+    assert after.get("last_seen_at") is not None
+    database.dispose()
+

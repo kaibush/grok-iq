@@ -207,6 +207,14 @@ class StatusAccountRepository:
             session.flush()
             return model_dict(account)
 
+    def touch_seen(self, account_id: int, now: datetime) -> None:
+        with self.database.transaction() as session:
+            account = session.get(StatusAccount, account_id)
+            if account is None:
+                return
+            account.last_seen_at = now
+            account.updated_at = now
+
     def bump_token_version(self, account_id: int) -> bool:
         with self.database.transaction() as session:
             account = session.get(StatusAccount, account_id)

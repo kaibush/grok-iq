@@ -746,6 +746,7 @@ class PageVisit(Base):
         Index("ix_page_visits_day_key_path", "day_key", "path"),
         Index("ix_page_visits_client_ip", "client_ip"),
         Index("ix_page_visits_linuxdo_user_id", "linuxdo_user_id"),
+        Index("ix_page_visits_status_account_id", "status_account_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -766,6 +767,10 @@ class PageVisit(Base):
     linuxdo_name: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     linuxdo_avatar_url: Mapped[str] = mapped_column(String(400), default="", nullable=False)
     linuxdo_trust_level: Mapped[int | None] = mapped_column(Integer)
+    status_account_id: Mapped[int | None] = mapped_column(Integer)
+    status_account_username: Mapped[str] = mapped_column(
+        String(64), default="", nullable=False
+    )
 
 
 class StatusInviteCode(Base):
