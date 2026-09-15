@@ -216,10 +216,10 @@ export function StatusInvitesPage() {
   return (
     <Page>
       <PageHeader
-        title='状态用户'
+        title='用户管理'
         description='统一管理 /status 的邀请码、本地账号和 Linux.do 用户。账号登录有效期 7 天。'
         actions={
-          <ActionToolbar label='状态用户操作'>
+          <ActionToolbar label='用户管理操作'>
             <ToolbarAction
               label='生成邀请码'
               onClick={() =>
@@ -233,7 +233,7 @@ export function StatusInvitesPage() {
               <Plus />
             </ToolbarAction>
             <ToolbarAction
-              label='刷新状态用户'
+              label='刷新用户管理'
               pending={
                 codesQuery.isFetching ||
                 accountsQuery.isFetching ||

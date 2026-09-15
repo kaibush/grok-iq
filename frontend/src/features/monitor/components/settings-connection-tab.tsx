@@ -154,7 +154,7 @@ export function SettingsConnectionTab({
         <SettingsCard
           icon={LogIn}
           title='状态页登录'
-          description='打开后需先登录才能查看 /status，支持 Linux.do Connect 或邀请码注册的本地账号。邀请码、注册账号和 Linux.do 用户在侧栏『状态用户』中统一管理。'
+          description='打开后需先登录才能查看 /status，支持 Linux.do Connect 或邀请码注册的本地账号。邀请码、注册账号和 Linux.do 用户在侧栏『用户管理』中统一管理。'
         >
           <div className='space-y-4'>
             <div className='flex flex-wrap items-center gap-2'>

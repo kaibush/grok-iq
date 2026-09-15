@@ -30,7 +30,7 @@ export const sidebarData: SidebarData = {
         { title: '监控概览', url: '/', icon: LayoutDashboard },
         { title: '上游状态', url: '/status', icon: Gauge },
         { title: '页面访问', url: '/page-visits', icon: Eye },
-        { title: '状态用户', url: '/status-invites', icon: Ticket },
+        { title: '用户管理', url: '/status-invites', icon: Ticket },
         { title: '账号探针', url: '/accounts', icon: UsersRound },
         { title: '隔离区', url: '/quarantine', icon: ShieldBan },
         { title: '冷却区', url: '/cooldown', icon: Timer },
