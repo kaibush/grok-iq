@@ -25,6 +25,7 @@ import { Route as authOtpRouteImport } from './routes/(auth)/otp'
 import { Route as authForgotPasswordRouteImport } from './routes/(auth)/forgot-password'
 import { Route as AuthenticatedSettingsRouteRouteImport } from './routes/_authenticated/settings/route'
 import { Route as AuthenticatedWorkersIndexRouteImport } from './routes/_authenticated/workers/index'
+import { Route as AuthenticatedStatusInvitesIndexRouteImport } from './routes/_authenticated/status-invites/index'
 import { Route as AuthenticatedSsoReportsIndexRouteImport } from './routes/_authenticated/sso-reports/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedRunsIndexRouteImport } from './routes/_authenticated/runs/index'
@@ -34,7 +35,6 @@ import { Route as AuthenticatedProbeProfilesIndexRouteImport } from './routes/_a
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
 import { Route as AuthenticatedPageVisitsIndexRouteImport } from './routes/_authenticated/page-visits/index'
-import { Route as AuthenticatedStatusInvitesIndexRouteImport } from './routes/_authenticated/status-invites/index'
 import { Route as AuthenticatedGuideIndexRouteImport } from './routes/_authenticated/guide/index'
 import { Route as AuthenticatedEgressNodesIndexRouteImport } from './routes/_authenticated/egress-nodes/index'
 import { Route as AuthenticatedCooldownIndexRouteImport } from './routes/_authenticated/cooldown/index'
@@ -134,6 +134,12 @@ const AuthenticatedWorkersIndexRoute =
     path: '/workers/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedStatusInvitesIndexRoute =
+  AuthenticatedStatusInvitesIndexRouteImport.update({
+    id: '/status-invites/',
+    path: '/status-invites/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSsoReportsIndexRoute =
   AuthenticatedSsoReportsIndexRouteImport.update({
     id: '/sso-reports/',
@@ -184,12 +190,6 @@ const AuthenticatedPageVisitsIndexRoute =
   AuthenticatedPageVisitsIndexRouteImport.update({
     id: '/page-visits/',
     path: '/page-visits/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedStatusInvitesIndexRoute =
-  AuthenticatedStatusInvitesIndexRouteImport.update({
-    id: '/status-invites/',
-    path: '/status-invites/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedGuideIndexRoute = AuthenticatedGuideIndexRouteImport.update({
@@ -327,7 +327,6 @@ export interface FileRoutesByFullPath {
   '/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/guide/': typeof AuthenticatedGuideIndexRoute
   '/page-visits/': typeof AuthenticatedPageVisitsIndexRoute
-  '/status-invites/': typeof AuthenticatedStatusInvitesIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/probe-profiles/': typeof AuthenticatedProbeProfilesIndexRoute
@@ -336,6 +335,7 @@ export interface FileRoutesByFullPath {
   '/runs/': typeof AuthenticatedRunsIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/sso-reports/': typeof AuthenticatedSsoReportsIndexRoute
+  '/status-invites/': typeof AuthenticatedStatusInvitesIndexRoute
   '/workers/': typeof AuthenticatedWorkersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -370,7 +370,6 @@ export interface FileRoutesByTo {
   '/egress-nodes': typeof AuthenticatedEgressNodesIndexRoute
   '/guide': typeof AuthenticatedGuideIndexRoute
   '/page-visits': typeof AuthenticatedPageVisitsIndexRoute
-  '/status-invites': typeof AuthenticatedStatusInvitesIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/probe-profiles': typeof AuthenticatedProbeProfilesIndexRoute
@@ -379,6 +378,7 @@ export interface FileRoutesByTo {
   '/runs': typeof AuthenticatedRunsIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/sso-reports': typeof AuthenticatedSsoReportsIndexRoute
+  '/status-invites': typeof AuthenticatedStatusInvitesIndexRoute
   '/workers': typeof AuthenticatedWorkersIndexRoute
 }
 export interface FileRoutesById {
@@ -416,7 +416,6 @@ export interface FileRoutesById {
   '/_authenticated/egress-nodes/': typeof AuthenticatedEgressNodesIndexRoute
   '/_authenticated/guide/': typeof AuthenticatedGuideIndexRoute
   '/_authenticated/page-visits/': typeof AuthenticatedPageVisitsIndexRoute
-  '/_authenticated/status-invites/': typeof AuthenticatedStatusInvitesIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/probe-profiles/': typeof AuthenticatedProbeProfilesIndexRoute
@@ -425,6 +424,7 @@ export interface FileRoutesById {
   '/_authenticated/runs/': typeof AuthenticatedRunsIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/sso-reports/': typeof AuthenticatedSsoReportsIndexRoute
+  '/_authenticated/status-invites/': typeof AuthenticatedStatusInvitesIndexRoute
   '/_authenticated/workers/': typeof AuthenticatedWorkersIndexRoute
 }
 export interface FileRouteTypes {
@@ -462,7 +462,6 @@ export interface FileRouteTypes {
     | '/egress-nodes/'
     | '/guide/'
     | '/page-visits/'
-    | '/status-invites/'
     | '/plans/'
     | '/playground/'
     | '/probe-profiles/'
@@ -471,6 +470,7 @@ export interface FileRouteTypes {
     | '/runs/'
     | '/settings/'
     | '/sso-reports/'
+    | '/status-invites/'
     | '/workers/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -505,7 +505,6 @@ export interface FileRouteTypes {
     | '/egress-nodes'
     | '/guide'
     | '/page-visits'
-    | '/status-invites'
     | '/plans'
     | '/playground'
     | '/probe-profiles'
@@ -514,6 +513,7 @@ export interface FileRouteTypes {
     | '/runs'
     | '/settings'
     | '/sso-reports'
+    | '/status-invites'
     | '/workers'
   id:
     | '__root__'
@@ -550,7 +550,6 @@ export interface FileRouteTypes {
     | '/_authenticated/egress-nodes/'
     | '/_authenticated/guide/'
     | '/_authenticated/page-visits/'
-    | '/_authenticated/status-invites/'
     | '/_authenticated/plans/'
     | '/_authenticated/playground/'
     | '/_authenticated/probe-profiles/'
@@ -559,6 +558,7 @@ export interface FileRouteTypes {
     | '/_authenticated/runs/'
     | '/_authenticated/settings/'
     | '/_authenticated/sso-reports/'
+    | '/_authenticated/status-invites/'
     | '/_authenticated/workers/'
   fileRoutesById: FileRoutesById
 }
@@ -692,6 +692,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedWorkersIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/status-invites/': {
+      id: '/_authenticated/status-invites/'
+      path: '/status-invites'
+      fullPath: '/status-invites/'
+      preLoaderRoute: typeof AuthenticatedStatusInvitesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/sso-reports/': {
       id: '/_authenticated/sso-reports/'
       path: '/sso-reports'
@@ -753,13 +760,6 @@ declare module '@tanstack/react-router' {
       path: '/page-visits'
       fullPath: '/page-visits/'
       preLoaderRoute: typeof AuthenticatedPageVisitsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/status-invites/': {
-      id: '/_authenticated/status-invites/'
-      path: '/status-invites'
-      fullPath: '/status-invites/'
-      preLoaderRoute: typeof AuthenticatedStatusInvitesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/guide/': {
@@ -930,7 +930,6 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedEgressNodesIndexRoute: typeof AuthenticatedEgressNodesIndexRoute
   AuthenticatedGuideIndexRoute: typeof AuthenticatedGuideIndexRoute
   AuthenticatedPageVisitsIndexRoute: typeof AuthenticatedPageVisitsIndexRoute
-  AuthenticatedStatusInvitesIndexRoute: typeof AuthenticatedStatusInvitesIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProbeProfilesIndexRoute: typeof AuthenticatedProbeProfilesIndexRoute
@@ -938,6 +937,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedRequestAuditsIndexRoute: typeof AuthenticatedRequestAuditsIndexRoute
   AuthenticatedRunsIndexRoute: typeof AuthenticatedRunsIndexRoute
   AuthenticatedSsoReportsIndexRoute: typeof AuthenticatedSsoReportsIndexRoute
+  AuthenticatedStatusInvitesIndexRoute: typeof AuthenticatedStatusInvitesIndexRoute
   AuthenticatedWorkersIndexRoute: typeof AuthenticatedWorkersIndexRoute
 }
 
@@ -957,7 +957,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEgressNodesIndexRoute: AuthenticatedEgressNodesIndexRoute,
   AuthenticatedGuideIndexRoute: AuthenticatedGuideIndexRoute,
   AuthenticatedPageVisitsIndexRoute: AuthenticatedPageVisitsIndexRoute,
-  AuthenticatedStatusInvitesIndexRoute: AuthenticatedStatusInvitesIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProbeProfilesIndexRoute: AuthenticatedProbeProfilesIndexRoute,
@@ -965,6 +964,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedRequestAuditsIndexRoute: AuthenticatedRequestAuditsIndexRoute,
   AuthenticatedRunsIndexRoute: AuthenticatedRunsIndexRoute,
   AuthenticatedSsoReportsIndexRoute: AuthenticatedSsoReportsIndexRoute,
+  AuthenticatedStatusInvitesIndexRoute: AuthenticatedStatusInvitesIndexRoute,
   AuthenticatedWorkersIndexRoute: AuthenticatedWorkersIndexRoute,
 }
 
