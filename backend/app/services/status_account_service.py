@@ -270,6 +270,16 @@ class StatusAccountService:
         invited = self.repository.list_accounts_for_invite(invite_id)
         return self.public_invite(invite, invited_users=invited) or {}
 
+    def set_account_enabled(self, account_id: int, enabled: bool) -> dict[str, Any]:
+        updated = self.repository.set_account_enabled(account_id, enabled)
+        if updated is None:
+            raise ValueError("账号不存在")
+        return self.public_account(updated) or {}
+
+    def delete_account(self, account_id: int) -> None:
+        if not self.repository.delete_account(account_id):
+            raise ValueError("账号不存在")
+
     def list_accounts(
         self,
         *,

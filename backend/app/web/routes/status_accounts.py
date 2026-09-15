@@ -5,7 +5,11 @@ from typing import Any
 from fastapi import APIRouter, Query, Request, Response
 
 from app.services.status_account_service import StatusAccountService
-from app.web.schemas import StatusInviteCreateInput, StatusInviteUpdateInput
+from app.web.schemas import (
+    StatusAccountUpdateInput,
+    StatusInviteCreateInput,
+    StatusInviteUpdateInput,
+)
 
 from ._shared import disable_client_cache
 
@@ -66,5 +70,21 @@ def build_status_accounts_router(status_accounts: StatusAccountService) -> APIRo
     ) -> dict[str, Any]:
         disable_client_cache(response)
         return status_accounts.list_accounts(query=q, page=page, page_size=page_size)
+
+    @router.patch("/status-accounts/{account_id}")
+    def patch_status_account(
+        account_id: int,
+        payload: StatusAccountUpdateInput,
+        response: Response,
+    ) -> dict[str, Any]:
+        disable_client_cache(response)
+        if payload.enabled is None:
+            raise ValueError("请指定账号启用状态")
+        return status_accounts.set_account_enabled(account_id, payload.enabled)
+
+    @router.delete("/status-accounts/{account_id}", status_code=204)
+    def delete_status_account(account_id: int) -> Response:
+        status_accounts.delete_account(account_id)
+        return Response(status_code=204)
 
     return router

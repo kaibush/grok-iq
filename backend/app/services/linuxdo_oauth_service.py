@@ -16,7 +16,10 @@ from app.integrations.linuxdo.oauth import (
     build_authorize_url,
     generate_pkce_pair,
 )
-from app.persistence.linuxdo_user_repository import LinuxDoUserRepository
+from app.persistence.linuxdo_user_repository import (
+    LinuxDoUserRepository,
+    linuxdo_id_from_profile,
+)
 from app.services.auth_service import AuthenticationError, AuthService
 
 JWT_ALGORITHM = "HS256"
@@ -157,6 +160,9 @@ class LinuxDoOAuthService:
             )
         except LinuxDoConnectError as exc:
             raise LinuxDoOAuthError(str(exc), status_code=exc.status_code) from exc
+        existing = self.repository.get_by_linuxdo_id(linuxdo_id_from_profile(profile))
+        if existing is not None and not bool(existing.get("enabled", True)):
+            raise LinuxDoOAuthError("账号已停用")
         user = self.repository.upsert_from_profile(profile, now=utc_now())
         return (
             self.public_user(user) or {},
@@ -185,10 +191,22 @@ class LinuxDoOAuthService:
             return None
         if str(user.get("linuxdo_id") or "") != str(payload.get("sub") or ""):
             return None
+        if not bool(user.get("enabled", True)):
+            return None
         return user
 
     def touch_seen(self, user_id: int) -> None:
         self.repository.touch_seen(user_id, utc_now())
+
+    def set_user_enabled(self, user_id: int, enabled: bool) -> dict[str, Any]:
+        user = self.repository.set_enabled(user_id, enabled)
+        if user is None:
+            raise ValueError("用户不存在")
+        return self.public_user(user) or {}
+
+    def delete_user(self, user_id: int) -> None:
+        if not self.repository.delete(user_id):
+            raise ValueError("用户不存在")
 
     def list_users(
         self,
@@ -234,6 +252,7 @@ class LinuxDoOAuthService:
             "trustLevel": int(user.get("trust_level") or 0),
             "active": bool(user.get("active", True)),
             "silenced": bool(user.get("silenced", False)),
+            "enabled": bool(user.get("enabled", True)),
             "loginCount": int(user.get("login_count") or 0),
             "lastLoginAt": app_isoformat(_as_datetime(user.get("last_login_at"))),
             "lastSeenAt": app_isoformat(_as_datetime(user.get("last_seen_at"))),

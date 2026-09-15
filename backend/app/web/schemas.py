@@ -59,6 +59,18 @@ class StatusInviteUpdateInput(BaseModel):
     enabled: bool | None = None
 
 
+class StatusAccountUpdateInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool | None = None
+
+
+class LinuxDoUserUpdateInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool | None = None
+
+
 class ChatProviderCreateInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

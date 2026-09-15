@@ -10,11 +10,13 @@ import {
   RefreshCw,
   Search,
   Ticket,
+  Trash2,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   api,
+  type LinuxDoPublicUser,
   type StatusAccountPublicUser,
   type StatusInviteCode,
   type StatusInvitedUser,
@@ -80,6 +82,7 @@ export function StatusInvitesPage() {
   const [appliedLinuxdoQuery, setAppliedLinuxdoQuery] = useState('')
   const [linuxdoPage, setLinuxdoPage] = useState(1)
   const [linuxdoPageSize, setLinuxdoPageSize] = useState(50)
+  const [userAction, setUserAction] = useState<ManagedUserAction | null>(null)
 
   const codesQuery = useQuery({
     queryKey: ['status-invite-codes', appliedQuery, page, pageSize],
@@ -194,6 +197,68 @@ export function StatusInvitesPage() {
       )
       setToggleTarget(null)
       await queryClient.invalidateQueries({ queryKey: ['status-invite-codes'] })
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+
+  const toggleUserMutation = useMutation({
+    mutationFn: async (target: ManagedUserAction) => {
+      if (target.action !== 'toggle') {
+        throw new Error('无效的用户操作')
+      }
+      if (target.kind === 'account') {
+        const updated = await api.updateStatusAccount(target.user.id, {
+          enabled: target.user.enabled === false,
+        })
+        return {
+          username: target.user.username,
+          enabled: updated.enabled !== false,
+        }
+      }
+      const updated = await api.updateLinuxdoUser(target.user.id, {
+        enabled: target.user.enabled === false,
+      })
+      return {
+        username: linuxdoUserLabel(target.user),
+        enabled: updated.enabled !== false,
+      }
+    },
+    onSuccess: async (result) => {
+      toast.success(
+        result.enabled
+          ? `已启用 ${result.username}`
+          : `已停用 ${result.username}`
+      )
+      setUserAction(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['status-accounts'] }),
+        queryClient.invalidateQueries({ queryKey: ['linuxdo-users'] }),
+        queryClient.invalidateQueries({ queryKey: ['status-invite-codes'] }),
+      ])
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (target: ManagedUserAction) => {
+      if (target.action !== 'delete') {
+        throw new Error('无效的用户操作')
+      }
+      if (target.kind === 'account') {
+        await api.deleteStatusAccount(target.user.id)
+        return target.user.username
+      }
+      await api.deleteLinuxdoUser(target.user.id)
+      return linuxdoUserLabel(target.user)
+    },
+    onSuccess: async (username) => {
+      toast.success(`已删除 ${username}`)
+      setUserAction(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['status-accounts'] }),
+        queryClient.invalidateQueries({ queryKey: ['linuxdo-users'] }),
+        queryClient.invalidateQueries({ queryKey: ['status-invite-codes'] }),
+      ])
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
@@ -546,6 +611,7 @@ export function StatusInvitesPage() {
                       <TableHead>最近登录</TableHead>
                       <TableHead>最近访问</TableHead>
                       <TableHead>状态</TableHead>
+                      <TableHead className='text-right'>操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -572,6 +638,31 @@ export function StatusInvitesPage() {
                         </TableCell>
                         <TableCell>
                           <AccountStatusBadge account={row} />
+                        </TableCell>
+                        <TableCell>
+                          <UserActionButtons
+                            enabled={row.enabled !== false}
+                            pending={
+                              userAction?.kind === 'account' &&
+                              userAction.user.id === row.id &&
+                              (toggleUserMutation.isPending ||
+                                deleteUserMutation.isPending)
+                            }
+                            onToggle={() =>
+                              setUserAction({
+                                kind: 'account',
+                                action: 'toggle',
+                                user: row,
+                              })
+                            }
+                            onDelete={() =>
+                              setUserAction({
+                                kind: 'account',
+                                action: 'delete',
+                                user: row,
+                              })
+                            }
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -651,6 +742,7 @@ export function StatusInvitesPage() {
                       <TableHead>最近登录</TableHead>
                       <TableHead>最近访问</TableHead>
                       <TableHead>状态</TableHead>
+                      <TableHead className='text-right'>操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -687,6 +779,32 @@ export function StatusInvitesPage() {
                           <LinuxDoStatusBadges
                             active={user.active}
                             silenced={user.silenced}
+                            enabled={user.enabled}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <UserActionButtons
+                            enabled={user.enabled !== false}
+                            pending={
+                              userAction?.kind === 'linuxdo' &&
+                              userAction.user.id === user.id &&
+                              (toggleUserMutation.isPending ||
+                                deleteUserMutation.isPending)
+                            }
+                            onToggle={() =>
+                              setUserAction({
+                                kind: 'linuxdo',
+                                action: 'toggle',
+                                user,
+                              })
+                            }
+                            onDelete={() =>
+                              setUserAction({
+                                kind: 'linuxdo',
+                                action: 'delete',
+                                user,
+                              })
+                            }
                           />
                         </TableCell>
                       </TableRow>
@@ -742,6 +860,37 @@ export function StatusInvitesPage() {
         handleConfirm={() => {
           if (!toggleTarget) return
           toggleMutation.mutate(toggleTarget)
+        }}
+      />
+
+      <ConfirmDialog
+        open={userAction != null}
+        onOpenChange={(open) => {
+          if (
+            !open &&
+            !toggleUserMutation.isPending &&
+            !deleteUserMutation.isPending
+          ) {
+            setUserAction(null)
+          }
+        }}
+        title={userActionTitle(userAction)}
+        desc={userActionDescription(userAction)}
+        cancelBtnText='取消'
+        confirmText={userActionPendingLabel(
+          userAction,
+          toggleUserMutation.isPending,
+          deleteUserMutation.isPending
+        )}
+        destructive={userActionIsDestructive(userAction)}
+        isLoading={toggleUserMutation.isPending || deleteUserMutation.isPending}
+        handleConfirm={() => {
+          if (!userAction) return
+          if (userAction.action === 'delete') {
+            deleteUserMutation.mutate(userAction)
+            return
+          }
+          toggleUserMutation.mutate(userAction)
         }}
       />
 
@@ -948,6 +1097,121 @@ function InvitedUsersCell({
       {preview}
       {users.length > 3 ? ` 等 ${users.length} 人` : ''}
     </button>
+  )
+}
+
+type ManagedUserAction =
+  | {
+      kind: 'account'
+      action: 'toggle' | 'delete'
+      user: StatusAccountPublicUser
+    }
+  | {
+      kind: 'linuxdo'
+      action: 'toggle' | 'delete'
+      user: LinuxDoPublicUser
+    }
+
+function linuxdoUserLabel(user: LinuxDoPublicUser) {
+  return (
+    user.username?.trim() ||
+    user.name?.trim() ||
+    user.linuxdoId ||
+    'Linux.do 用户'
+  )
+}
+
+function managedUserLabel(target: ManagedUserAction | null) {
+  if (!target) return ''
+  return target.kind === 'account'
+    ? target.user.username
+    : linuxdoUserLabel(target.user)
+}
+
+function managedUserEnabled(target: ManagedUserAction | null) {
+  if (!target) return true
+  return target.user.enabled !== false
+}
+
+function userActionTitle(target: ManagedUserAction | null) {
+  const name = managedUserLabel(target)
+  if (target?.action === 'delete') return `删除 ${name}？`
+  return managedUserEnabled(target) ? `停用 ${name}？` : `启用 ${name}？`
+}
+
+function userActionDescription(target: ManagedUserAction | null) {
+  if (target?.action === 'delete') {
+    return '删除后无法登录 /status，访问流水里的历史用户名仍会保留。'
+  }
+  if (managedUserEnabled(target)) {
+    return '停用后无法再访问 /status，已有登录立即失效。'
+  }
+  return '启用后该用户可再次登录 /status。'
+}
+
+function userActionIsDestructive(target: ManagedUserAction | null) {
+  return target?.action === 'delete' || managedUserEnabled(target)
+}
+
+function userActionPendingLabel(
+  target: ManagedUserAction | null,
+  toggling: boolean,
+  deleting: boolean
+) {
+  if (deleting) {
+    return (
+      <>
+        <Loader2 className='animate-spin' />
+        删除中…
+      </>
+    )
+  }
+  if (toggling) {
+    return (
+      <>
+        <Loader2 className='animate-spin' />
+        {managedUserEnabled(target) ? '停用中…' : '启用中…'}
+      </>
+    )
+  }
+  if (target?.action === 'delete') return '确认删除'
+  return managedUserEnabled(target) ? '确认停用' : '确认启用'
+}
+
+function UserActionButtons({
+  enabled,
+  pending,
+  onToggle,
+  onDelete,
+}: {
+  enabled: boolean
+  pending: boolean
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div className='flex justify-end gap-1'>
+      <Button
+        type='button'
+        size='sm'
+        variant='ghost'
+        disabled={pending}
+        onClick={onToggle}
+      >
+        {enabled ? <PowerOff /> : <Power />}
+        {enabled ? '停用' : '启用'}
+      </Button>
+      <Button
+        type='button'
+        size='sm'
+        variant='ghost'
+        disabled={pending}
+        onClick={onDelete}
+      >
+        <Trash2 />
+        删除
+      </Button>
+    </div>
   )
 }
 

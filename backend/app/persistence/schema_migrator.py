@@ -345,6 +345,12 @@ COMPATIBILITY_COLUMNS = {
             "ALTER TABLE page_visits ADD COLUMN status_account_username VARCHAR(64) NOT NULL DEFAULT ''",
         ),
     ],
+    "linuxdo_users": [
+        (
+            "enabled",
+            "ALTER TABLE linuxdo_users ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT 1",
+        ),
+    ],
     "request_audit_account_verifications": [
         (
             "egress_recommendation",

@@ -91,23 +91,31 @@ export function LinuxDoIdentityCell({
 export function LinuxDoStatusBadges({
   active,
   silenced,
+  enabled,
 }: {
   active?: boolean
   silenced?: boolean
+  enabled?: boolean
 }) {
-  if (active !== true && active !== false && !silenced) {
+  const adminDisabled = enabled === false
+  if (!adminDisabled && active !== true && active !== false && !silenced) {
     return <span className='text-muted-foreground'>—</span>
   }
   return (
     <span className='inline-flex items-center gap-1.5'>
-      {active === true ? (
+      {adminDisabled ? (
+        <Badge variant='secondary' className='h-5 px-1.5 text-[10px]'>
+          停用
+        </Badge>
+      ) : null}
+      {!adminDisabled && active === true ? (
         <Badge variant='success' className='h-5 px-1.5 text-[10px]'>
           正常
         </Badge>
       ) : null}
-      {active === false ? (
+      {!adminDisabled && active === false ? (
         <Badge variant='outline' className='h-5 px-1.5 text-[10px]'>
-          停用
+          未激活
         </Badge>
       ) : null}
       {silenced ? (

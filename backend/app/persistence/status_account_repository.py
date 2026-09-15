@@ -251,3 +251,25 @@ class StatusAccountRepository:
                 .limit(max(1, limit))
             ).all()
             return [model_dict(value) for value in values], int(total or 0)
+
+    def set_account_enabled(
+        self, account_id: int, enabled: bool
+    ) -> dict[str, Any] | None:
+        with self.database.transaction() as session:
+            account = session.get(StatusAccount, account_id)
+            if account is None:
+                return None
+            account.enabled = bool(enabled)
+            if not account.enabled:
+                account.token_version = int(account.token_version or 0) + 1
+            account.updated_at = utc_now()
+            session.flush()
+            return model_dict(account)
+
+    def delete_account(self, account_id: int) -> bool:
+        with self.database.transaction() as session:
+            account = session.get(StatusAccount, account_id)
+            if account is None:
+                return False
+            session.delete(account)
+            return True

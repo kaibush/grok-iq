@@ -295,6 +295,7 @@ export type LinuxDoPublicUser = {
   trustLevel?: number
   active?: boolean
   silenced?: boolean
+  enabled?: boolean
   loginCount?: number
   lastLoginAt?: string | null
   lastSeenAt?: string | null
@@ -3676,6 +3677,20 @@ export const api = {
         page_size: params?.pageSize,
       })}`
     ),
+  updateStatusAccount: (id: number, body: { enabled: boolean }) =>
+    request<StatusAccountPublicUser>(`/status-accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteStatusAccount: (id: number) =>
+    request<void>(`/status-accounts/${id}`, { method: 'DELETE' }),
+  updateLinuxdoUser: (id: number, body: { enabled: boolean }) =>
+    request<LinuxDoPublicUser>(`/linuxdo-users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteLinuxdoUser: (id: number) =>
+    request<void>(`/linuxdo-users/${id}`, { method: 'DELETE' }),
   publicLinuxdoLoginUrl: (returnTo = '/status') =>
     `${API_BASE}/public/linuxdo/login${query({ return_to: returnTo })}`,
   publicUpstreamAccounts: () =>

@@ -5,6 +5,8 @@ from typing import Any
 
 from sqlalchemy import func, nulls_last, or_, select
 
+from app.core.clock import utc_now
+
 from .database import Database
 from .models import LinuxDoUser, model_dict
 
@@ -41,6 +43,7 @@ class LinuxDoUserRepository:
                     trust_level=trust_level,
                     active=active,
                     silenced=silenced,
+                    enabled=True,
                     login_count=1,
                     last_login_at=now,
                     last_seen_at=now,
@@ -118,6 +121,28 @@ class LinuxDoUserRepository:
                 .limit(max(1, limit))
             ).all()
             return [model_dict(value) for value in values], int(total or 0)
+
+    def set_enabled(self, user_id: int, enabled: bool) -> dict[str, Any] | None:
+        with self.database.transaction() as session:
+            user = session.get(LinuxDoUser, user_id)
+            if user is None:
+                return None
+            user.enabled = bool(enabled)
+            user.updated_at = utc_now()
+            session.flush()
+            return model_dict(user)
+
+    def delete(self, user_id: int) -> bool:
+        with self.database.transaction() as session:
+            user = session.get(LinuxDoUser, user_id)
+            if user is None:
+                return False
+            session.delete(user)
+            return True
+
+
+def linuxdo_id_from_profile(profile: dict[str, Any]) -> str:
+    return _linuxdo_id(profile)
 
 
 def _linuxdo_id(profile: dict[str, Any]) -> str:

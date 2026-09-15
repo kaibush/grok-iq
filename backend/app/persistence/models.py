@@ -723,6 +723,7 @@ class LinuxDoUser(Base):
     trust_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     silenced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(AppDateTime())
     last_seen_at: Mapped[datetime | None] = mapped_column(AppDateTime())
