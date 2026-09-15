@@ -201,7 +201,7 @@ export function ClientKeyQuotaDialog() {
         <DialogHeader>
           <DialogTitle>查询密钥额度</DialogTitle>
           <DialogDescription>
-            输入密钥，查看剩余额度和时间窗口使用量。
+            支持 grok2api 的 sk- 密钥和历史 g2a_ 密钥，查看剩余额度和时间窗口使用量。
           </DialogDescription>
         </DialogHeader>
         <form className='space-y-3' onSubmit={handleSubmit}>
@@ -212,7 +212,7 @@ export function ClientKeyQuotaDialog() {
               type='password'
               autoComplete='off'
               spellCheck={false}
-              placeholder='********'
+              placeholder='sk-... 或 g2a_...'
               className='font-mono'
               maxLength={256}
               value={apiKey}

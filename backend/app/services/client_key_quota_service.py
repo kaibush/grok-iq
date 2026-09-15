@@ -35,6 +35,7 @@ class ClientKeyQuotaService:
 
     async def lookup_item(self, api_key: str, *, client_ip: str) -> dict[str, Any] | None:
         self._consume_rate_limit(client_ip)
+        api_key = api_key.strip()
         prefix = _parse_prefix(api_key)
         if prefix is None:
             return None
@@ -91,14 +92,32 @@ class ClientKeyQuotaService:
         return None
 
 
+_SK_MARKER = "sk-"
+_SK_PAYLOAD_LENGTH = 48
+_SK_LOOKUP_PREFIX_LENGTH = 12
+_BASE64URL_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
 def _parse_prefix(raw: str) -> str | None:
-    parts = raw.split("_", 2)
+    value = raw.strip()
+    if value.startswith(_SK_MARKER):
+        payload = value[len(_SK_MARKER) :]
+        if len(payload) != _SK_PAYLOAD_LENGTH or not _is_base64url_payload(payload):
+            return None
+        return payload[:_SK_LOOKUP_PREFIX_LENGTH]
+    parts = value.split("_", 2)
     if len(parts) != 3:
         return None
     scheme, prefix, rest = parts
     if scheme != "g2a" or not prefix or not rest:
         return None
     return prefix
+
+
+def _is_base64url_payload(value: str) -> bool:
+    return all(char in _BASE64URL_CHARS for char in value)
 
 
 def _secrets_match(left: str, right: str) -> bool:

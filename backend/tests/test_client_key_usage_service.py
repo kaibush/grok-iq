@@ -409,3 +409,73 @@ async def test_public_usage_overview_hides_upstream_errors() -> None:
     assert result["series"] == []
     assert result["topModels"] == []
     assert "resources" not in result
+
+
+SK_PREFIX = "abcdefghijkl"
+SK_PAYLOAD = SK_PREFIX + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+SK_KEY = f"sk-{SK_PAYLOAD}"
+
+
+@pytest.mark.asyncio
+async def test_lookup_public_usage_accepts_sk_client_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("app.services.client_key_usage_service.utc_now", lambda: now)
+    client = FakeGrok2APIClient(
+        keys={
+            "items": [
+                {
+                    "id": "9",
+                    "name": "ops-sk",
+                    "prefix": SK_PREFIX,
+                    "enabled": True,
+                    "billingLimitUsdTicks": USD_TICKS,
+                    "billedUsageUsdTicks": 0,
+                }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 20,
+        },
+        secrets={"9": SK_KEY},
+        audits={
+            "9": {
+                "items": [
+                    {
+                        "clientKeyId": "9",
+                        "clientKeyName": "ops-sk",
+                        "statusCode": 200,
+                        "totalTokens": 4,
+                        "estimatedCostInUsdTicks": 1_000_000_000,
+                        "durationMs": 20,
+                        "createdAt": "2026-08-31T08:00:00Z",
+                    }
+                ],
+                "hasMore": False,
+                "nextCursor": "",
+            }
+        },
+    )
+    service = ClientKeyUsageService(client)  # type: ignore[arg-type]
+
+    missing = await service.lookup_public_usage(
+        "sk-" + ("a" * 47),
+        client_ip="127.0.0.1",
+        period="24h",
+    )
+    assert missing == {"found": False}
+    assert client.list_client_keys_calls == []
+    assert client.secret_calls == []
+
+    result = await service.lookup_public_usage(
+        SK_KEY,
+        client_ip="127.0.0.1",
+        period="24h",
+    )
+    assert result["found"] is True
+    assert result["usage"]["requests"] == 1
+    assert result["usage"]["totalTokens"] == 4
+    assert client.list_client_keys_calls[0]["search"] == SK_PREFIX
+    assert client.secret_calls == ["9"]
+    assert {call["key"] for call in client.list_request_audits_calls} == {"9"}
