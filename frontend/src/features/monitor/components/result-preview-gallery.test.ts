@@ -110,6 +110,18 @@ describe('previewItemsFromAccounts', () => {
     expect(items[0]?.accountName).toBe('cooldown-account')
     expect(items[0]?.source).toBe('account')
     expect(items[0]?.isolated).toBeUndefined()
+    expect(items[0]?.missingUpstream).toBeUndefined()
+  })
+
+  it('marks missing-upstream accounts so preview delete stays disabled', () => {
+    const items = previewItemsFromAccounts([
+      {
+        id: 9003,
+        name: 'missing-upstream',
+        missingUpstream: true,
+      },
+    ])
+    expect(items[0]?.missingUpstream).toBe(true)
   })
 
   it('marks quarantined accounts so preview isolate can switch to view-only', () => {

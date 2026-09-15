@@ -22,6 +22,7 @@ import {
   LayoutList,
   Loader2,
   ShieldBan,
+  Trash2,
   UsersRound,
   X,
 } from 'lucide-react'
@@ -123,6 +124,7 @@ export type ResultPreviewItem = {
   source?: 'run' | 'account'
   roundNumber?: number
   isolated?: boolean
+  missingUpstream?: boolean
 }
 
 export function previewItemsFromRuns(
@@ -181,6 +183,7 @@ export type PreviewableAccount = {
   email?: string | null
   createdAt?: string | null
   quarantined?: boolean
+  missingUpstream?: boolean
   assessment?: {
     sample_count?: number | null
     latest_sample_at?: string | null
@@ -221,6 +224,7 @@ export function previewItemFromAccount(
       : undefined,
     source: 'account' as const,
     isolated: isPreviewableAccountIsolated(account) || undefined,
+    missingUpstream: account.missingUpstream || undefined,
   }
 }
 
@@ -544,6 +548,8 @@ export function ResultPreviewGallery({
   const skipPageCommitRef = useRef(false)
   const [isolateOpen, setIsolateOpen] = useState(false)
   const [isolatedAccountIds, setIsolatedAccountIds] = useState<number[]>([])
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deletedAccountIds, setDeletedAccountIds] = useState<number[]>([])
   const [compareExpected, setCompareExpected] = useState(false)
   const previewPrefs = usePersistedViewState(
     PREVIEW_VIEW_STORAGE_KEY,
@@ -929,6 +935,10 @@ export function ResultPreviewGallery({
     isIsolatedAccount(account) ||
     Boolean(item?.isolated) ||
     (item != null && isolatedAccountIds.includes(item.accountId))
+  const alreadyDeletedUpstream =
+    Boolean(account?.missingUpstream) ||
+    Boolean(item?.missingUpstream) ||
+    (item != null && deletedAccountIds.includes(item.accountId))
   const isolateMutation = useMutation({
     mutationFn: (accountId: number) =>
       api.accountAction(accountId, {
@@ -952,11 +962,48 @@ export function ResultPreviewGallery({
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
+  const deleteMutation = useMutation({
+    mutationFn: (accountId: number) => api.deleteAccounts([accountId]),
+    onSuccess: (result, accountId) => {
+      setDeleteOpen(false)
+      const skippedAccountIds = result.skippedAccountIds ?? []
+      const failedAccountIds = result.failedAccountIds ?? []
+      if (result.deleted > 0) {
+        setDeletedAccountIds((current) =>
+          current.includes(accountId) ? current : [...current, accountId]
+        )
+      }
+      if (failedAccountIds.length > 0 || skippedAccountIds.length > 0) {
+        const details = [`已删除上游 ${result.deleted} 个账号`]
+        if (failedAccountIds.length) {
+          details.push(`${failedAccountIds.length} 个删除失败`)
+        }
+        if (skippedAccountIds.length) {
+          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+        }
+        toast.warning(details.join('；'))
+      } else if (result.deleted > 0) {
+        toast.success('已删除上游账号')
+      } else {
+        toast.warning('未能删除上游账号')
+      }
+      void client.invalidateQueries({ queryKey: ['account', accountId] })
+      void client.invalidateQueries({
+        queryKey: ['account-preview', accountId],
+      })
+      void client.invalidateQueries({ queryKey: ['accounts'] })
+      void client.invalidateQueries({ queryKey: ['runs'] })
+      void client.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
 
   useEffect(() => {
     if (open) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsolatedAccountIds((current) => (current.length ? [] : current))
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDeletedAccountIds((current) => (current.length ? [] : current))
     client.removeQueries({ queryKey: ['run-preview'] })
     client.removeQueries({ queryKey: ['run-preview-samples'] })
     client.removeQueries({ queryKey: ['account-preview'] })
@@ -967,6 +1014,7 @@ export function ResultPreviewGallery({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCompareExpected(false)
     setIsolateOpen(false)
+    setDeleteOpen(false)
     const nextId = pendingSampleId.current ?? resolvedItem?.sampleId
     const nextRound = pendingRoundNumber.current ?? resolvedItem?.roundNumber
     pendingSampleId.current = undefined
@@ -1053,7 +1101,7 @@ export function ResultPreviewGallery({
       ) {
         return
       }
-      if (isolateOpen) return
+      if (isolateOpen || deleteOpen) return
       if (event.key === 'Enter' && view === 'grid') {
         event.preventDefault()
         setSessionView('split')
@@ -1100,15 +1148,20 @@ export function ResultPreviewGallery({
       } else if (event.key === 'i' || event.key === 'I') {
         event.preventDefault()
         if (item && !alreadyIsolated) setIsolateOpen(true)
+      } else if (event.key === 'd' || event.key === 'D') {
+        event.preventDefault()
+        if (item && !alreadyDeletedUpstream) setDeleteOpen(true)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
+    alreadyDeletedUpstream,
     alreadyIsolated,
     currentPage,
     currentPageCount,
     accountPerspective,
+    deleteOpen,
     expandRounds,
     gridCols,
     isolateOpen,
@@ -1217,7 +1270,7 @@ export function ResultPreviewGallery({
                 </Tabs>
                 <InfoTooltip
                   label='预览操作'
-                  content='单击选中某个账号的预览卡片，即可把它移入隔离区；双击进入阅读模式查看详情。'
+                  content='单击选中某个账号的预览卡片，即可把它移入隔离区或删除上游账号；双击进入阅读模式查看详情。'
                 />
               </div>
               {showGroupToggle ? (
@@ -1417,6 +1470,19 @@ export function ResultPreviewGallery({
                   移入隔离区
                 </Button>
               )}
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                className='shrink-0 whitespace-nowrap'
+                disabled={
+                  !item || deleteMutation.isPending || alreadyDeletedUpstream
+                }
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 />
+                {alreadyDeletedUpstream ? '上游已删除' : '删除上游账号'}
+              </Button>
               </div>
             </header>
             {pageLoading && !item ? (
@@ -1820,6 +1886,7 @@ export function ResultPreviewGallery({
                     <InspectBar
                       item={resolvedItem ?? item}
                       account={account}
+                      missingUpstream={alreadyDeletedUpstream}
                       sample={sample}
                       loading={
                         isAccountItem
@@ -1944,6 +2011,48 @@ export function ResultPreviewGallery({
           if (item) isolateMutation.mutate(item.accountId)
         }}
       />
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !deleteMutation.isPending) setDeleteOpen(false)
+        }}
+        title={`删除 ${item?.accountName || '账号'} 的上游？`}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              将通过 grok2api API 永久删除当前选中账号的上游记录，此操作不可撤销。
+            </p>
+            <p className='font-medium text-foreground'>
+              账号删除后无法通过本页面恢复，请谨慎操作。
+            </p>
+            <p className='text-muted-foreground'>
+              正在执行探针或等待账号设置恢复的账号会被跳过。本地探针样本、历史任务和监控判定会保留。
+            </p>
+          </div>
+        }
+        cancelBtnText='取消'
+        confirmText={
+          deleteMutation.isPending ? (
+            <>
+              <Loader2 className='animate-spin' />
+              删除中…
+            </>
+          ) : (
+            <>
+              <Trash2 />
+              确认删除上游
+            </>
+          )
+        }
+        destructive
+        isLoading={deleteMutation.isPending}
+        disabled={!item || alreadyDeletedUpstream}
+        handleConfirm={() => {
+          if (item && !alreadyDeletedUpstream) {
+            deleteMutation.mutate(item.accountId)
+          }
+        }}
+      />
     </>
   )
 }
@@ -1951,6 +2060,7 @@ export function ResultPreviewGallery({
 function InspectBar({
   item,
   account,
+  missingUpstream,
   sample,
   loading,
   profileName,
@@ -1959,6 +2069,7 @@ function InspectBar({
 }: {
   item: ResultPreviewItem
   account?: UpstreamAccount
+  missingUpstream?: boolean
   sample: ProbeSample | null
   loading: boolean
   profileName?: string
@@ -1972,7 +2083,7 @@ function InspectBar({
       ) : (
         <>
           <MonitorStatusBadge status={account?.assessment.monitor_status} />
-          {account?.missingUpstream ? (
+          {missingUpstream || account?.missingUpstream ? (
             <Badge variant='outline'>上游缺失</Badge>
           ) : (
             <EnabledBadge enabled={account?.enabled} prefix='上游' />
