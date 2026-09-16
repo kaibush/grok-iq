@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from app.core.clock import app_isoformat, to_app_timezone, utc_now
+from app.core.clock import app_isoformat, parse_optional_datetime, to_app_timezone, utc_now
 from app.core.config import Settings
 from app.core.disposition import evidence_from, matches_disposition_source
 from app.integrations.grok2api.client import Grok2APIClient, IntegrationError
@@ -21,6 +21,7 @@ from app.services.cooldown_stats import (
     ALLOWED_STATUSES,
     GROK2API_COOLDOWN_SOURCE,
     LOCAL_COOLDOWN_SOURCE,
+    build_cooldown_probe_staging_item,
     build_cooldown_zone_item,
     build_missing_thinking_cooldown_item_from_live,
     compute_cooldown_stats,
@@ -30,6 +31,7 @@ from app.services.cooldown_stats import (
     matches_cooldown_search,
     missing_thinking_state_of,
     normalize_cooldown_source,
+    normalize_staging_probe_status,
     resolve_cooldown_list_range,
     select_cooldown_zone_rows,
     sort_cooldown_zone_items,
@@ -1380,16 +1382,18 @@ class AccountService:
             if live_missing_thinking_account_id(item) > 0
         ]
         assessments = self.accounts.get_assessments(sorted(set(account_ids))) if account_ids else {}
-        values = [
-            build_missing_thinking_cooldown_item_from_live(
+        staged_ids = self.accounts.list_cooldown_probe_staging_ids() if account_ids else set()
+        values = []
+        for item in items:
+            account_id = live_missing_thinking_account_id(item)
+            if account_id <= 0:
+                continue
+            payload_item = build_missing_thinking_cooldown_item_from_live(
                 item,
-                quarantined=self._is_quarantined(
-                    assessments.get(live_missing_thinking_account_id(item))
-                ),
+                quarantined=self._is_quarantined(assessments.get(account_id)),
             )
-            for item in items
-            if live_missing_thinking_account_id(item) > 0
-        ]
+            payload_item["staged"] = account_id in staged_ids
+            values.append(payload_item)
         try:
             total = int(payload.get("total") or 0)
         except (TypeError, ValueError, OverflowError):
@@ -1399,6 +1403,129 @@ class AccountService:
             "total": total,
             "page": page,
             "pageSize": page_size,
+        }
+
+    async def add_cooldown_probe_staging(
+        self,
+        accounts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        unique: dict[int, dict[str, Any]] = {}
+        skipped_ids: list[int] = []
+        for item in accounts:
+            if not isinstance(item, dict):
+                continue
+            try:
+                account_id = int(item.get("accountId") or item.get("account_id") or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if account_id <= 0:
+                continue
+            if bool(item.get("missingUpstream") or item.get("missing_upstream")):
+                skipped_ids.append(account_id)
+                continue
+            unique[account_id] = item
+        if unique:
+            live_items = await self.client.get_accounts_by_ids(set(unique))
+            live_ids = {
+                int(item.get("id") or 0)
+                for item in live_items
+                if int(item.get("id") or 0) > 0
+            }
+            for account_id in list(unique):
+                if account_id not in live_ids:
+                    skipped_ids.append(account_id)
+                    unique.pop(account_id, None)
+        payloads: list[dict[str, Any]] = []
+        for account_id, item in unique.items():
+            payloads.append(
+                {
+                    "account_id": account_id,
+                    "name": str(item.get("name") or "")[:160],
+                    "email": str(item.get("email") or "")[:255],
+                    "grok_state": str(item.get("grokState") or item.get("grok_state") or "")[:32],
+                    "reason": str(item.get("reason") or "")[:500],
+                    "cooled_at": parse_optional_datetime(item.get("cooledAt") or item.get("cooled_at")),
+                    "cooldown_until": parse_optional_datetime(
+                        item.get("cooldownUntil") or item.get("cooldown_until")
+                    ),
+                    "cooldown_count": _staging_cooldown_count(item),
+                }
+            )
+        result = self.accounts.add_cooldown_probe_staging(payloads)
+        added_ids = [int(account_id) for account_id in result.get("addedAccountIds") or []]
+        already_ids = [
+            int(account_id) for account_id in result.get("alreadyStagedAccountIds") or []
+        ]
+        return {
+            "added": len(added_ids),
+            "addedAccountIds": added_ids,
+            "alreadyStagedAccountIds": already_ids,
+            "skippedAccountIds": list(dict.fromkeys(skipped_ids)),
+        }
+
+    async def list_cooldown_probe_staging(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str = "",
+        probe_status: str = "all",
+    ) -> dict[str, Any]:
+        normalized = normalize_staging_probe_status(probe_status)
+        rows = self.accounts.list_cooldown_probe_staging()
+        account_ids = [
+            int(row.get("account_id") or 0)
+            for row in rows
+            if int(row.get("account_id") or 0) > 0
+        ]
+        latest_runs = (
+            self.probes.latest_runs_by_account_ids(account_ids) if account_ids else {}
+        )
+        upstream_by_id: dict[int, dict[str, Any]] = {}
+        if account_ids:
+            upstream_items = await self.client.get_accounts_by_ids(set(account_ids))
+            upstream_by_id.update(
+                {
+                    int(item.get("id") or 0): item
+                    for item in upstream_items
+                    if int(item.get("id") or 0) > 0
+                }
+            )
+        assessments = self.accounts.get_assessments(account_ids) if account_ids else {}
+        values: list[dict[str, Any]] = []
+        for row in rows:
+            account_id = int(row.get("account_id") or 0)
+            item = build_cooldown_probe_staging_item(
+                row,
+                upstream=upstream_by_id.get(account_id),
+                latest_run=latest_runs.get(account_id),
+                quarantined=self._is_quarantined(assessments.get(account_id)),
+            )
+            if matches_cooldown_search(item, search):
+                values.append(item)
+        probed_count = sum(1 for item in values if item["probedAfterStaged"])
+        unprobed_count = len(values) - probed_count
+        if normalized == "probed":
+            values = [item for item in values if item["probedAfterStaged"]]
+        elif normalized == "unprobed":
+            values = [item for item in values if not item["probedAfterStaged"]]
+        offset = (page - 1) * page_size
+        return {
+            "items": values[offset : offset + page_size],
+            "total": len(values),
+            "page": page,
+            "pageSize": page_size,
+            "probedCount": probed_count,
+            "unprobedCount": unprobed_count,
+        }
+
+    def remove_cooldown_probe_staging(self, account_ids: list[int]) -> dict[str, Any]:
+        unique_ids = list(dict.fromkeys(account_id for account_id in account_ids if account_id > 0))
+        removed = self.accounts.remove_cooldown_probe_staging(unique_ids)
+        return {
+            "requested": len(unique_ids),
+            "removed": removed,
+            "accountIds": unique_ids,
         }
 
     async def release_cooldown_zone(
@@ -1976,6 +2103,16 @@ class AccountService:
                 "recovery_guarded": False,
             },
         }
+
+
+def _staging_cooldown_count(item: dict[str, Any]) -> int:
+    try:
+        value = item.get("cooldownCount")
+        if value is None:
+            value = item.get("cooldown_count")
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def _count(value: Any) -> int:

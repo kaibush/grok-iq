@@ -12,6 +12,8 @@ from app.web.schemas import (
     AccountBatchEgressInput,
     AccountBatchUpdateInput,
     AccountOperatorNoteInput,
+    CooldownProbeStagingAddInput,
+    CooldownProbeStagingDeleteInput,
     CooldownReleaseInput,
 )
 
@@ -203,6 +205,34 @@ def build_accounts_router(service: AccountService) -> APIRouter:
             account_ids=payload.account_ids,
             source=payload.source,
         )
+
+    @router.get("/accounts/cooldowns/probe-staging")
+    async def list_cooldown_probe_staging(
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200, alias="pageSize"),
+        search: str = "",
+        probe_status: str = Query(default="all", alias="probeStatus"),
+    ) -> dict[str, Any]:
+        return await service.list_cooldown_probe_staging(
+            page=page,
+            page_size=page_size,
+            search=search,
+            probe_status=probe_status,
+        )
+
+    @router.post("/accounts/cooldowns/probe-staging")
+    async def add_cooldown_probe_staging(
+        payload: CooldownProbeStagingAddInput,
+    ) -> dict[str, Any]:
+        return await service.add_cooldown_probe_staging(
+            [item.model_dump() for item in payload.accounts]
+        )
+
+    @router.delete("/accounts/cooldowns/probe-staging")
+    async def delete_cooldown_probe_staging(
+        payload: CooldownProbeStagingDeleteInput,
+    ) -> dict[str, Any]:
+        return service.remove_cooldown_probe_staging(payload.account_ids)
 
     @router.get("/accounts/{account_id}")
     async def account_detail(

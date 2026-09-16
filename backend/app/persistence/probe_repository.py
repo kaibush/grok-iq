@@ -1417,6 +1417,12 @@ class ProbeRepository:
             created_to=created_to,
         )
 
+    def latest_runs_by_account_ids(
+        self,
+        account_ids: list[int] | set[int] | tuple[int, ...],
+    ) -> dict[int, dict[str, Any]]:
+        return self._run_reader.latest_runs_by_account_ids(account_ids)
+
     def run_detail(self, run_id: str) -> dict[str, Any] | None:
         return self._run_reader.run_detail(run_id)
 

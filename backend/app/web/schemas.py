@@ -171,6 +171,32 @@ class CooldownReleaseInput(BaseModel):
     source: str = "local"
 
 
+class CooldownProbeStagingAccountInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    account_id: int = Field(alias="accountId")
+    name: str = ""
+    email: str = ""
+    grok_state: str = Field(default="", alias="grokState")
+    reason: str = ""
+    cooled_at: str | None = Field(default=None, alias="cooledAt")
+    cooldown_until: str | None = Field(default=None, alias="cooldownUntil")
+    cooldown_count: int = Field(default=0, alias="cooldownCount")
+    missing_upstream: bool = Field(default=False, alias="missingUpstream")
+
+
+class CooldownProbeStagingAddInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    accounts: list[CooldownProbeStagingAccountInput] = Field(min_length=1, max_length=100_000)
+
+
+class CooldownProbeStagingDeleteInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    account_ids: list[int] = Field(min_length=1, max_length=100_000, alias="accountIds")
+
+
 class AccountOperatorNoteInput(BaseModel):
     note: str = Field(default="", max_length=2000)
 

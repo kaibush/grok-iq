@@ -144,6 +144,28 @@ class AccountCooldown(Base):
     )
 
 
+class CooldownProbeStaging(Base):
+    """Operator-managed grok2api cooldown accounts waiting for probe tasks."""
+
+    __tablename__ = "cooldown_probe_staging"
+    __table_args__ = (
+        Index("ix_cooldown_probe_staging_staged_at", "staged_at"),
+    )
+
+    account_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    grok_state: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    cooled_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    cooldown_until: Mapped[datetime | None] = mapped_column(AppDateTime())
+    cooldown_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    staged_at: Mapped[datetime] = mapped_column(AppDateTime(), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
 class ProbeProfile(Base):
     __tablename__ = "probe_profiles"
 

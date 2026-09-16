@@ -34,6 +34,7 @@ from .models import (
     AccountAssessment,
     AccountCooldown,
     Alert,
+    CooldownProbeStaging,
     AppSetting,
     MetadataRow,
     ProbeProfile,
@@ -1174,6 +1175,112 @@ class AccountRepository:
                 AccountCooldown.id.desc(),
             )
             return [model_dict(value) for value in session.scalars(query).all()]
+
+    def add_cooldown_probe_staging(
+        self,
+        accounts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        unique: dict[int, dict[str, Any]] = {}
+        for item in accounts:
+            account_id = int(item.get("account_id") or 0)
+            if account_id <= 0:
+                continue
+            unique[account_id] = item
+        if not unique:
+            return {"addedAccountIds": [], "alreadyStagedAccountIds": []}
+        now = utc_now()
+        with self.database.transaction() as session:
+            existing_ids = set(
+                session.scalars(
+                    select(CooldownProbeStaging.account_id).where(
+                        CooldownProbeStaging.account_id.in_(sorted(unique))
+                    )
+                ).all()
+            )
+            added_ids: list[int] = []
+            already_ids: list[int] = []
+            for account_id, item in unique.items():
+                payload = {
+                    "account_id": account_id,
+                    "name": str(item.get("name") or "")[:160],
+                    "email": str(item.get("email") or "")[:255],
+                    "grok_state": str(item.get("grok_state") or "")[:32],
+                    "reason": str(item.get("reason") or "")[:500],
+                    "cooled_at": item.get("cooled_at"),
+                    "cooldown_until": item.get("cooldown_until"),
+                    "cooldown_count": max(0, int(item.get("cooldown_count") or 0)),
+                    "updated_at": now,
+                }
+                if account_id in existing_ids:
+                    already_ids.append(account_id)
+                    session.execute(
+                        sqlite_insert(CooldownProbeStaging.__table__)
+                        .values(**payload, staged_at=now)
+                        .on_conflict_do_update(
+                            index_elements=["account_id"],
+                            set_={
+                                key: payload[key]
+                                for key in payload
+                                if key != "account_id"
+                            },
+                        )
+                    )
+                    continue
+                added_ids.append(account_id)
+                session.execute(
+                    sqlite_insert(CooldownProbeStaging.__table__).values(
+                        **payload,
+                        staged_at=now,
+                    )
+                )
+        return {
+            "addedAccountIds": added_ids,
+            "alreadyStagedAccountIds": already_ids,
+        }
+
+    def list_cooldown_probe_staging(self, *, search: str = "") -> list[dict[str, Any]]:
+        token = str(search or "").strip().lower()
+        with self.database.session() as session:
+            values = [
+                model_dict(value)
+                for value in session.scalars(
+                    select(CooldownProbeStaging).order_by(
+                        CooldownProbeStaging.staged_at.desc(),
+                        CooldownProbeStaging.account_id.desc(),
+                    )
+                ).all()
+            ]
+        if not token:
+            return values
+        filtered: list[dict[str, Any]] = []
+        for item in values:
+            if (
+                token in str(item.get("name") or "").lower()
+                or token in str(item.get("email") or "").lower()
+                or token == str(item.get("account_id") or "")
+            ):
+                filtered.append(item)
+        return filtered
+
+    def list_cooldown_probe_staging_ids(self) -> set[int]:
+        with self.database.session() as session:
+            return {
+                int(account_id)
+                for account_id in session.scalars(select(CooldownProbeStaging.account_id)).all()
+                if int(account_id or 0) > 0
+            }
+
+    def remove_cooldown_probe_staging(self, account_ids: list[int]) -> int:
+        unique_ids = [account_id for account_id in dict.fromkeys(account_ids) if account_id > 0]
+        if not unique_ids:
+            return 0
+        with self.database.transaction() as session:
+            result = session.execute(
+                delete(CooldownProbeStaging).where(
+                    CooldownProbeStaging.account_id.in_(unique_ids)
+                )
+            )
+            return int(result.rowcount or 0)
 
     def create_alert(
         self,

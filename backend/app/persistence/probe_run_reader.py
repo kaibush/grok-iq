@@ -157,6 +157,40 @@ class ProbeRunReader:
             "activeCount": int(active_count or 0),
         }
 
+    def latest_runs_by_account_ids(
+        self,
+        account_ids: Iterable[int],
+    ) -> dict[int, dict[str, Any]]:
+        unique_ids = sorted(
+            {
+                int(account_id)
+                for account_id in account_ids
+                if int(account_id or 0) > 0
+            }
+        )
+        if not unique_ids:
+            return {}
+        ranked = (
+            select(
+                ProbeRun.id,
+                func.row_number()
+                .over(
+                    partition_by=ProbeRun.account_id,
+                    order_by=(ProbeRun.created_at.desc(), ProbeRun.id.desc()),
+                )
+                .label("rn"),
+            )
+            .where(ProbeRun.account_id.in_(unique_ids))
+            .subquery()
+        )
+        with self.database.session() as session:
+            values = session.scalars(
+                select(ProbeRun)
+                .join(ranked, ProbeRun.id == ranked.c.id)
+                .where(ranked.c.rn == 1)
+            ).all()
+            return {int(value.account_id): model_dict(value) for value in values}
+
     def run_detail(self, run_id: str) -> dict[str, Any] | None:
         with self.database.session() as session:
             run = session.get(ProbeRun, run_id)

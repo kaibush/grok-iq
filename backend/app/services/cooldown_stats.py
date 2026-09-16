@@ -690,6 +690,118 @@ def matches_cooldown_search(item: dict[str, Any], search: str) -> bool:
     )
 
 
+STAGING_PROBE_STATUSES = {"all", "unprobed", "probed"}
+
+
+def normalize_staging_probe_status(value: str | None) -> str:
+    token = str(value or "all").strip().lower() or "all"
+    if token not in STAGING_PROBE_STATUSES:
+        raise ValueError("探针暂存状态仅支持 all、unprobed 或 probed")
+    return token
+
+
+def overlay_staging_grok_state(
+    snapshot: str | None,
+    *,
+    missing_upstream: bool,
+    enabled: bool,
+) -> str:
+    if missing_upstream:
+        return "deleted"
+    if enabled:
+        return "enabled"
+    value = str(snapshot or "").strip().lower()
+    if value in {"timed_disabled", "permanent_disabled"}:
+        return value
+    return "permanent_disabled"
+
+
+def compact_probe_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(run, dict) or not str(run.get("id") or "").strip():
+        return None
+    return {
+        "id": str(run.get("id") or ""),
+        "status": str(run.get("status") or ""),
+        "createdAt": _iso(run.get("created_at") or run.get("createdAt")),
+        "completedAt": _iso(run.get("completed_at") or run.get("completedAt")),
+        "error": str(run.get("error") or ""),
+        "profileId": str(run.get("profile_id") or run.get("profileId") or ""),
+    }
+
+
+def probed_after_staged(run: dict[str, Any] | None, staged_at: Any) -> bool:
+    if not isinstance(run, dict):
+        return False
+    created = parse_optional_datetime(run.get("created_at") or run.get("createdAt"))
+    staged = parse_optional_datetime(staged_at)
+    if created is None or staged is None:
+        return False
+    return created >= staged
+
+
+def build_cooldown_probe_staging_item(
+    row: dict[str, Any],
+    *,
+    upstream: dict[str, Any] | None,
+    latest_run: dict[str, Any] | None,
+    quarantined: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or utc_now()
+    account_id = _as_int(row.get("account_id") or row.get("id"), 0)
+    missing_upstream = upstream is None
+    enabled = bool((upstream or {}).get("enabled")) and not missing_upstream
+    grok_state = overlay_staging_grok_state(
+        str(row.get("grok_state") or ""),
+        missing_upstream=missing_upstream,
+        enabled=enabled,
+    )
+    cooling = grok_state in {"timed_disabled", "permanent_disabled"}
+    cooled_at = parse_optional_datetime(row.get("cooled_at"))
+    cooldown_until = parse_optional_datetime(row.get("cooldown_until"))
+    staged_at = parse_optional_datetime(row.get("staged_at"))
+    minutes = 0
+    if cooldown_until is not None and cooled_at is not None:
+        minutes = max(1, int((cooldown_until - cooled_at).total_seconds() / 60))
+    remaining = remaining_seconds(cooldown_until, now=current) if grok_state == "timed_disabled" else (
+        None if grok_state == "permanent_disabled" else 0
+    )
+    compact = compact_probe_run(latest_run)
+    after = probed_after_staged(latest_run, staged_at)
+    return {
+        "id": account_id,
+        "name": str(
+            (upstream or {}).get("name")
+            or row.get("name")
+            or f"账号 #{account_id}"
+        ),
+        "email": str((upstream or {}).get("email") or row.get("email") or ""),
+        "enabled": enabled,
+        "missingUpstream": missing_upstream,
+        "quarantined": quarantined,
+        "status": COOLING_STATUS if cooling else EXPIRED_STATUS,
+        "label": MISSING_THINKING_LABEL,
+        "reason": str(row.get("reason") or ""),
+        "source": GROK2API_COOLDOWN_SOURCE,
+        "cooledAt": _iso(cooled_at),
+        "cooldownUntil": _iso(cooldown_until),
+        "expiredAt": None,
+        "remainingSeconds": remaining,
+        "cooldownMinutes": minutes,
+        "tpsStreak": None,
+        "tpsMinCount": None,
+        "maxTps": None,
+        "auditTps": None,
+        "grokState": grok_state,
+        "cooldownCount": max(_as_int(row.get("cooldown_count"), 0), 0),
+        "stagedAt": _iso(staged_at),
+        "updatedAt": _iso(row.get("updated_at")),
+        "latestProbeRun": compact,
+        "probedAfterStaged": after,
+        "staged": True,
+    }
+
+
 def _trend(
     rows: list[dict[str, Any]],
     *,

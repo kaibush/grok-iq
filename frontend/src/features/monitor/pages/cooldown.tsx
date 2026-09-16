@@ -7,7 +7,10 @@ import {
 } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  ClipboardList,
   Images,
+  ListMinus,
+  ListPlus,
   Loader2,
   Play,
   PowerOff,
@@ -22,6 +25,7 @@ import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
   api,
   type CooldownAccount,
+  type CooldownProbeStagingAccount,
   type CooldownReleaseResult,
 } from '@/lib/api'
 import {
@@ -91,6 +95,8 @@ import {
 
 type CooldownStatusFilter = 'cooling' | 'expired' | 'all' | 'permanent_disabled'
 type CooldownSourceFilter = 'local' | 'grok2api'
+type CooldownWorkspace = 'list' | 'staging'
+type StagingProbeStatusFilter = 'all' | 'unprobed' | 'probed'
 
 const COOLDOWN_VIEW_STORAGE_KEY = 'grokiq.monitor.cooldown-view.v2'
 const defaultCooldownView = {
@@ -99,6 +105,9 @@ const defaultCooldownView = {
   search: '',
   status: 'cooling' as CooldownStatusFilter,
   source: 'local' as CooldownSourceFilter,
+  workspace: 'list' as CooldownWorkspace,
+  stagingPage: 1,
+  stagingProbeStatus: 'all' as StagingProbeStatusFilter,
 }
 
 const localStatusOptions: Array<{
@@ -137,10 +146,103 @@ const sourceLabels: Record<CooldownSourceFilter, string> = {
   grok2api: '上游同步',
 }
 
+const stagingProbeStatusOptions: Array<{
+  value: StagingProbeStatusFilter
+  label: string
+}> = [
+  { value: 'all', label: '全部' },
+  { value: 'unprobed', label: '未执行' },
+  { value: 'probed', label: '已执行' },
+]
+
+const stagingProbeStatusLabels: Record<StagingProbeStatusFilter, string> = {
+  all: '全部探针',
+  unprobed: '未执行',
+  probed: '已执行',
+}
+
+const ACTIVE_STAGING_PROBE_STATUSES = new Set([
+  'queued',
+  'running',
+  'cancel_requested',
+  'recovering',
+])
+
 function normalizeCooldownSource(
   value: string | undefined
 ): CooldownSourceFilter {
   return value === 'grok2api' ? 'grok2api' : 'local'
+}
+
+function normalizeCooldownWorkspace(
+  value: string | undefined
+): CooldownWorkspace {
+  return value === 'staging' ? 'staging' : 'list'
+}
+
+function normalizeStagingProbeStatus(
+  value: string | undefined
+): StagingProbeStatusFilter {
+  if (value === 'unprobed' || value === 'probed' || value === 'all') return value
+  return 'all'
+}
+
+function canStageCooldownAccount(account: CooldownAccount) {
+  return !account.missingUpstream
+}
+
+function stagingAccountPayload(account: CooldownAccount) {
+  return {
+    accountId: account.id,
+    name: account.name,
+    email: account.email,
+    grokState: account.grokState,
+    reason: account.reason,
+    cooledAt: account.cooledAt,
+    cooldownUntil: account.cooldownUntil,
+    cooldownCount: account.cooldownCount,
+    missingUpstream: account.missingUpstream,
+  }
+}
+
+function stagingProbeLabel(account: CooldownProbeStagingAccount) {
+  if (!account.probedAfterStaged) return '未执行'
+  const status = account.latestProbeRun?.status
+  switch (status) {
+    case 'queued':
+      return '排队中'
+    case 'running':
+    case 'recovering':
+      return '执行中'
+    case 'cancel_requested':
+      return '取消中'
+    case 'completed':
+      return '已完成'
+    case 'completed_with_errors':
+      return '完成有错误'
+    case 'failed':
+      return '失败'
+    case 'cancelled':
+      return '已取消'
+    default:
+      return status?.trim() || '已执行'
+  }
+}
+
+function stagingProbeBadgeVariant(account: CooldownProbeStagingAccount) {
+  if (!account.probedAfterStaged) return 'outline' as const
+  const status = account.latestProbeRun?.status
+  if (status === 'failed') return 'destructive' as const
+  if (status === 'completed') return 'success' as const
+  if (
+    status === 'queued' ||
+    status === 'running' ||
+    status === 'recovering' ||
+    status === 'cancel_requested'
+  ) {
+    return 'warning' as const
+  }
+  return 'secondary' as const
 }
 
 function normalizeCooldownStatus(
@@ -255,6 +357,14 @@ export function CooldownPage() {
   const source = normalizeCooldownSource(view.value.source)
   const grokSource = source === 'grok2api'
   const status = normalizeCooldownStatus(view.value.status, grokSource)
+  const workspace = grokSource
+    ? normalizeCooldownWorkspace(view.value.workspace)
+    : 'list'
+  const stagingMode = workspace === 'staging'
+  const stagingPage = view.value.stagingPage || 1
+  const stagingProbeStatus = normalizeStagingProbeStatus(
+    view.value.stagingProbeStatus
+  )
   const updateView = (patch: Partial<typeof defaultCooldownView>) =>
     view.setValue((current) => ({ ...current, ...patch }))
   const statsRange = useMemo(
@@ -272,11 +382,13 @@ export function CooldownPage() {
   const [deferredSearch] = useDebouncedValue(search.trim())
   const committedQuery = useMemo(
     () => ({
-      page,
+      page: stagingMode ? stagingPage : page,
       pageSize,
       search: deferredSearch,
       status,
       source,
+      workspace,
+      probeStatus: stagingProbeStatus,
       from: historyRange.from ?? '',
       to: historyRange.to ?? '',
     }),
@@ -287,19 +399,30 @@ export function CooldownPage() {
       page,
       pageSize,
       source,
+      stagingMode,
+      stagingPage,
+      stagingProbeStatus,
       status,
+      workspace,
     ]
   )
   const tableQuery = usePaintDeferredValue(committedQuery)
   const [selected, setSelected] = useState<number[]>([])
   const [selectedDisabled, setSelectedDisabled] = useState<number[]>([])
   const [selectedReleasable, setSelectedReleasable] = useState<number[]>([])
+  const [stagingSelected, setStagingSelected] = useState<number[]>([])
+  const [stagingSelectedDisabled, setStagingSelectedDisabled] = useState<
+    number[]
+  >([])
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [releaseIds, setReleaseIds] = useState<number[]>([])
   const [disableOpen, setDisableOpen] = useState(false)
   const [disableIds, setDisableIds] = useState<number[]>([])
   const [isolateOpen, setIsolateOpen] = useState(false)
   const [isolateIds, setIsolateIds] = useState<number[]>([])
+  const [unstageOpen, setUnstageOpen] = useState(false)
+  const [unstageIds, setUnstageIds] = useState<number[]>([])
+  const selectedAccountsRef = useRef(new Map<number, CooldownAccount>())
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [upstreamAccount, setUpstreamAccount] =
     useState<CooldownAccount | null>(null)
@@ -324,9 +447,11 @@ export function CooldownPage() {
     tableQuery.search !== committedQuery.search ||
     tableQuery.status !== committedQuery.status ||
     tableQuery.source !== committedQuery.source ||
+    tableQuery.workspace !== committedQuery.workspace ||
+    tableQuery.probeStatus !== committedQuery.probeStatus ||
     tableQuery.from !== committedQuery.from ||
     tableQuery.to !== committedQuery.to
-  const query = useQuery({
+  const listQuery = useQuery({
     queryKey: [
       'accounts',
       'cooldowns',
@@ -355,6 +480,7 @@ export function CooldownPage() {
         },
         signal
       ),
+    enabled: workspace !== 'staging',
     placeholderData: (previous) => {
       if (!previous?.items.length) return previous
       const expectedSource =
@@ -366,7 +492,45 @@ export function CooldownPage() {
       return items.some((item) => item.status === 'cooling') ? 15_000 : false
     },
   })
+  const stagingQuery = useQuery({
+    queryKey: [
+      'accounts',
+      'cooldown-probe-staging',
+      tableQuery.page,
+      tableQuery.pageSize,
+      tableQuery.search,
+      tableQuery.probeStatus,
+    ],
+    queryFn: ({ signal }) =>
+      api.cooldownProbeStaging(
+        {
+          page: tableQuery.page,
+          pageSize: tableQuery.pageSize,
+          search: tableQuery.search,
+          probeStatus: tableQuery.probeStatus,
+        },
+        signal
+      ),
+    enabled: grokSource && workspace === 'staging',
+    placeholderData: (previous) =>
+      previous?.items.length ? previous : undefined,
+    refetchInterval: (current) => {
+      const items = current.state.data?.items ?? []
+      return items.some(
+        (item) =>
+          item.status === 'cooling' ||
+          ACTIVE_STAGING_PROBE_STATUSES.has(item.latestProbeRun?.status || '')
+      )
+        ? 15_000
+        : false
+    },
+  })
+  const query = stagingMode ? stagingQuery : listQuery
   const accounts = useMemo(() => query.data?.items ?? [], [query.data?.items])
+  const stagingAccounts = useMemo(
+    () => (stagingQuery.data?.items ?? []) as CooldownProbeStagingAccount[],
+    [stagingQuery.data?.items]
+  )
   const { beginTableInteraction, tableLoading: showTableLoading } =
     useServerTableLoading({
       isFetching: query.isFetching,
@@ -376,6 +540,8 @@ export function CooldownPage() {
     tableQuery.search,
     tableQuery.status,
     tableQuery.source,
+    tableQuery.workspace,
+    tableQuery.probeStatus,
     tableQuery.from,
     tableQuery.to,
   ].join('|')
@@ -387,9 +553,14 @@ export function CooldownPage() {
     }
     if (appliedFilterKeyRef.current === tableFilterKey) return
     appliedFilterKeyRef.current = tableFilterKey
+    selectedAccountsRef.current.clear()
     setSelected((current) => (current.length === 0 ? current : []))
     setSelectedDisabled((current) => (current.length === 0 ? current : []))
     setSelectedReleasable((current) => (current.length === 0 ? current : []))
+    setStagingSelected((current) => (current.length === 0 ? current : []))
+    setStagingSelectedDisabled((current) =>
+      current.length === 0 ? current : []
+    )
   }, [beginTableInteraction, tableFilterKey, tableQueryPending])
 
   const hasCoolingRows = accounts.some((item) => item.status === 'cooling')
@@ -451,33 +622,44 @@ export function CooldownPage() {
   const previewAccountsQuery = useQuery({
     queryKey: [
       'accounts',
-      'cooldowns',
+      stagingMode ? 'cooldown-probe-staging' : 'cooldowns',
       'preview',
       previewPage,
       tableQuery.pageSize,
       tableQuery.search,
       tableQuery.status,
       tableQuery.source,
+      tableQuery.probeStatus,
       tableQuery.from,
       tableQuery.to,
     ],
     queryFn: ({ signal }) =>
-      api.cooldownAccounts(
-        {
-          page: previewPage,
-          pageSize: tableQuery.pageSize,
-          search: tableQuery.search,
-          status: tableQuery.status,
-          source: tableQuery.source,
-          ...(tableQuery.status === 'cooling'
-            ? {}
-            : {
-                from: tableQuery.from || undefined,
-                to: tableQuery.to || undefined,
-              }),
-        },
-        signal
-      ),
+      stagingMode
+        ? api.cooldownProbeStaging(
+            {
+              page: previewPage,
+              pageSize: tableQuery.pageSize,
+              search: tableQuery.search,
+              probeStatus: tableQuery.probeStatus,
+            },
+            signal
+          )
+        : api.cooldownAccounts(
+            {
+              page: previewPage,
+              pageSize: tableQuery.pageSize,
+              search: tableQuery.search,
+              status: tableQuery.status,
+              source: tableQuery.source,
+              ...(tableQuery.status === 'cooling'
+                ? {}
+                : {
+                    from: tableQuery.from || undefined,
+                    to: tableQuery.to || undefined,
+                  }),
+            },
+            signal
+          ),
     enabled: resultPreview != null && resultPreview.accountId == null,
   })
   const previewSource =
@@ -534,19 +716,19 @@ export function CooldownPage() {
           : items.findIndex((item) => item.accountId === accountId)
       if (accountId != null && matchedIndex < 0 && required) {
         setResultPreview({
-          page,
+          page: stagingMode ? stagingPage : page,
           index: 0,
           accountId,
         })
         return
       }
       setResultPreview({
-        page,
+        page: stagingMode ? stagingPage : page,
         index: required ? 0 : Math.max(0, matchedIndex),
         accountId: required ? accountId : undefined,
       })
     },
-    [accounts, page, query.data?.total]
+    [accounts, page, query.data?.total, stagingMode, stagingPage]
   )
   const openProbeDialog = useCallback(
     (account: CooldownAccount) => {
@@ -571,10 +753,30 @@ export function CooldownPage() {
     () => new Set(selectedReleasable),
     [selectedReleasable]
   )
+  const activeSelected = stagingMode ? stagingSelected : selected
+  const activeSelectedDisabled = stagingMode
+    ? stagingSelectedDisabled
+    : selectedDisabled
+  const activeSelectedIdSet = useMemo(
+    () => new Set(activeSelected),
+    [activeSelected]
+  )
+  const activeSelectedDisabledSet = useMemo(
+    () => new Set(activeSelectedDisabled),
+    [activeSelectedDisabled]
+  )
   const selectableAccounts = accounts.filter((item) =>
-    canSelectCooldownAccount(item, grokSource)
+    stagingMode ? true : canSelectCooldownAccount(item, grokSource)
   )
   const selectableIds = selectableAccounts.map((item) => item.id)
+  const stageableSelected = grokSource
+    ? selected.filter((id) => {
+        const account =
+          selectedAccountsRef.current.get(id) ??
+          accounts.find((item) => item.id === id)
+        return account ? canStageCooldownAccount(account) : false
+      })
+    : []
   const releasableSelected = selected.filter((id) =>
     selectedReleasableSet.has(id)
   )
@@ -583,27 +785,52 @@ export function CooldownPage() {
     : []
   const allChecked =
     selectableIds.length > 0 &&
-    selectableIds.every((id) => selectedIdSet.has(id))
-  const hasActiveFilters = status !== 'cooling' || Boolean(search.trim())
+    selectableIds.every((id) =>
+      (stagingMode ? activeSelectedIdSet : selectedIdSet).has(id)
+    )
+  const hasActiveFilters = stagingMode
+    ? stagingProbeStatus !== 'all' || Boolean(search.trim())
+    : status !== 'cooling' || Boolean(search.trim())
   const statusLabels = grokSource ? grokStatusLabels : localStatusLabels
   const viewSummary = [
     sourceLabels[source],
+    stagingMode ? '探针暂存' : '',
     search.trim() ? `搜索“${search.trim()}”` : '',
-    statusLabels[status],
-    grokSource || status === 'cooling' ? '' : statsRangeLabel,
-    `第 ${page} 页 · 每页 ${pageSize} 条`,
+    stagingMode
+      ? stagingProbeStatusLabels[stagingProbeStatus]
+      : statusLabels[status],
+    grokSource || status === 'cooling' || stagingMode ? '' : statsRangeLabel,
+    `第 ${stagingMode ? stagingPage : page} 页 · 每页 ${pageSize} 条`,
   ]
     .filter(Boolean)
     .join(' · ')
 
+  const rememberSelectedAccounts = (items: CooldownAccount[], checked: boolean) => {
+    const next = selectedAccountsRef.current
+    for (const item of items) {
+      if (checked) next.set(item.id, item)
+      else next.delete(item.id)
+    }
+  }
+
   const clearSelection = () => {
+    selectedAccountsRef.current.clear()
     setSelected([])
     setSelectedDisabled([])
     setSelectedReleasable([])
+    setStagingSelected([])
+    setStagingSelectedDisabled([])
   }
 
   const syncSelection = (accountIds: number[]) => {
     const allowed = new Set(accountIds)
+    if (stagingMode) {
+      setStagingSelected((current) => current.filter((id) => allowed.has(id)))
+      setStagingSelectedDisabled((current) =>
+        current.filter((id) => allowed.has(id))
+      )
+      return
+    }
     setSelected((current) => current.filter((id) => allowed.has(id)))
     setSelectedDisabled((current) => current.filter((id) => allowed.has(id)))
     setSelectedReleasable((current) => current.filter((id) => allowed.has(id)))
@@ -726,8 +953,63 @@ export function CooldownPage() {
     },
   })
   const isolatePending = isolateMutation.isPending
+
+  const addStagingMutation = useMutation({
+    mutationFn: (accounts: CooldownAccount[]) =>
+      api.addCooldownProbeStaging(accounts.map(stagingAccountPayload)),
+    onSuccess: (result) => {
+      const already = result.alreadyStagedAccountIds ?? []
+      const skipped = result.skippedAccountIds ?? []
+      const parts = [
+        result.added ? `已加入探针暂存 ${result.added} 个账号` : '',
+        already.length ? `${already.length} 个原本已在暂存` : '',
+        skipped.length ? `${skipped.length} 个缺少上游并跳过` : '',
+      ].filter(Boolean)
+      if (!parts.length) {
+        toast.warning('没有账号被加入探针暂存')
+        return
+      }
+      if (skipped.length || (!result.added && already.length)) {
+        toast.warning(parts.join('；'))
+      } else {
+        toast.success(parts.join('；'))
+      }
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['accounts', 'cooldowns'] })
+      void client.invalidateQueries({
+        queryKey: ['accounts', 'cooldown-probe-staging'],
+      })
+    },
+  })
+  const addStagingPending = addStagingMutation.isPending
+
+  const unstageMutation = useMutation({
+    mutationFn: (accountIds: number[]) =>
+      api.removeCooldownProbeStaging(accountIds),
+    onSuccess: (result) => {
+      setUnstageOpen(false)
+      setUnstageIds([])
+      setStagingSelected([])
+      setStagingSelectedDisabled([])
+      toast.success(`已移出探针暂存 ${result.removed} 个账号`)
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['accounts', 'cooldowns'] })
+      void client.invalidateQueries({
+        queryKey: ['accounts', 'cooldown-probe-staging'],
+      })
+    },
+  })
+  const unstagePending = unstageMutation.isPending
   const selectionActionPending =
-    releasePending || disablePending || isolatePending
+    releasePending ||
+    disablePending ||
+    isolatePending ||
+    addStagingPending ||
+    unstagePending
 
   const openIsolate = (accountIds: number[]) => {
     const ids = uniqueIds(accountIds)
@@ -736,18 +1018,41 @@ export function CooldownPage() {
     setIsolateOpen(true)
   }
 
+  const openUnstage = (accountIds: number[]) => {
+    const ids = uniqueIds(accountIds)
+    if (ids.length === 0) return
+    setUnstageIds(ids)
+    setUnstageOpen(true)
+  }
+
   const openSelectedProbe = () => {
-    const accountIds = uniqueIds(selected)
+    const accountIds = uniqueIds(activeSelected)
     if (accountIds.length === 0) {
       toast.error('没有可创建探针的账号')
       return
     }
     setProbeAccountIds(accountIds)
     setProbeDisabledCount(
-      accountIds.filter((id) => selectedDisabledSet.has(id)).length
+      accountIds.filter((id) => activeSelectedDisabledSet.has(id)).length
     )
     setProbeOpen(true)
     void refetchEgress()
+  }
+
+  const openSelectedStaging = () => {
+    const payloads = uniqueIds(selected)
+      .map(
+        (id) =>
+          selectedAccountsRef.current.get(id) ??
+          accounts.find((item) => item.id === id)
+      )
+      .filter((item): item is CooldownAccount => Boolean(item))
+      .filter(canStageCooldownAccount)
+    if (payloads.length === 0) {
+      toast.error('没有可加入探针暂存的账号')
+      return
+    }
+    addStagingMutation.mutate(payloads)
   }
 
   const toggleCurrentPageSelection = (checked: boolean) => {
@@ -757,56 +1062,53 @@ export function CooldownPage() {
     const pageReleasableIds = selectableAccounts
       .filter(canReleaseCooldown)
       .map((item) => item.id)
-    setSelected((current) => {
-      const next = new Set(current)
-      for (const id of selectableIds) {
-        if (checked) next.add(id)
-        else next.delete(id)
-      }
-      return Array.from(next)
-    })
-    setSelectedDisabled((current) => {
-      const next = new Set(current)
-      if (checked) {
-        for (const id of pageDisabledIds) next.add(id)
-      } else {
-        for (const id of selectableIds) next.delete(id)
-      }
-      return Array.from(next)
-    })
-    setSelectedReleasable((current) => {
-      const next = new Set(current)
-      if (checked) {
-        for (const id of pageReleasableIds) next.add(id)
-      } else {
-        for (const id of selectableIds) next.delete(id)
-      }
-      return Array.from(next)
-    })
+    const applyIds = (
+      setter: typeof setSelected,
+      ids: number[],
+      addChecked: boolean
+    ) => {
+      setter((current) => {
+        const next = new Set(current)
+        if (addChecked && checked) {
+          for (const id of ids) next.add(id)
+        } else {
+          for (const id of selectableIds) next.delete(id)
+        }
+        return Array.from(next)
+      })
+    }
+    if (stagingMode) {
+      applyIds(setStagingSelected, selectableIds, true)
+      applyIds(setStagingSelectedDisabled, pageDisabledIds, true)
+      return
+    }
+    rememberSelectedAccounts(selectableAccounts, checked)
+    applyIds(setSelected, selectableIds, true)
+    applyIds(setSelectedDisabled, pageDisabledIds, true)
+    applyIds(setSelectedReleasable, pageReleasableIds, true)
   }
 
   const toggleAccountSelection = (id: number, checked: boolean) => {
     const account = accounts.find((item) => item.id === id)
     const disabled = Boolean(account && !account.enabled)
     const releasable = Boolean(account && canReleaseCooldown(account))
-    setSelected((current) => {
-      if (checked) {
-        return current.includes(id) ? current : [...current, id]
-      }
-      return current.filter((item) => item !== id)
-    })
-    setSelectedDisabled((current) => {
-      if (checked && disabled) {
-        return current.includes(id) ? current : [...current, id]
-      }
-      return current.filter((item) => item !== id)
-    })
-    setSelectedReleasable((current) => {
-      if (checked && releasable) {
-        return current.includes(id) ? current : [...current, id]
-      }
-      return current.filter((item) => item !== id)
-    })
+    const applyId = (setter: typeof setSelected, include: boolean) => {
+      setter((current) => {
+        if (checked && include) {
+          return current.includes(id) ? current : [...current, id]
+        }
+        return current.filter((item) => item !== id)
+      })
+    }
+    if (stagingMode) {
+      applyId(setStagingSelected, true)
+      applyId(setStagingSelectedDisabled, disabled)
+      return
+    }
+    if (account) rememberSelectedAccounts([account], checked)
+    applyId(setSelected, true)
+    applyId(setSelectedDisabled, disabled)
+    applyId(setSelectedReleasable, releasable)
   }
 
   return (
@@ -817,7 +1119,9 @@ export function CooldownPage() {
           <div className='space-y-2'>
             <p>
               {grokSource
-                ? '上游同步实时读取 grok2api 缺思考记录。定时停用到期后由 grok2api 自动恢复；永久停用需手动启用。解除冷却会立即启用上游账号。停用全部只改上游启用，不会移入隔离区。'
+                ? stagingMode
+                  ? '探针暂存用来管理上游冷却区里已经准备执行探针的账号。加入后会保留记录，执行探针后标记为已执行，不会自动移出。'
+                  : '上游同步实时读取 grok2api 缺思考记录。定时停用到期后由 grok2api 自动恢复；永久停用需手动启用。解除冷却会立即启用上游账号。停用全部只改上游启用，不会移入隔离区。选中账号后可加入探针暂存，方便跟踪哪些冷却账号已经做过探针。'
                 : '本系统冷却来自请求审计高速 TPS。连续达到次数后会先临时停用账号，到期自动恢复，不会进入隔离区。冷却结束后如果再次连续高速 TPS，才会永久停用并移入隔离区。'}
             </p>
           </div>
@@ -834,67 +1138,109 @@ export function CooldownPage() {
                 void client.invalidateQueries({
                   queryKey: ['accounts', 'cooldown-stats'],
                 })
+                void client.invalidateQueries({
+                  queryKey: ['accounts', 'cooldown-probe-staging'],
+                })
               }}
             >
               <RefreshCw />
             </ToolbarAction>
             <SelectionToolbar
               wrap={false}
-              selectedCount={selected.length}
+              selectedCount={activeSelected.length}
               entityLabel='账号'
               disabled={selectionActionPending}
               onClear={clearSelection}
             >
               <ToolbarAction
-                label={`测试已选 ${selected.length} 个账号`}
-                disabled={selectionActionPending || selected.length === 0}
+                label={`测试已选 ${activeSelected.length} 个账号`}
+                disabled={
+                  selectionActionPending || activeSelected.length === 0
+                }
                 onClick={openSelectedProbe}
               >
                 <Play />
               </ToolbarAction>
-              <ToolbarAction
-                label={
-                  grokSource
-                    ? releasableSelected.length
-                      ? `解除已选 ${releasableSelected.length} 个账号的冷却`
-                      : '已选账号不在冷却中，无法解除冷却'
-                    : releasableSelected.length
-                      ? `提前结束已选 ${releasableSelected.length} 个账号的冷却`
-                      : '已选账号不在冷却中，无法提前结束'
-                }
-                pending={releasePending}
-                disabled={
-                  selectionActionPending || releasableSelected.length === 0
-                }
-                onClick={() => openRelease(releasableSelected)}
-              >
-                <TimerOff />
-              </ToolbarAction>
-              {grokSource ? (
+              {stagingMode ? (
                 <ToolbarAction
-                  label={
-                    disableableSelected.length
-                      ? `停用全部（${disableableSelected.length} 个启用账号）`
-                      : '已选账号均处于停用状态或缺少上游'
-                  }
+                  label={`移出暂存 ${activeSelected.length} 个账号`}
                   destructive
-                  pending={disablePending}
+                  pending={unstagePending}
                   disabled={
-                    selectionActionPending || disableableSelected.length === 0
+                    selectionActionPending || activeSelected.length === 0
                   }
-                  onClick={() => openDisable(disableableSelected)}
+                  onClick={() => openUnstage(activeSelected)}
                 >
-                  <PowerOff />
+                  <ListMinus />
                 </ToolbarAction>
-              ) : null}
-              <ToolbarAction
-                label={`将已选 ${selected.length} 个账号移入隔离区`}
-                pending={isolatePending}
-                disabled={selectionActionPending || selected.length === 0}
-                onClick={() => openIsolate(selected)}
-              >
-                <ShieldBan />
-              </ToolbarAction>
+              ) : (
+                <>
+                  {grokSource ? (
+                    <ToolbarAction
+                      label={
+                        stageableSelected.length
+                          ? `加入探针暂存 ${stageableSelected.length} 个账号`
+                          : '已选账号缺少上游，无法加入暂存'
+                      }
+                      pending={addStagingPending}
+                      disabled={
+                        selectionActionPending ||
+                        stageableSelected.length === 0
+                      }
+                      onClick={openSelectedStaging}
+                    >
+                      <ListPlus />
+                    </ToolbarAction>
+                  ) : null}
+                  <ToolbarAction
+                    label={
+                      grokSource
+                        ? releasableSelected.length
+                          ? `解除已选 ${releasableSelected.length} 个账号的冷却`
+                          : '已选账号不在冷却中，无法解除冷却'
+                        : releasableSelected.length
+                          ? `提前结束已选 ${releasableSelected.length} 个账号的冷却`
+                          : '已选账号不在冷却中，无法提前结束'
+                    }
+                    pending={releasePending}
+                    disabled={
+                      selectionActionPending ||
+                      releasableSelected.length === 0
+                    }
+                    onClick={() => openRelease(releasableSelected)}
+                  >
+                    <TimerOff />
+                  </ToolbarAction>
+                  {grokSource ? (
+                    <ToolbarAction
+                      label={
+                        disableableSelected.length
+                          ? `停用全部（${disableableSelected.length} 个启用账号）`
+                          : '已选账号均处于停用状态或缺少上游'
+                      }
+                      destructive
+                      pending={disablePending}
+                      disabled={
+                        selectionActionPending ||
+                        disableableSelected.length === 0
+                      }
+                      onClick={() => openDisable(disableableSelected)}
+                    >
+                      <PowerOff />
+                    </ToolbarAction>
+                  ) : null}
+                  <ToolbarAction
+                    label={`将已选 ${activeSelected.length} 个账号移入隔离区`}
+                    pending={isolatePending}
+                    disabled={
+                      selectionActionPending || activeSelected.length === 0
+                    }
+                    onClick={() => openIsolate(activeSelected)}
+                  >
+                    <ShieldBan />
+                  </ToolbarAction>
+                </>
+              )}
             </SelectionToolbar>
           </ActionToolbar>
         }
@@ -916,6 +1262,7 @@ export function CooldownPage() {
           updateView({
             source: next,
             page: 1,
+            workspace: 'list',
             ...(next === 'local' && status === 'permanent_disabled'
               ? { status: 'cooling' }
               : {}),
@@ -941,11 +1288,21 @@ export function CooldownPage() {
           <div className='space-y-2' aria-busy={showTableLoading}>
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
               <Tabs
-                value={resultPreview ? 'preview' : 'list'}
+                value={
+                  resultPreview ? 'preview' : stagingMode ? 'staging' : 'list'
+                }
                 className='shrink-0 gap-0'
                 onValueChange={(value) => {
-                  if (value === 'list') {
+                  if (value === 'staging') {
+                    beginTableInteraction()
                     setResultPreview(null)
+                    updateView({ workspace: 'staging' })
+                    return
+                  }
+                  if (value === 'list') {
+                    beginTableInteraction()
+                    setResultPreview(null)
+                    updateView({ workspace: 'list' })
                     return
                   }
                   openAccountPreview()
@@ -957,20 +1314,44 @@ export function CooldownPage() {
                     <Images className='size-3.5' />
                     预览
                   </TabsTrigger>
+                  {grokSource ? (
+                    <TabsTrigger value='staging'>
+                      <ClipboardList className='size-3.5' />
+                      探针暂存
+                    </TabsTrigger>
+                  ) : null}
                 </TabsList>
               </Tabs>
-              <SegmentedControl
-                ariaLabel='冷却状态'
-                value={status}
-                onChange={(next) => updateView({ status: next, page: 1 })}
-                options={grokSource ? grokStatusOptions : localStatusOptions}
-              />
+              {stagingMode ? (
+                <SegmentedControl
+                  ariaLabel='探针暂存状态'
+                  value={stagingProbeStatus}
+                  onChange={(next) =>
+                    updateView({
+                      stagingProbeStatus: next,
+                      stagingPage: 1,
+                    })
+                  }
+                  options={stagingProbeStatusOptions}
+                />
+              ) : (
+                <SegmentedControl
+                  ariaLabel='冷却状态'
+                  value={status}
+                  onChange={(next) => updateView({ status: next, page: 1 })}
+                  options={grokSource ? grokStatusOptions : localStatusOptions}
+                />
+              )}
               <div className='relative min-w-0 flex-1'>
                 <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
                 <Input
                   value={search}
                   onChange={(event) =>
-                    updateView({ search: event.target.value, page: 1 })
+                    updateView(
+                      stagingMode
+                        ? { search: event.target.value, stagingPage: 1 }
+                        : { search: event.target.value, page: 1 }
+                    )
                   }
                   placeholder={
                     grokSource
@@ -1004,7 +1385,7 @@ export function CooldownPage() {
         footer={
           accounts.length ? (
             <ServerPagination
-              page={page}
+              page={stagingMode ? stagingPage : page}
               pageSize={pageSize}
               total={query.data?.total ?? 0}
               disabled={showTableLoading}
@@ -1012,11 +1393,17 @@ export function CooldownPage() {
               itemLabel='账号'
               onPageChange={(value) => {
                 beginTableInteraction()
-                updateView({ page: value })
+                updateView(
+                  stagingMode ? { stagingPage: value } : { page: value }
+                )
               }}
               onPageSizeChange={(value) => {
                 beginTableInteraction()
-                updateView({ pageSize: value, page: 1 })
+                updateView(
+                  stagingMode
+                    ? { pageSize: value, stagingPage: 1 }
+                    : { pageSize: value, page: 1 }
+                )
               }}
             />
           ) : null
@@ -1034,8 +1421,13 @@ export function CooldownPage() {
           <div className='relative min-h-40' aria-busy={showTableLoading}>
             <CooldownTable
               grokSource={grokSource}
-              accounts={accounts}
-              selected={selected}
+              stagingMode={stagingMode}
+              accounts={
+                stagingMode
+                  ? stagingAccounts
+                  : accounts
+              }
+              selected={activeSelected}
               allChecked={allChecked}
               selectDisabled={selectableIds.length === 0}
               nowMs={nowMs}
@@ -1043,6 +1435,7 @@ export function CooldownPage() {
               onToggleCurrentPage={toggleCurrentPageSelection}
               onToggleAccount={toggleAccountSelection}
               onRelease={(account) => openRelease([account.id])}
+              onUnstage={(account) => openUnstage([account.id])}
               onOpenUpstream={openAccountUpstream}
               onPreview={(account) => openAccountPreview(account.id, true)}
               onProbe={openProbeDialog}
@@ -1051,44 +1444,56 @@ export function CooldownPage() {
             />
             {showTableLoading && (
               <ServerTableLoadingOverlay
-                page={page}
+                page={stagingMode ? stagingPage : page}
                 itemLabel='账号'
-                message='正在更新冷却筛选结果…'
+                message={
+                  stagingMode
+                    ? '正在更新探针暂存…'
+                    : '正在更新冷却筛选结果…'
+                }
               />
             )}
           </div>
         ) : (
           <div className='relative min-h-48' aria-busy={showTableLoading}>
             <EmptyState
-              icon={Timer}
+              icon={stagingMode ? ClipboardList : Timer}
               title={
-                hasActiveFilters
-                  ? '没有匹配的冷却记录'
-                  : grokSource
-                    ? '当前没有定时停用的账号'
-                    : '当前没有冷却中的账号'
+                stagingMode
+                  ? hasActiveFilters
+                    ? '没有匹配的探针暂存账号'
+                    : '当前没有探针暂存账号'
+                  : hasActiveFilters
+                    ? '没有匹配的冷却记录'
+                    : grokSource
+                      ? '当前没有定时停用的账号'
+                      : '当前没有冷却中的账号'
               }
               description={
-                grokSource
-                  ? status === 'expired'
-                    ? '当前没有已重新启用的缺思考账号。'
-                    : status === 'permanent_disabled'
-                      ? '当前没有永久停用的缺思考账号。'
+                stagingMode
+                  ? hasActiveFilters
+                    ? '没有匹配当前筛选的暂存账号，请调整条件后重试。'
+                    : '在上游同步列表中选中定时停用或永久停用的账号，再点「加入探针暂存」。执行探针后会标记为已执行，不会自动移出。'
+                  : grokSource
+                    ? status === 'expired'
+                      ? '当前没有已重新启用的缺思考账号。'
+                      : status === 'permanent_disabled'
+                        ? '当前没有永久停用的缺思考账号。'
+                        : status === 'all'
+                          ? '当前没有 grok2api 缺思考记录。'
+                          : hasActiveFilters
+                            ? '没有匹配当前筛选的缺思考记录，请调整条件后重试。'
+                            : '实时读取 grok2api 缺思考记录。当前没有定时停用的账号。'
+                    : status === 'expired'
+                      ? `看板时间范围「${statsRangeLabel}」内没有已结束的冷却记录，请扩大时间范围后重试。`
                       : status === 'all'
-                        ? '当前没有 grok2api 缺思考记录。'
+                        ? `看板时间范围「${statsRangeLabel}」内没有冷却记录，请扩大时间范围或改回「冷却中」。`
                         : hasActiveFilters
-                          ? '没有匹配当前筛选的缺思考记录，请调整条件后重试。'
-                          : '实时读取 grok2api 缺思考记录。当前没有定时停用的账号。'
-                  : status === 'expired'
-                    ? `看板时间范围「${statsRangeLabel}」内没有已结束的冷却记录，请扩大时间范围后重试。`
-                    : status === 'all'
-                      ? `看板时间范围「${statsRangeLabel}」内没有冷却记录，请扩大时间范围或改回「冷却中」。`
-                      : hasActiveFilters
-                        ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
-                        : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。已结束的记录请切换到「已结束」，并确认上方看板时间范围覆盖冷却发生的时间。'
+                          ? '没有匹配当前筛选的冷却记录，请调整条件后重试。'
+                          : '高速 TPS 连续达标后会先在这里停用几分钟，到期自动恢复。已结束的记录请切换到「已结束」，并确认上方看板时间范围覆盖冷却发生的时间。'
               }
               action={
-                hasActiveFilters ? undefined : (
+                hasActiveFilters || stagingMode ? undefined : (
                   <Button
                     variant='outline'
                     onClick={() => updateView({ status: 'expired', page: 1 })}
@@ -1100,9 +1505,13 @@ export function CooldownPage() {
             />
             {showTableLoading && (
               <ServerTableLoadingOverlay
-                page={page}
+                page={stagingMode ? stagingPage : page}
                 itemLabel='账号'
-                message='正在更新冷却筛选结果…'
+                message={
+                  stagingMode
+                    ? '正在更新探针暂存…'
+                    : '正在更新冷却筛选结果…'
+                }
               />
             )}
           </div>
@@ -1202,6 +1611,44 @@ export function CooldownPage() {
         handleConfirm={() => {
           if (disableIds.length === 0) return
           disableMutation.mutate(disableIds)
+        }}
+      />
+      <ConfirmDialog
+        open={unstageOpen}
+        onOpenChange={(open) => {
+          if (!open && !unstagePending) {
+            setUnstageOpen(false)
+            setUnstageIds([])
+          }
+        }}
+        title={`移出 ${unstageIds.length} 个探针暂存账号？`}
+        desc={
+          <div className='space-y-2'>
+            <p>
+              {`将从探针暂存表移出已选 ${unstageIds.length} 个账号。这不会改变上游冷却状态，也不会删除探针任务。`}
+            </p>
+          </div>
+        }
+        cancelBtnText='取消'
+        confirmText={
+          unstagePending ? (
+            <>
+              <Loader2 className='animate-spin' />
+              移出中…
+            </>
+          ) : (
+            <>
+              <ListMinus />
+              确认移出暂存
+            </>
+          )
+        }
+        destructive
+        isLoading={unstagePending}
+        disabled={unstageIds.length === 0}
+        handleConfirm={() => {
+          if (unstageIds.length === 0) return
+          unstageMutation.mutate(unstageIds)
         }}
       />
       <ConfirmDialog
@@ -1327,6 +1774,9 @@ export function CooldownPage() {
           void client.invalidateQueries({ queryKey: ['runs'] })
           void client.invalidateQueries({ queryKey: ['dashboard'] })
           void client.invalidateQueries({ queryKey: ['accounts'] })
+          void client.invalidateQueries({
+            queryKey: ['accounts', 'cooldown-probe-staging'],
+          })
         }}
       />
     </Page>
@@ -1335,6 +1785,7 @@ export function CooldownPage() {
 
 function CooldownTable({
   grokSource = false,
+  stagingMode = false,
   accounts,
   selected,
   allChecked,
@@ -1344,6 +1795,7 @@ function CooldownTable({
   onToggleCurrentPage,
   onToggleAccount,
   onRelease,
+  onUnstage,
   onOpenUpstream,
   onPreview,
   onProbe,
@@ -1351,6 +1803,7 @@ function CooldownTable({
   onOpenLedger,
 }: {
   grokSource?: boolean
+  stagingMode?: boolean
   accounts: CooldownAccount[]
   selected: number[]
   allChecked: boolean
@@ -1360,6 +1813,7 @@ function CooldownTable({
   onToggleCurrentPage: (checked: boolean) => void
   onToggleAccount: (id: number, checked: boolean) => void
   onRelease: (account: CooldownAccount) => void
+  onUnstage: (account: CooldownAccount) => void
   onOpenUpstream: (account: CooldownAccount) => void
   onPreview: (account: CooldownAccount) => void
   onProbe: (account: CooldownAccount) => void
@@ -1369,7 +1823,7 @@ function CooldownTable({
   const selectedIdSet = useMemo(() => new Set(selected), [selected])
   return (
     <Table
-      rememberRowKey='monitor-cooldown'
+      rememberRowKey={stagingMode ? 'monitor-cooldown-staging' : 'monitor-cooldown'}
       className='[&_td]:py-1.5 [&_th]:h-8'
     >
       <TableHeader>
@@ -1380,25 +1834,38 @@ function CooldownTable({
               disabled={selectDisabled}
               onCheckedChange={(value) => onToggleCurrentPage(value === true)}
               aria-label={
-                grokSource ? '选择当前页账号' : '选择当前页可提前结束的冷却账号'
+                stagingMode
+                  ? '选择当前页探针暂存账号'
+                  : grokSource
+                    ? '选择当前页账号'
+                    : '选择当前页可提前结束的冷却账号'
               }
             />
           </TableHead>
           <TableHead>账号</TableHead>
-          <TableHead>状态</TableHead>
-          <TableHead>原因</TableHead>
-          {grokSource ? (
-            <TableHead>次数</TableHead>
+          <TableHead>当前状态</TableHead>
+          {stagingMode ? (
+            <>
+              <TableHead>加入时间</TableHead>
+              <TableHead>暂存后探针</TableHead>
+            </>
           ) : (
             <>
-              <TableHead>连续次数</TableHead>
-              <TableHead>峰值 TPS</TableHead>
+              <TableHead>原因</TableHead>
+              {grokSource ? (
+                <TableHead>次数</TableHead>
+              ) : (
+                <>
+                  <TableHead>连续次数</TableHead>
+                  <TableHead>峰值 TPS</TableHead>
+                </>
+              )}
+              <TableHead>开始时间</TableHead>
+              <TableHead>结束时间</TableHead>
+              <TableHead>剩余</TableHead>
+              <TableHead>上游启用</TableHead>
             </>
           )}
-          <TableHead>开始时间</TableHead>
-          <TableHead>结束时间</TableHead>
-          <TableHead>剩余</TableHead>
-          <TableHead>上游启用</TableHead>
           <TableHead className='text-right'>操作</TableHead>
         </TableRow>
       </TableHeader>
@@ -1407,12 +1874,14 @@ function CooldownTable({
           <CooldownRow
             key={account.id}
             grokSource={grokSource}
+            stagingMode={stagingMode}
             account={account}
             selected={selectedIdSet.has(account.id)}
             nowMs={nowMs}
             actionPending={actionPending}
             onSelectedChange={(checked) => onToggleAccount(account.id, checked)}
             onRelease={() => onRelease(account)}
+            onUnstage={() => onUnstage(account)}
             onOpenUpstream={() => onOpenUpstream(account)}
             onPreview={() => onPreview(account)}
             onProbe={() => onProbe(account)}
@@ -1427,12 +1896,14 @@ function CooldownTable({
 
 function CooldownRow({
   grokSource = false,
+  stagingMode = false,
   account,
   selected,
   nowMs,
   actionPending,
   onSelectedChange,
   onRelease,
+  onUnstage,
   onOpenUpstream,
   onPreview,
   onProbe,
@@ -1440,12 +1911,14 @@ function CooldownRow({
   onOpenLedger,
 }: {
   grokSource?: boolean
-  account: CooldownAccount
+  stagingMode?: boolean
+  account: CooldownAccount | CooldownProbeStagingAccount
   selected: boolean
   nowMs: number
   actionPending: boolean
   onSelectedChange: (checked: boolean) => void
   onRelease: () => void
+  onUnstage: () => void
   onOpenUpstream: () => void
   onPreview: () => void
   onProbe: () => void
@@ -1462,7 +1935,10 @@ function CooldownRow({
   const expiringSoon =
     account.status === 'cooling' && isCooldownExpiringSoon(remaining)
   const canRelease = canReleaseCooldown(account)
-  const canSelect = canSelectCooldownAccount(account, grokSource)
+  const canSelect = stagingMode
+    ? true
+    : canSelectCooldownAccount(account, grokSource)
+  const stagingAccount = account as CooldownProbeStagingAccount
   const reason = account.reason?.trim() || account.label?.trim() || '—'
   const peakTps = account.maxTps ?? account.auditTps
   const endedAt = account.cooldownUntil || account.expiredAt
@@ -1504,6 +1980,11 @@ function CooldownRow({
                   下次将停用
                 </Badge>
               ) : null}
+              {grokSource && !stagingMode && account.staged ? (
+                <Badge variant='info' className='h-5 px-1.5 text-[10px]'>
+                  已暂存
+                </Badge>
+              ) : null}
             </div>
             <div
               className='max-w-80 text-xs text-muted-foreground'
@@ -1536,91 +2017,126 @@ function CooldownRow({
               : '已结束'}
         </Badge>
       </TableCell>
-      <TableCell>
-        <div className='max-w-64 text-sm' title={reason}>
-          {reason}
-        </div>
-      </TableCell>
-      {grokSource ? (
-        <TableCell className='tabular-nums'>
-          {formatNumber(account.cooldownCount ?? 0, 0)}
-        </TableCell>
+      {stagingMode ? (
+        <>
+          <TableCell>
+            <TimeCell value={stagingAccount.stagedAt} />
+          </TableCell>
+          <TableCell>
+            <Badge
+              variant={stagingProbeBadgeVariant(stagingAccount)}
+              className='h-5 px-1.5 text-[11px]'
+            >
+              {stagingProbeLabel(stagingAccount)}
+            </Badge>
+          </TableCell>
+        </>
       ) : (
         <>
-          <TableCell className='tabular-nums'>
-            {account.tpsStreak != null || account.tpsMinCount != null
-              ? `${formatNumber(account.tpsStreak ?? 0, 0)} / ${formatNumber(account.tpsMinCount ?? 0, 0)}`
-              : '—'}
+          <TableCell>
+            <div className='max-w-64 text-sm' title={reason}>
+              {reason}
+            </div>
           </TableCell>
-          <TableCell className='tabular-nums'>
-            {peakTps == null ? '—' : formatNumber(peakTps)}
+          {grokSource ? (
+            <TableCell className='tabular-nums'>
+              {formatNumber(account.cooldownCount ?? 0, 0)}
+            </TableCell>
+          ) : (
+            <>
+              <TableCell className='tabular-nums'>
+                {account.tpsStreak != null || account.tpsMinCount != null
+                  ? `${formatNumber(account.tpsStreak ?? 0, 0)} / ${formatNumber(account.tpsMinCount ?? 0, 0)}`
+                  : '—'}
+              </TableCell>
+              <TableCell className='tabular-nums'>
+                {peakTps == null ? '—' : formatNumber(peakTps)}
+              </TableCell>
+            </>
+          )}
+          <TableCell>
+            <TimeCell value={account.cooledAt} />
+          </TableCell>
+          <TableCell>
+            <TimeCell value={endedAt} />
+          </TableCell>
+          <TableCell>
+            {account.grokState === 'permanent_disabled' ? (
+              <span className='text-muted-foreground'>永久</span>
+            ) : account.status === 'expired' ? (
+              <span className='text-muted-foreground'>
+                {grokSource ? '已启用' : '已结束'}
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  'tabular-nums',
+                  expiringSoon && 'text-amber-700 dark:text-amber-300'
+                )}
+              >
+                {formatRemainingDuration(remaining)}
+              </span>
+            )}
+          </TableCell>
+          <TableCell>
+            {account.missingUpstream ? (
+              <Badge variant='outline'>上游缺失</Badge>
+            ) : (
+              <EnabledBadge enabled={account.enabled} prefix='上游' />
+            )}
           </TableCell>
         </>
       )}
-      <TableCell>
-        <TimeCell value={account.cooledAt} />
-      </TableCell>
-      <TableCell>
-        <TimeCell value={endedAt} />
-      </TableCell>
-      <TableCell>
-        {account.grokState === 'permanent_disabled' ? (
-          <span className='text-muted-foreground'>永久</span>
-        ) : account.status === 'expired' ? (
-          <span className='text-muted-foreground'>
-            {grokSource ? '已启用' : '已结束'}
-          </span>
-        ) : (
-          <span
-            className={cn(
-              'tabular-nums',
-              expiringSoon && 'text-amber-700 dark:text-amber-300'
-            )}
-          >
-            {formatRemainingDuration(remaining)}
-          </span>
-        )}
-      </TableCell>
-      <TableCell>
-        {account.missingUpstream ? (
-          <Badge variant='outline'>上游缺失</Badge>
-        ) : (
-          <EnabledBadge enabled={account.enabled} prefix='上游' />
-        )}
-      </TableCell>
       <TableCell className='w-40 text-right'>
         <AccountInspectActions
           accountLabel={accountLabel}
           missingUpstream={Boolean(account.missingUpstream)}
           extra={
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size='icon'
-                  variant='ghost'
-                  disabled={!canRelease || actionPending}
-                  onClick={onRelease}
-                  aria-label={
-                    grokSource
-                      ? `解除 ${accountLabel} 的冷却`
-                      : `提前结束 ${accountLabel} 的冷却`
-                  }
-                >
-                  <TimerOff />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {account.quarantined
-                  ? grokSource
-                    ? '已进入隔离区，无法解除冷却'
-                    : '已进入隔离区，无法提前结束冷却'
-                  : account.status === 'expired'
-                    ? '冷却已结束'
-                    : grokSource
-                      ? '解除冷却'
-                      : '提前结束冷却'}
-              </TooltipContent>
-            </Tooltip>
+            stagingMode ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size='icon'
+                    variant='ghost'
+                    disabled={actionPending}
+                    onClick={onUnstage}
+                    aria-label={`移出 ${accountLabel} 的探针暂存`}
+                  >
+                    <ListMinus />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>移出暂存</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size='icon'
+                    variant='ghost'
+                    disabled={!canRelease || actionPending}
+                    onClick={onRelease}
+                    aria-label={
+                      grokSource
+                        ? `解除 ${accountLabel} 的冷却`
+                        : `提前结束 ${accountLabel} 的冷却`
+                    }
+                  >
+                    <TimerOff />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {account.quarantined
+                    ? grokSource
+                      ? '已进入隔离区，无法解除冷却'
+                      : '已进入隔离区，无法提前结束冷却'
+                    : account.status === 'expired'
+                      ? '冷却已结束'
+                      : grokSource
+                        ? '解除冷却'
+                        : '提前结束冷却'}
+                </TooltipContent>
+              </Tooltip>
+            )
           }
           onOpenUpstream={onOpenUpstream}
           onPreview={onPreview}

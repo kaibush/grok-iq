@@ -752,6 +752,36 @@ export type CooldownAccount = {
   releasedManually?: boolean
   cooldownCount?: number
   nextAction?: 'isolate' | string
+  staged?: boolean
+}
+
+export type CooldownProbeRunSummary = {
+  id: string
+  status: string
+  createdAt?: string | null
+  completedAt?: string | null
+  error?: string
+  profileId?: string
+}
+
+export type CooldownProbeStagingAccount = CooldownAccount & {
+  stagedAt?: string | null
+  updatedAt?: string | null
+  probedAfterStaged?: boolean
+  latestProbeRun?: CooldownProbeRunSummary | null
+}
+
+export type CooldownProbeStagingAddResult = {
+  added: number
+  addedAccountIds?: number[]
+  alreadyStagedAccountIds?: number[]
+  skippedAccountIds?: number[]
+}
+
+export type CooldownProbeStagingRemoveResult = {
+  requested: number
+  removed: number
+  accountIds?: number[]
 }
 
 export type CooldownStatsResponse = {
@@ -2696,6 +2726,11 @@ export type Page<T> = {
   activeCount?: number
 }
 
+export type CooldownProbeStagingPage = Page<CooldownProbeStagingAccount> & {
+  probedCount?: number
+  unprobedCount?: number
+}
+
 export type AccountSelection = {
   accountIds: number[]
   disabledAccountIds: number[]
@@ -3954,6 +3989,51 @@ export const api = {
         source,
       }),
     }),
+  cooldownProbeStaging: (
+    params: Record<string, string | number | undefined> = {},
+    signal?: AbortSignal
+  ) =>
+    request<CooldownProbeStagingPage>(
+      `/accounts/cooldowns/probe-staging${query(params)}`,
+      { signal }
+    ),
+  addCooldownProbeStaging: (
+    accounts: Array<{
+      accountId: number
+      name?: string
+      email?: string
+      grokState?: string
+      reason?: string
+      cooledAt?: string | null
+      cooldownUntil?: string | null
+      cooldownCount?: number
+      missingUpstream?: boolean
+    }>
+  ) =>
+    request<CooldownProbeStagingAddResult>(
+      '/accounts/cooldowns/probe-staging',
+      {
+        method: 'POST',
+        body: JSON.stringify({ accounts }),
+      }
+    ),
+  removeCooldownProbeStaging: (accountIds: number[]) =>
+    request<CooldownProbeStagingRemoveResult>(
+      '/accounts/cooldowns/probe-staging',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({
+          accountIds: Array.from(
+            new Set(
+              accountIds.filter(
+                (accountId) =>
+                  Number.isSafeInteger(accountId) && accountId > 0
+              )
+            )
+          ),
+        }),
+      }
+    ),
   deleteQuarantineLocal,
   deleteQuarantineUpstream,
   updateAccountsEnabled,
