@@ -2608,6 +2608,9 @@ function AccountPreviewGroupSection({
   sampleOverrideRound,
   profileNames,
   scrollRoot,
+  selectMode = false,
+  accountSelected = false,
+  missingUpstream = false,
   onSelect,
   onOpen,
 }: {
@@ -2620,6 +2623,9 @@ function AccountPreviewGroupSection({
   sampleOverrideRound?: number
   profileNames: Record<string, string>
   scrollRoot?: { readonly current: HTMLElement | null }
+  selectMode?: boolean
+  accountSelected?: boolean
+  missingUpstream?: boolean
   onSelect: (entry: ResultPreviewItem) => void
   onOpen: (entry: ResultPreviewItem) => void
 }) {
