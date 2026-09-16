@@ -237,7 +237,7 @@ def build_accounts_router(service: AccountService) -> APIRouter:
     @router.get("/accounts/{account_id}")
     async def account_detail(
         account_id: int,
-        limit: int = Query(default=200, ge=10, le=1000),
+        limit: int = Query(default=200, ge=1, le=1000),
     ) -> dict[str, Any]:
         return await service.detail(account_id, limit)
 
