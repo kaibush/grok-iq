@@ -8,6 +8,58 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 
+export function reasoningPresence({
+  content,
+  tokenCount,
+  hasReasoningText,
+  streaming = false,
+}: {
+  content?: string | null
+  tokenCount?: number | null
+  hasReasoningText?: boolean | null
+  streaming?: boolean
+}) {
+  const hasText = Boolean(content?.trim() || hasReasoningText)
+  const missing = !hasText && !streaming && (tokenCount ?? 0) > 0
+  return { hasText, missing }
+}
+
+export function ReasoningPresenceBadge({
+  content,
+  tokenCount,
+  hasReasoningText,
+  streaming = false,
+  className,
+}: {
+  content?: string | null
+  tokenCount?: number | null
+  hasReasoningText?: boolean | null
+  streaming?: boolean
+  className?: string
+}) {
+  const { hasText, missing } = reasoningPresence({
+    content,
+    tokenCount,
+    hasReasoningText,
+    streaming,
+  })
+  if (hasText) {
+    return (
+      <Badge variant='success' className={cn('h-5 px-1.5 text-[10px]', className)}>
+        有内容
+      </Badge>
+    )
+  }
+  if (missing) {
+    return (
+      <Badge variant='warning' className={cn('h-5 px-1.5 text-[10px]', className)}>
+        无正文
+      </Badge>
+    )
+  }
+  return null
+}
+
 export function ReasoningPanel({
   content,
   streaming = false,
@@ -23,13 +75,17 @@ export function ReasoningPanel({
 }) {
   const text = content.trim()
   const [open, setOpen] = useState(Boolean(defaultOpen))
-  const missing = !text && !streaming && (tokenCount ?? 0) > 0
+  const { hasText, missing } = reasoningPresence({
+    content: text,
+    tokenCount,
+    streaming,
+  })
 
-  if (!text && !streaming && !missing) return null
+  if (!hasText && !streaming && !missing) return null
 
   const statusLabel = streaming
     ? '思考过程，正在接收'
-    : text
+    : hasText
       ? '思考过程，有内容'
       : '思考过程，无正文'
 
@@ -48,16 +104,11 @@ export function ReasoningPanel({
           >
             <BrainCircuit className='size-3.5 text-primary' />
             <span>思考过程</span>
-            {text ? (
-              <Badge variant='success' className='h-5 px-1.5 text-[10px]'>
-                有内容
-              </Badge>
-            ) : null}
-            {missing ? (
-              <Badge variant='warning' className='h-5 px-1.5 text-[10px]'>
-                无正文
-              </Badge>
-            ) : null}
+            <ReasoningPresenceBadge
+              content={text}
+              tokenCount={tokenCount}
+              streaming={streaming}
+            />
             <span className='ms-auto inline-flex items-center gap-1'>
               {streaming ? (
                 <span className='inline-flex items-center gap-1 text-primary'>

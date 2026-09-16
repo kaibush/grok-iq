@@ -1936,6 +1936,7 @@ export type ProbeSample = {
   response_sha256?: string
   response_text: string
   reasoning_text?: string
+  has_reasoning_text?: boolean
   classification: string
   risk_rule_id?: string
   risk_rule_ids?: string[]

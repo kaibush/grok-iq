@@ -92,6 +92,9 @@ export function slimPreviewSample(sample: ProbeSample): ProbeSample {
     ...sample,
     response_text: slimPreviewResponseText(sample.response_text || ''),
     reasoning_text: '',
+    has_reasoning_text: Boolean(
+      sample.reasoning_text?.trim() || sample.has_reasoning_text
+    ),
   }
 }
 

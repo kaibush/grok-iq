@@ -94,6 +94,47 @@ describe('slimRunPreview', () => {
     })
     expect(result.samples[0]?.response_text).toBe('<div>hi</div>')
     expect(result.samples[0]?.reasoning_text).toBe('')
+    expect(result.samples[0]?.has_reasoning_text).toBe(true)
+  })
+
+  it('keeps the thinking flag after a second slim', () => {
+    const profile = {
+      id: 'p1',
+      built_in: false,
+      name: 'HTML card',
+      expected_output: '',
+      expected_image_url: '',
+      enabled: true,
+    } as ProbeProfile
+    const first = slimRunPreview({
+      run: { id: 'r1' } as ProbeRun,
+      profile,
+      samples: [sample({ reasoning_text: 'keep the flag' })],
+    })
+    const second = slimRunPreview({
+      run: { id: 'r1' } as ProbeRun,
+      profile,
+      samples: first.samples,
+    })
+    expect(second.samples[0]?.reasoning_text).toBe('')
+    expect(second.samples[0]?.has_reasoning_text).toBe(true)
+  })
+
+  it('does not mark thinking content when only tokens exist', () => {
+    const result = slimRunPreview({
+      run: { id: 'r1' } as ProbeRun,
+      profile: {
+        id: 'p1',
+        built_in: false,
+        name: 'HTML card',
+        expected_output: '',
+        expected_image_url: '',
+        enabled: true,
+      } as ProbeProfile,
+      samples: [sample({ reasoning_text: '   ', reasoning_tokens: 8 })],
+    })
+    expect(result.samples[0]?.reasoning_text).toBe('')
+    expect(result.samples[0]?.has_reasoning_text).toBe(false)
   })
 })
 
@@ -144,6 +185,7 @@ describe('slimAccountPreview', () => {
     expect(result.account.name).toBe('iso-account')
     expect(result.samples[0]?.response_text).toBe('<section>card</section>')
     expect(result.samples[0]?.reasoning_text).toBe('')
+    expect(result.samples[0]?.has_reasoning_text).toBe(true)
     expect(result.runs).toEqual([
       {
         id: 'run-1',

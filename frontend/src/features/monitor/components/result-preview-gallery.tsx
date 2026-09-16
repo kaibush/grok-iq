@@ -68,6 +68,10 @@ import { InfoTooltip } from '@/components/info-tooltip'
 import { MonitorStatusBadge } from '@/components/monitor-status-badge'
 import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-node-names'
 import { ProbeRunDetailDialog } from '@/features/monitor/components/probe-run-detail-dialog'
+import {
+  reasoningPresence,
+  ReasoningPresenceBadge,
+} from '@/features/monitor/components/reasoning-panel'
 import { DualTpsValue } from '@/features/monitor/components/tps-display'
 
 const AccountProbeDetailDialog = lazy(() =>
@@ -2723,21 +2727,42 @@ function ThumbInspectMeta({
 }) {
   const profile = thumbInspectProfile(item, title)
   const showProfile = Boolean(profile && sample?.classification?.trim())
+  const presence = sample
+    ? reasoningPresence({
+        content: sample.reasoning_text,
+        tokenCount: sample.reasoning_tokens,
+        hasReasoningText: sample.has_reasoning_text,
+      })
+    : { hasText: false, missing: false }
+  const showReasoning = presence.hasText || presence.missing
   if (!sample && !extra && !showProfile) return null
   return (
     <div className='mt-0.5 min-w-0 space-y-0.5 text-[10px] leading-4 text-muted-foreground tabular-nums'>
       {sample ? (
-        <div className='whitespace-normal break-words'>
-          TPS{' '}
-          <DualTpsValue
-            tps={sample.tps}
-            upstreamTps={sample.upstream_tps}
-            compact
-          />
-          <span className='px-1 text-muted-foreground/50'>·</span>
-          首 Token {formatNumber(sample.first_token_ms, 0)} ms
-          <span className='px-1 text-muted-foreground/50'>·</span>
-          耗时 {formatNumber(sample.duration_ms, 0)} ms
+        <div className='flex flex-wrap items-center gap-x-1 gap-y-0.5 whitespace-normal break-words'>
+          <span>
+            TPS{' '}
+            <DualTpsValue
+              tps={sample.tps}
+              upstreamTps={sample.upstream_tps}
+              compact
+            />
+            <span className='px-1 text-muted-foreground/50'>·</span>
+            首 Token {formatNumber(sample.first_token_ms, 0)} ms
+            <span className='px-1 text-muted-foreground/50'>·</span>
+            耗时 {formatNumber(sample.duration_ms, 0)} ms
+          </span>
+          {showReasoning ? (
+            <span className='inline-flex items-center gap-1'>
+              <span className='text-muted-foreground/50'>·</span>
+              思考过程
+              <ReasoningPresenceBadge
+                content={sample.reasoning_text}
+                tokenCount={sample.reasoning_tokens}
+                hasReasoningText={sample.has_reasoning_text}
+              />
+            </span>
+          ) : null}
         </div>
       ) : null}
       {showProfile || extra ? (
