@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BrainCircuit, ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import {
   Collapsible,
   CollapsibleContent,
@@ -26,6 +27,12 @@ export function ReasoningPanel({
 
   if (!text && !streaming && !missing) return null
 
+  const statusLabel = streaming
+    ? '思考过程，正在接收'
+    : text
+      ? '思考过程，有内容'
+      : '思考过程，无正文'
+
   return (
     <Collapsible
       open={open}
@@ -36,23 +43,35 @@ export function ReasoningPanel({
         <CollapsibleTrigger asChild>
           <button
             type='button'
+            aria-label={statusLabel}
             className='flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground'
           >
             <BrainCircuit className='size-3.5 text-primary' />
             <span>思考过程</span>
-            {streaming && (
-              <span className='ms-auto inline-flex items-center gap-1 text-primary'>
-                <Loader2 className='size-3 animate-spin' />
-                接收中
-              </span>
-            )}
-            <ChevronDown
-              className={cn(
-                'size-3.5 transition-transform',
-                open && 'rotate-180',
-                !streaming && 'ms-auto'
-              )}
-            />
+            {text ? (
+              <Badge variant='success' className='h-5 px-1.5 text-[10px]'>
+                有内容
+              </Badge>
+            ) : null}
+            {missing ? (
+              <Badge variant='warning' className='h-5 px-1.5 text-[10px]'>
+                无正文
+              </Badge>
+            ) : null}
+            <span className='ms-auto inline-flex items-center gap-1'>
+              {streaming ? (
+                <span className='inline-flex items-center gap-1 text-primary'>
+                  <Loader2 className='size-3 animate-spin' />
+                  接收中
+                </span>
+              ) : null}
+              <ChevronDown
+                className={cn(
+                  'size-3.5 transition-transform',
+                  open && 'rotate-180'
+                )}
+              />
+            </span>
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -69,7 +88,7 @@ export function ReasoningPanel({
               </div>
             ) : missing ? (
               <span className='text-muted-foreground'>
-                上游上报了 {tokenCount} 个推理 Token，但流里没有思考正文。这本身也是降智常见特征。
+                {`上游上报了 ${tokenCount} 个推理 Token，但流里没有思考正文。这本身也是降智常见特征。`}
               </span>
             ) : (
               <span className='text-muted-foreground'>正在等待思考片段…</span>
