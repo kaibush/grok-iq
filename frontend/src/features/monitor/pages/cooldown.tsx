@@ -155,6 +155,15 @@ const stagingProbeStatusOptions: Array<{
   { value: 'probed', label: '已执行' },
 ]
 
+const grokWorkspaceOptions: Array<{
+  value: CooldownWorkspace
+  label: string
+  icon?: typeof ClipboardList
+}> = [
+  { value: 'list', label: '冷却列表' },
+  { value: 'staging', label: '探针暂存', icon: ClipboardList },
+]
+
 const stagingProbeStatusLabels: Record<StagingProbeStatusFilter, string> = {
   all: '全部探针',
   unprobed: '未执行',
@@ -1288,21 +1297,11 @@ export function CooldownPage() {
           <div className='space-y-2' aria-busy={showTableLoading}>
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
               <Tabs
-                value={
-                  resultPreview ? 'preview' : stagingMode ? 'staging' : 'list'
-                }
+                value={resultPreview ? 'preview' : 'list'}
                 className='shrink-0 gap-0'
                 onValueChange={(value) => {
-                  if (value === 'staging') {
-                    beginTableInteraction()
-                    setResultPreview(null)
-                    updateView({ workspace: 'staging' })
-                    return
-                  }
                   if (value === 'list') {
-                    beginTableInteraction()
                     setResultPreview(null)
-                    updateView({ workspace: 'list' })
                     return
                   }
                   openAccountPreview()
@@ -1314,14 +1313,29 @@ export function CooldownPage() {
                     <Images className='size-3.5' />
                     预览
                   </TabsTrigger>
-                  {grokSource ? (
-                    <TabsTrigger value='staging'>
-                      <ClipboardList className='size-3.5' />
-                      探针暂存
-                    </TabsTrigger>
-                  ) : null}
                 </TabsList>
               </Tabs>
+              {grokSource ? (
+                <SegmentedControl
+                  ariaLabel='上游冷却数据'
+                  value={stagingMode ? 'staging' : 'list'}
+                  onChange={(next) => {
+                    if (next === workspace) return
+                    beginTableInteraction()
+                    setResultPreview(null)
+                    setReleaseOpen(false)
+                    setReleaseIds([])
+                    setDisableOpen(false)
+                    setDisableIds([])
+                    setIsolateOpen(false)
+                    setIsolateIds([])
+                    setUnstageOpen(false)
+                    setUnstageIds([])
+                    updateView({ workspace: next })
+                  }}
+                  options={grokWorkspaceOptions}
+                />
+              ) : null}
               {stagingMode ? (
                 <SegmentedControl
                   ariaLabel='探针暂存状态'
