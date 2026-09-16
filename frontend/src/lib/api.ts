@@ -1762,6 +1762,7 @@ export type ProbeRun = {
   account_name: string
   account_email: string
   account_created_at?: string | null
+  missingUpstream?: boolean
   profile_id: string
   plan_id?: string | null
   status: string

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
@@ -256,6 +257,53 @@ class AccountRepository:
                 select(AccountAssessment).where(AccountAssessment.account_id.in_(account_ids))
             ).all()
             return {value.account_id: _assessment_dict(value) for value in values}
+
+    def mark_upstream_deleted(self, account_ids: Iterable[int]) -> None:
+        unique_ids = list(
+            dict.fromkeys(
+                int(account_id) for account_id in account_ids if int(account_id) > 0
+            )
+        )
+        if not unique_ids:
+            return
+        now = utc_now()
+        with self.database.transaction() as session:
+            existing = {
+                value.account_id: value
+                for value in session.scalars(
+                    select(AccountAssessment).where(
+                        AccountAssessment.account_id.in_(unique_ids)
+                    )
+                ).all()
+            }
+            for account_id in unique_ids:
+                assessment = existing.get(account_id)
+                if assessment is None:
+                    assessment = AccountAssessment(account_id=account_id)
+                    session.add(assessment)
+                if assessment.upstream_deleted_at is None:
+                    assessment.upstream_deleted_at = now
+                    assessment.updated_at = now
+
+    def clear_upstream_deleted(self, account_ids: Iterable[int]) -> None:
+        unique_ids = list(
+            dict.fromkeys(
+                int(account_id) for account_id in account_ids if int(account_id) > 0
+            )
+        )
+        if not unique_ids:
+            return
+        now = utc_now()
+        with self.database.transaction() as session:
+            values = session.scalars(
+                select(AccountAssessment).where(
+                    AccountAssessment.account_id.in_(unique_ids),
+                    AccountAssessment.upstream_deleted_at.is_not(None),
+                )
+            ).all()
+            for assessment in values:
+                assessment.upstream_deleted_at = None
+                assessment.updated_at = now
 
     def list_assessments(self, limit: int = 1000) -> list[dict[str, Any]]:
         with self.database.session() as session:

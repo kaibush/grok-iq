@@ -129,6 +129,7 @@ class AccountService:
         payload = await self.client.list_accounts(**params)
         items = list(payload.get("items", []))
         account_ids = [int(item.get("id") or 0) for item in items]
+        self.accounts.clear_upstream_deleted(account_ids)
         assessments = self.accounts.get_assessments(account_ids)
         sso_account_ids = self._account_ids_with_sso(account_ids)
         verifications = self._latest_verifications(account_ids)
@@ -147,6 +148,7 @@ class AccountService:
 
     async def detail(self, account_id: int, limit: int = 200) -> dict[str, Any]:
         account = await self.client.get_account(account_id)
+        self.accounts.clear_upstream_deleted([account_id])
         verification = self._latest_verifications([account_id]).get(account_id)
         return {
             "account": self._overlay(
@@ -1163,6 +1165,7 @@ class AccountService:
         if account_ids:
             upstream_items = await self.client.get_accounts_by_ids(set(account_ids))
             upstream_by_id = {int(item.get("id") or 0): item for item in upstream_items}
+            self.accounts.clear_upstream_deleted(list(upstream_by_id))
         sso_account_ids = self._account_ids_with_sso(account_ids)
         verifications = self._latest_verifications(account_ids)
         values = []
@@ -1542,6 +1545,7 @@ class AccountService:
 
     async def delete_upstream_account(self, account_id: int) -> dict[str, Any]:
         await self.client.delete_account(account_id)
+        self.accounts.mark_upstream_deleted([account_id])
         self.accounts.create_alert(
             account_id=account_id,
             kind="upstream_delete",
@@ -1564,9 +1568,14 @@ class AccountService:
         delete_result = await self.client.delete_accounts(eligible_ids) if eligible_ids else None
         failures = list(delete_result.failures) if delete_result else []
         failed_account_ids = {failure.account_id for failure in failures}
-        for account_id in eligible_ids:
-            if account_id in failed_account_ids:
-                continue
+        deleted_ids = [
+            account_id
+            for account_id in eligible_ids
+            if account_id not in failed_account_ids
+        ]
+        if deleted_ids:
+            self.accounts.mark_upstream_deleted(deleted_ids)
+        for account_id in deleted_ids:
             self.accounts.create_alert(
                 account_id=account_id,
                 kind="upstream_delete",

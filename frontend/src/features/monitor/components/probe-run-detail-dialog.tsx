@@ -23,6 +23,7 @@ import {
   getEgressNodeName,
   type EgressNodeNameMap,
 } from '@/features/monitor/components/egress-node-names'
+import { MissingUpstreamIndicator } from '@/features/monitor/components/account-state-indicators'
 import { ReasoningPanel } from '@/features/monitor/components/reasoning-panel'
 import { DualTpsValue } from '@/features/monitor/components/tps-display'
 import {
@@ -93,6 +94,9 @@ export function ProbeRunDetailDialog({
                           }
                           className='size-6'
                         />
+                        {run.missingUpstream ? (
+                          <MissingUpstreamIndicator compact />
+                        ) : null}
                       </div>
                       <div className='mt-1 text-xs font-normal text-muted-foreground'>
                         {formatAccountSecondaryLabel({

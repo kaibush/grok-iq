@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Undo2,
+  UserX,
 } from 'lucide-react'
 import { type ProbeRun } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -65,6 +66,42 @@ const restoreVisuals = {
     variant: 'destructive',
   },
 } as const
+
+export function MissingUpstreamIndicator({
+  compact = false,
+  interactive = true,
+}: {
+  compact?: boolean
+  interactive?: boolean
+}) {
+  const badge = (
+    <Badge
+      variant='destructive'
+      className={cn(
+        'rounded-full p-0',
+        compact ? 'size-5 [&>svg]:size-3' : 'size-7'
+      )}
+      tabIndex={interactive ? 0 : undefined}
+      aria-hidden={interactive ? undefined : true}
+      aria-label={interactive ? '上游账号已删除' : undefined}
+    >
+      <UserX />
+    </Badge>
+  )
+  if (!interactive) {
+    return (
+      <span className='pointer-events-none' title='上游账号已删除'>
+        {badge}
+      </span>
+    )
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent>上游账号已删除</TooltipContent>
+    </Tooltip>
+  )
+}
 
 export function AccountRestoreIndicator({ run }: { run: ProbeRun }) {
   if (!run.account_settings_snapshot_at) return null

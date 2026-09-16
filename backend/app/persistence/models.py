@@ -100,6 +100,7 @@ class AccountAssessment(Base):
     disposition: Mapped[dict[str, Any]] = mapped_column(
         JSON, default=dict, nullable=False
     )
+    upstream_deleted_at: Mapped[datetime | None] = mapped_column(AppDateTime())
     created_at: Mapped[datetime] = mapped_column(AppDateTime(), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False

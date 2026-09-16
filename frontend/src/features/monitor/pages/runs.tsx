@@ -133,6 +133,7 @@ import { AccountProbeDetailDialog } from '@/features/monitor/components/account-
 import {
   AccountRestoreIndicator,
   EgressBindingIndicator,
+  MissingUpstreamIndicator,
 } from '@/features/monitor/components/account-state-indicators'
 import {
   buildEgressNodeNameMap,
@@ -2014,6 +2015,7 @@ const RunRow = memo(function RunRow({
             value={run.account_email?.trim() || String(run.account_id)}
             className='size-6'
           />
+          {run.missingUpstream ? <MissingUpstreamIndicator compact /> : null}
         </div>
       </TableCell>
       <TableCell>
@@ -2417,6 +2419,9 @@ function RunDetail({
                 value={run.account_email?.trim() || String(run.account_id)}
                 className='size-6'
               />
+              {run.missingUpstream ? (
+                <MissingUpstreamIndicator compact />
+              ) : null}
             </div>
           }
           valueClassName='break-all'

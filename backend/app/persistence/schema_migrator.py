@@ -39,6 +39,10 @@ COMPATIBILITY_COLUMNS = {
             "latest_upstream_tps",
             "ALTER TABLE account_assessments ADD COLUMN latest_upstream_tps FLOAT NOT NULL DEFAULT 0",
         ),
+        (
+            "upstream_deleted_at",
+            "ALTER TABLE account_assessments ADD COLUMN upstream_deleted_at DATETIME",
+        ),
     ],
     "probe_profiles": [
         (

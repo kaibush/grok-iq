@@ -12,14 +12,17 @@ import {
   useQueries,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from '@tanstack/react-query'
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Columns2,
   ExternalLink,
   LayoutGrid,
   LayoutList,
+  ListChecks,
   Loader2,
   ShieldBan,
   Trash2,
@@ -67,6 +70,7 @@ import { ContentPreviewCanvas } from '@/components/formatted-content'
 import { InfoTooltip } from '@/components/info-tooltip'
 import { MonitorStatusBadge } from '@/components/monitor-status-badge'
 import { buildEgressNodeNameMap } from '@/features/monitor/components/egress-node-names'
+import { MissingUpstreamIndicator } from '@/features/monitor/components/account-state-indicators'
 import { ProbeRunDetailDialog } from '@/features/monitor/components/probe-run-detail-dialog'
 import {
   reasoningPresence,
@@ -210,7 +214,81 @@ export function previewItemsFromRuns(
     totalSteps: run.total_steps,
     status: run.status,
     error: run.error,
+    missingUpstream: run.missingUpstream || undefined,
   }))
+}
+
+export function uniquePreviewAccountIds(items: Array<{ accountId: number }>) {
+  const ids: number[] = []
+  const seen = new Set<number>()
+  for (const item of items) {
+    if (!Number.isSafeInteger(item.accountId) || item.accountId <= 0) continue
+    if (seen.has(item.accountId)) continue
+    seen.add(item.accountId)
+    ids.push(item.accountId)
+  }
+  return ids
+}
+
+export function togglePreviewAccountId(ids: number[], accountId: number) {
+  if (!Number.isSafeInteger(accountId) || accountId <= 0) return ids
+  return ids.includes(accountId)
+    ? ids.filter((id) => id !== accountId)
+    : [...ids, accountId]
+}
+
+export function invalidatePreviewAccountQueries(
+  client: QueryClient,
+  accountIds: number[]
+) {
+  const uniqueIds = Array.from(
+    new Set(
+      accountIds.filter(
+        (accountId) => Number.isSafeInteger(accountId) && accountId > 0
+      )
+    )
+  )
+  for (const accountId of uniqueIds) {
+    void client.invalidateQueries({ queryKey: ['account', accountId] })
+    void client.invalidateQueries({ queryKey: ['account-preview', accountId] })
+  }
+  void client.invalidateQueries({ queryKey: ['accounts'] })
+  void client.invalidateQueries({ queryKey: ['runs'] })
+  void client.invalidateQueries({ queryKey: ['run'] })
+  void client.invalidateQueries({ queryKey: ['dashboard'] })
+}
+
+function previewAccountDeleted(
+  item: ResultPreviewItem | undefined,
+  deletedAccountIds: number[]
+) {
+  if (!item) return false
+  return (
+    Boolean(item.missingUpstream) || deletedAccountIds.includes(item.accountId)
+  )
+}
+
+function PreviewSelectMark({
+  active,
+  className,
+}: {
+  active: boolean
+  className?: string
+}) {
+  return (
+    <span
+      className={cn(
+        'flex size-5 shrink-0 items-center justify-center rounded-full border shadow-sm',
+        active
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-border/80 bg-background/90 text-transparent',
+        className
+      )}
+      aria-hidden
+    >
+      <Check className='size-3' />
+    </span>
+  )
 }
 
 export function previewItemsFromSamples(
@@ -345,6 +423,7 @@ export function previewItemsFromAccountPreview(
       sample: sample ?? undefined,
       sampleId: sample?.id,
       content: sample?.response_text,
+      missingUpstream: payload.account.missingUpstream || undefined,
     }
   })
 }
@@ -613,6 +692,8 @@ export function ResultPreviewGallery({
   const [isolatedAccountIds, setIsolatedAccountIds] = useState<number[]>([])
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletedAccountIds, setDeletedAccountIds] = useState<number[]>([])
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
   const [compareExpected, setCompareExpected] = useState(false)
   const previewPrefs = usePersistedViewState(
     PREVIEW_VIEW_STORAGE_KEY,
@@ -736,6 +817,12 @@ export function ResultPreviewGallery({
     onIndexChange(nextIndex)
     if (sampleId) setSampleOverrideId(sampleId)
     if (roundNumber) setSampleOverrideRound(roundNumber)
+  }
+  const toggleSelectedPreviewAccount = (accountId: number) => {
+    if (!selectMode) return
+    setSelectedAccountIds((current) =>
+      togglePreviewAccountId(current, accountId)
+    )
   }
   const openPreviewItem = (
     nextIndex: number,
@@ -1002,38 +1089,94 @@ export function ResultPreviewGallery({
     Boolean(account?.missingUpstream) ||
     Boolean(item?.missingUpstream) ||
     (item != null && deletedAccountIds.includes(item.accountId))
+  const pageAccountIds = uniquePreviewAccountIds(layoutItems)
+  const selectedPageCount = pageAccountIds.filter((accountId) =>
+    selectedAccountIds.includes(accountId)
+  ).length
+  const allPageAccountsSelected =
+    pageAccountIds.length > 0 && selectedPageCount === pageAccountIds.length
+  const isolateTargetIds = selectMode
+    ? selectedAccountIds.filter((accountId) => {
+        if (isolatedAccountIds.includes(accountId)) return false
+        return !layoutItems.some(
+          (entry) => entry.accountId === accountId && entry.isolated
+        )
+      })
+    : item && !alreadyIsolated
+      ? [item.accountId]
+      : []
+  const deleteTargetIds = selectMode
+    ? selectedAccountIds.filter((accountId) => {
+        if (deletedAccountIds.includes(accountId)) return false
+        return !layoutItems.some(
+          (entry) => entry.accountId === accountId && entry.missingUpstream
+        )
+      })
+    : item && !alreadyDeletedUpstream
+      ? [item.accountId]
+      : []
   const isolateMutation = useMutation({
-    mutationFn: (accountId: number) =>
-      api.accountAction(accountId, {
+    mutationFn: (accountIds: number[]) =>
+      api.accountBatchAction({
+        account_ids: accountIds,
         action: 'isolate',
         note: PREVIEW_ISOLATE_NOTE,
         propagate: true,
       }),
-    onSuccess: (_result, accountId) => {
+    onSuccess: (result, accountIds) => {
       setIsolateOpen(false)
-      setIsolatedAccountIds((current) =>
-        current.includes(accountId) ? current : [...current, accountId]
+      const skippedAccountIds = result.skippedAccountIds ?? []
+      const failedAccountIds = result.failedAccountIds ?? []
+      const alreadyIsolatedIds = result.alreadyIsolatedAccountIds ?? []
+      const isolatedIds = accountIds.filter(
+        (accountId) =>
+          !skippedAccountIds.includes(accountId) &&
+          !failedAccountIds.includes(accountId)
       )
-      toast.success('已移入隔离区')
-      void client.invalidateQueries({ queryKey: ['account', accountId] })
-      void client.invalidateQueries({
-        queryKey: ['account-preview', accountId],
-      })
-      void client.invalidateQueries({ queryKey: ['accounts'] })
-      void client.invalidateQueries({ queryKey: ['runs'] })
-      void client.invalidateQueries({ queryKey: ['dashboard'] })
+      setIsolatedAccountIds((current) =>
+        Array.from(new Set([...current, ...isolatedIds, ...alreadyIsolatedIds]))
+      )
+      if (
+        failedAccountIds.length > 0 ||
+        skippedAccountIds.length > 0 ||
+        alreadyIsolatedIds.length > 0
+      ) {
+        const details = [`已移入隔离区 ${result.updated} 个账号`]
+        if (failedAccountIds.length) {
+          details.push(`${failedAccountIds.length} 个操作失败`)
+        }
+        if (skippedAccountIds.length) {
+          details.push(`${skippedAccountIds.length} 个设置受任务保护并跳过`)
+        }
+        if (alreadyIsolatedIds.length) {
+          details.push(`${alreadyIsolatedIds.length} 个原本已在隔离区`)
+        }
+        toast.warning(details.join('；'))
+      } else {
+        toast.success(
+          result.updated > 1
+            ? `已移入隔离区 ${result.updated} 个账号`
+            : '已移入隔离区'
+        )
+      }
+      invalidatePreviewAccountQueries(client, accountIds)
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
   const deleteMutation = useMutation({
-    mutationFn: (accountId: number) => api.deleteAccounts([accountId]),
-    onSuccess: (result, accountId) => {
+    mutationFn: (accountIds: number[]) => api.deleteAccounts(accountIds),
+    onSuccess: (result, accountIds) => {
       setDeleteOpen(false)
       const skippedAccountIds = result.skippedAccountIds ?? []
       const failedAccountIds = result.failedAccountIds ?? []
-      if (result.deleted > 0) {
+      const deletedIds = accountIds.filter(
+        (accountId) =>
+          !skippedAccountIds.includes(accountId) &&
+          !failedAccountIds.includes(accountId)
+      )
+      if (deletedIds.length > 0) {
         setDeletedAccountIds((current) =>
-          current.includes(accountId) ? current : [...current, accountId]
+          Array.from(new Set([...current, ...deletedIds]))
         )
       }
       if (failedAccountIds.length > 0 || skippedAccountIds.length > 0) {
@@ -1046,17 +1189,15 @@ export function ResultPreviewGallery({
         }
         toast.warning(details.join('；'))
       } else if (result.deleted > 0) {
-        toast.success('已删除上游账号')
+        toast.success(
+          result.deleted > 1
+            ? `已删除上游 ${result.deleted} 个账号`
+            : '已删除上游账号'
+        )
       } else {
         toast.warning('未能删除上游账号')
       }
-      void client.invalidateQueries({ queryKey: ['account', accountId] })
-      void client.invalidateQueries({
-        queryKey: ['account-preview', accountId],
-      })
-      void client.invalidateQueries({ queryKey: ['accounts'] })
-      void client.invalidateQueries({ queryKey: ['runs'] })
-      void client.invalidateQueries({ queryKey: ['dashboard'] })
+      invalidatePreviewAccountQueries(client, accountIds)
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   })
@@ -1067,6 +1208,8 @@ export function ResultPreviewGallery({
     setIsolatedAccountIds((current) => (current.length ? [] : current))
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDeletedAccountIds((current) => (current.length ? [] : current))
+    setSelectMode(false)
+    setSelectedAccountIds((current) => (current.length ? [] : current))
     client.removeQueries({ queryKey: ['run-preview'] })
     client.removeQueries({ queryKey: ['run-preview-samples'] })
     client.removeQueries({ queryKey: ['account-preview'] })
@@ -1210,10 +1353,10 @@ export function ResultPreviewGallery({
         }
       } else if (event.key === 'i' || event.key === 'I') {
         event.preventDefault()
-        if (item && !alreadyIsolated) setIsolateOpen(true)
+        if (isolateTargetIds.length) setIsolateOpen(true)
       } else if (event.key === 'd' || event.key === 'D') {
         event.preventDefault()
-        if (item && !alreadyDeletedUpstream) setDeleteOpen(true)
+        if (deleteTargetIds.length) setDeleteOpen(true)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -1221,6 +1364,8 @@ export function ResultPreviewGallery({
   }, [
     alreadyDeletedUpstream,
     alreadyIsolated,
+    deleteTargetIds.length,
+    isolateTargetIds.length,
     currentPage,
     currentPageCount,
     accountPerspective,
@@ -1333,7 +1478,7 @@ export function ResultPreviewGallery({
                 </Tabs>
                 <InfoTooltip
                   label='预览操作'
-                  content='单击选中某个账号的预览卡片，即可把它移入隔离区或删除上游账号；双击进入阅读模式查看详情。'
+                  content='单击选中某个账号的预览卡片，即可把它移入隔离区或删除上游账号；开启多选后可以批量处理多个账号。双击进入阅读模式查看详情。'
                 />
               </div>
               {showGroupToggle ? (
@@ -1504,7 +1649,58 @@ export function ResultPreviewGallery({
                   对照预期
                 </Button>
               ) : null}
-              {alreadyIsolated ? (
+              <Button
+                type='button'
+                size='sm'
+                variant={selectMode ? 'secondary' : 'outline'}
+                className='shrink-0 whitespace-nowrap'
+                onClick={() => {
+                  if (selectMode) {
+                    setSelectMode(false)
+                    setSelectedAccountIds([])
+                    return
+                  }
+                  setSelectMode(true)
+                  if (item?.accountId) {
+                    setSelectedAccountIds(
+                      togglePreviewAccountId([], item.accountId)
+                    )
+                  }
+                }}
+              >
+                <ListChecks />
+                {selectMode ? '退出多选' : '多选'}
+              </Button>
+              {selectMode ? (
+                <>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    className='shrink-0 whitespace-nowrap'
+                    disabled={pageAccountIds.length === 0}
+                    onClick={() => {
+                      if (allPageAccountsSelected) {
+                        setSelectedAccountIds((current) =>
+                          current.filter(
+                            (accountId) => !pageAccountIds.includes(accountId)
+                          )
+                        )
+                        return
+                      }
+                      setSelectedAccountIds((current) =>
+                        Array.from(new Set([...current, ...pageAccountIds]))
+                      )
+                    }}
+                  >
+                    {allPageAccountsSelected ? '取消全选' : '全选本页'}
+                  </Button>
+                  <Badge variant='outline' className='h-8 shrink-0 px-2'>
+                    已选 {selectedAccountIds.length} 个账号
+                  </Badge>
+                </>
+              ) : null}
+              {!selectMode && alreadyIsolated ? (
                 onOpenQuarantine ? (
                   <Button
                     type='button'
@@ -1526,11 +1722,15 @@ export function ResultPreviewGallery({
                   size='sm'
                   variant='outline'
                   className='shrink-0 whitespace-nowrap'
-                  disabled={!item || isolateMutation.isPending}
+                  disabled={
+                    isolateMutation.isPending || isolateTargetIds.length === 0
+                  }
                   onClick={() => setIsolateOpen(true)}
                 >
                   <ShieldBan />
-                  移入隔离区
+                  {selectMode && isolateTargetIds.length
+                    ? `移入隔离区 (${isolateTargetIds.length})`
+                    : '移入隔离区'}
                 </Button>
               )}
               <Button
@@ -1539,12 +1739,18 @@ export function ResultPreviewGallery({
                 variant='outline'
                 className='shrink-0 whitespace-nowrap'
                 disabled={
-                  !item || deleteMutation.isPending || alreadyDeletedUpstream
+                  deleteMutation.isPending || deleteTargetIds.length === 0
                 }
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 />
-                {alreadyDeletedUpstream ? '上游已删除' : '删除上游账号'}
+                {selectMode
+                  ? deleteTargetIds.length
+                    ? `删除上游账号 (${deleteTargetIds.length})`
+                    : '删除上游账号'
+                  : alreadyDeletedUpstream
+                    ? '上游已删除'
+                    : '删除上游账号'}
               </Button>
               </div>
             </header>
@@ -1592,7 +1798,18 @@ export function ResultPreviewGallery({
                                     : undefined
                                 }
                                 profileNames={profileNames}
+                                selectMode={selectMode}
+                                accountSelected={selectedAccountIds.includes(
+                                  group.accountId
+                                )}
+                                missingUpstream={
+                                  previewAccountDeleted(
+                                    accountItem,
+                                    deletedAccountIds
+                                  )
+                                }
                                 onSelect={(entry) => {
+                                  toggleSelectedPreviewAccount(entry.accountId)
                                   if (entry.runId) setSelectedRunId(entry.runId)
                                   selectPreviewItem(
                                     Math.max(0, accountIndex),
@@ -1620,8 +1837,26 @@ export function ResultPreviewGallery({
                             return (
                               <section key={group.accountId}>
                                 <div className='sticky top-0 isolate z-30 -mx-4 border-b border-border/70 bg-background/90 px-4 py-2 backdrop-blur-md'>
-                                  <div className='truncate text-sm font-medium'>
-                                    {group.accountName}
+                                  <div className='flex items-center gap-2'>
+                                    {selectMode ? (
+                                      <PreviewSelectMark
+                                        active={selectedAccountIds.includes(
+                                          group.accountId
+                                        )}
+                                      />
+                                    ) : null}
+                                    <div className='min-w-0 flex-1 truncate text-sm font-medium'>
+                                      {group.accountName}
+                                    </div>
+                                    {previewAccountDeleted(
+                                      group.items[0],
+                                      deletedAccountIds
+                                    ) ? (
+                                      <MissingUpstreamIndicator
+                                        compact
+                                        interactive={false}
+                                      />
+                                    ) : null}
                                   </div>
                                   <div className='truncate text-xs font-normal text-muted-foreground'>
                                     {groupAccountSubtitle(
@@ -1654,13 +1889,24 @@ export function ResultPreviewGallery({
                                         heading={
                                           entry.heading || entry.profileName
                                         }
-                                        onSelect={() =>
+                                        selectMode={selectMode}
+                                        accountSelected={selectedAccountIds.includes(
+                                          entry.accountId
+                                        )}
+                                        missingUpstream={previewAccountDeleted(
+                                          entry,
+                                          deletedAccountIds
+                                        )}
+                                        onSelect={() => {
+                                          toggleSelectedPreviewAccount(
+                                            entry.accountId
+                                          )
                                           selectPreviewItem(
                                             index,
                                             entry.sampleId,
                                             entry.roundNumber
                                           )
-                                        }
+                                        }}
                                         onOpen={() =>
                                           openPreviewItem(
                                             index,
@@ -1688,7 +1934,16 @@ export function ResultPreviewGallery({
                         }
                         sampleLeaves={sampleLeaves}
                         scrollRef={gridRef}
+                        selectMode={selectMode}
+                        selectedAccountIds={selectedAccountIds}
+                        deletedAccountIds={deletedAccountIds}
                         onSelect={(index) => {
+                          const entry = (expandRounds ? expandItems : items)[
+                            index
+                          ]
+                          if (entry) {
+                            toggleSelectedPreviewAccount(entry.accountId)
+                          }
                           if (!expandRounds) {
                             onIndexChange(index)
                             return
@@ -1756,17 +2011,37 @@ export function ResultPreviewGallery({
                                     (entry) => entry.id === group.items[0].id
                                   )}
                                   className='w-full px-3 py-2.5 text-left'
-                                  onClick={() =>
+                                  onClick={() => {
+                                    toggleSelectedPreviewAccount(group.accountId)
                                     onIndexChange(
                                       items.findIndex(
                                         (entry) =>
                                           entry.id === group.items[0].id
                                       )
                                     )
-                                  }
+                                  }}
                                 >
-                                  <div className='truncate text-sm font-medium'>
-                                    {group.accountName}
+                                  <div className='flex items-start gap-2'>
+                                    {selectMode ? (
+                                      <PreviewSelectMark
+                                        active={selectedAccountIds.includes(
+                                          group.accountId
+                                        )}
+                                        className='mt-0.5'
+                                      />
+                                    ) : null}
+                                    <div className='min-w-0 flex-1 truncate text-sm font-medium'>
+                                      {group.accountName}
+                                    </div>
+                                    {previewAccountDeleted(
+                                      group.items[0],
+                                      deletedAccountIds
+                                    ) ? (
+                                      <MissingUpstreamIndicator
+                                        compact
+                                        interactive={false}
+                                      />
+                                    ) : null}
                                   </div>
                                   <div className='mt-1 truncate text-[11px] text-muted-foreground'>
                                     {groupAccountSubtitle(
@@ -1823,6 +2098,9 @@ export function ResultPreviewGallery({
                                                 : 'hover:bg-background/70'
                                             )}
                                             onClick={() => {
+                                              toggleSelectedPreviewAccount(
+                                                entry.accountId
+                                              )
                                               if (accountPerspective) {
                                                 if (entry.runId) {
                                                   setSelectedRunId(entry.runId)
@@ -1838,11 +2116,22 @@ export function ResultPreviewGallery({
                                           >
                                             <div className='flex items-start justify-between gap-2'>
                                               <div className='min-w-0'>
-                                                <div className='truncate text-xs font-medium'>
-                                                  {entry.profileName ||
-                                                    (entry.createdAt
-                                                      ? `任务 ${formatDate(entry.createdAt)}`
-                                                      : `任务 ${entry.runId.slice(0, 8)}`)}
+                                                <div className='flex items-center gap-1.5'>
+                                                  <div className='min-w-0 truncate text-xs font-medium'>
+                                                    {entry.profileName ||
+                                                      (entry.createdAt
+                                                        ? `任务 ${formatDate(entry.createdAt)}`
+                                                        : `任务 ${entry.runId.slice(0, 8)}`)}
+                                                  </div>
+                                                  {previewAccountDeleted(
+                                                    entry,
+                                                    deletedAccountIds
+                                                  ) ? (
+                                                    <MissingUpstreamIndicator
+                                                      compact
+                                                      interactive={false}
+                                                    />
+                                                  ) : null}
                                                 </div>
                                                 <div className='truncate text-[11px] text-muted-foreground'>
                                                   {entry.createdAt
@@ -1897,19 +2186,43 @@ export function ResultPreviewGallery({
                                       ? 'border-primary/45 bg-primary/5'
                                       : 'bg-background hover:border-border hover:bg-muted/40'
                                   )}
-                                  onClick={() => onIndexChange(itemIndex)}
+                                  onClick={() => {
+                                    toggleSelectedPreviewAccount(entry.accountId)
+                                    onIndexChange(itemIndex)
+                                  }}
                                 >
                                   <div className='flex items-start justify-between gap-2'>
-                                    <div className='min-w-0'>
-                                      <div className='truncate text-sm font-medium'>
-                                        {sampleLeaves
-                                          ? `第 ${entry.sample?.round_number || 1} 轮`
-                                          : entry.accountName}
-                                      </div>
-                                      <div className='mt-1 truncate text-[11px] text-muted-foreground'>
-                                        {sampleLeaves
-                                          ? sampleMeta(entry)
-                                          : accountMeta(entry)}
+                                    <div className='flex min-w-0 items-start gap-2'>
+                                      {selectMode ? (
+                                        <PreviewSelectMark
+                                          active={selectedAccountIds.includes(
+                                            entry.accountId
+                                          )}
+                                          className='mt-0.5'
+                                        />
+                                      ) : null}
+                                      <div className='min-w-0'>
+                                        <div className='flex items-center gap-1.5'>
+                                          <div className='min-w-0 truncate text-sm font-medium'>
+                                            {sampleLeaves
+                                              ? `第 ${entry.sample?.round_number || 1} 轮`
+                                              : entry.accountName}
+                                          </div>
+                                          {previewAccountDeleted(
+                                            entry,
+                                            deletedAccountIds
+                                          ) ? (
+                                            <MissingUpstreamIndicator
+                                              compact
+                                              interactive={false}
+                                            />
+                                          ) : null}
+                                        </div>
+                                        <div className='mt-1 truncate text-[11px] text-muted-foreground'>
+                                          {sampleLeaves
+                                            ? sampleMeta(entry)
+                                            : accountMeta(entry)}
+                                        </div>
                                       </div>
                                     </div>
                                     {sampleLeaves && entry.sample ? (
@@ -2045,11 +2358,17 @@ export function ResultPreviewGallery({
         onOpenChange={(nextOpen) => {
           if (!nextOpen && !isolateMutation.isPending) setIsolateOpen(false)
         }}
-        title={`将 ${item?.accountName || '账号'} 移入隔离区？`}
+        title={
+          isolateTargetIds.length > 1
+            ? `将 ${isolateTargetIds.length} 个账号移入隔离区？`
+            : `将 ${item?.accountName || '账号'} 移入隔离区？`
+        }
         desc={
           <div className='space-y-2'>
             <p>
-              当前预览看起来像降智时，可以把账号长期隔离并停用上游，不会删除账号。
+              {isolateTargetIds.length > 1
+                ? `当前预览看起来像降智时，可以把已选的 ${isolateTargetIds.length} 个账号长期隔离并停用上游，不会删除账号。`
+                : '当前预览看起来像降智时，可以把账号长期隔离并停用上游，不会删除账号。'}
             </p>
             <p className='font-medium text-foreground'>
               隔离区不会自动到期恢复。备注会写成「{PREVIEW_ISOLATE_NOTE}」。
@@ -2071,9 +2390,11 @@ export function ResultPreviewGallery({
           )
         }
         isLoading={isolateMutation.isPending}
-        disabled={!item}
+        disabled={isolateTargetIds.length === 0}
         handleConfirm={() => {
-          if (item) isolateMutation.mutate(item.accountId)
+          if (isolateTargetIds.length) {
+            isolateMutation.mutate(isolateTargetIds)
+          }
         }}
       />
       <ConfirmDialog
@@ -2081,11 +2402,17 @@ export function ResultPreviewGallery({
         onOpenChange={(nextOpen) => {
           if (!nextOpen && !deleteMutation.isPending) setDeleteOpen(false)
         }}
-        title={`删除 ${item?.accountName || '账号'} 的上游？`}
+        title={
+          deleteTargetIds.length > 1
+            ? `删除 ${deleteTargetIds.length} 个账号的上游？`
+            : `删除 ${item?.accountName || '账号'} 的上游？`
+        }
         desc={
           <div className='space-y-2'>
             <p>
-              将通过 grok2api API 永久删除当前选中账号的上游记录，此操作不可撤销。
+              {deleteTargetIds.length > 1
+                ? `将通过 grok2api API 永久删除已选 ${deleteTargetIds.length} 个账号的上游记录，此操作不可撤销。`
+                : '将通过 grok2api API 永久删除当前选中账号的上游记录，此操作不可撤销。'}
             </p>
             <p className='font-medium text-foreground'>
               账号删除后无法通过本页面恢复，请谨慎操作。
@@ -2111,10 +2438,10 @@ export function ResultPreviewGallery({
         }
         destructive
         isLoading={deleteMutation.isPending}
-        disabled={!item || alreadyDeletedUpstream}
+        disabled={deleteTargetIds.length === 0}
         handleConfirm={() => {
-          if (item && !alreadyDeletedUpstream) {
-            deleteMutation.mutate(item.accountId)
+          if (deleteTargetIds.length) {
+            deleteMutation.mutate(deleteTargetIds)
           }
         }}
       />
@@ -2351,8 +2678,16 @@ function AccountPreviewGroupSection({
   return (
     <section ref={ref}>
       <div className='sticky top-0 isolate z-30 -mx-4 border-b border-border/70 bg-background/90 px-4 py-2 backdrop-blur-md'>
-        <div className='truncate text-sm font-medium'>
-          {accountItem.accountName}
+        <div className='flex items-center gap-2'>
+          {selectMode ? (
+            <PreviewSelectMark active={accountSelected} />
+          ) : null}
+          <div className='min-w-0 flex-1 truncate text-sm font-medium'>
+            {accountItem.accountName}
+          </div>
+          {missingUpstream ? (
+            <MissingUpstreamIndicator compact interactive={false} />
+          ) : null}
         </div>
         <div className='truncate text-xs font-normal text-muted-foreground'>
           {groupAccountSubtitle(displayItems, leaves.length)}
@@ -2382,6 +2717,9 @@ function AccountPreviewGroupSection({
                 heading={
                   entry.heading || entry.profileName || entry.accountName
                 }
+                selectMode={selectMode}
+                accountSelected={accountSelected}
+                missingUpstream={missingUpstream}
                 onSelect={() => onSelect(entry)}
                 onOpen={() => onOpen(entry)}
               />
@@ -2399,6 +2737,9 @@ function VirtualizedThumbGrid({
   activeId,
   sampleLeaves,
   scrollRef,
+  selectMode = false,
+  selectedAccountIds = [],
+  deletedAccountIds = [],
   onSelect,
   onOpen,
 }: {
@@ -2407,6 +2748,9 @@ function VirtualizedThumbGrid({
   activeId?: string
   sampleLeaves: boolean
   scrollRef: { current: HTMLDivElement | null }
+  selectMode?: boolean
+  selectedAccountIds?: number[]
+  deletedAccountIds?: number[]
   onSelect: (index: number) => void
   onOpen: (index: number) => void
 }) {
@@ -2521,6 +2865,9 @@ function VirtualizedThumbGrid({
               scrollRoot={scrollRef}
               eager
               allowHtmlThumb={live}
+              selectMode={selectMode}
+              accountSelected={selectedAccountIds.includes(entry.accountId)}
+              missingUpstream={previewAccountDeleted(entry, deletedAccountIds)}
               onSelect={onSelect}
               onOpen={onOpen}
             />
@@ -2540,6 +2887,9 @@ function PreviewThumbCard({
   scrollRoot,
   eager = false,
   allowHtmlThumb,
+  selectMode = false,
+  accountSelected = false,
+  missingUpstream = false,
   onSelect,
   onOpen,
 }: {
@@ -2551,6 +2901,9 @@ function PreviewThumbCard({
   scrollRoot?: { readonly current: HTMLElement | null }
   eager?: boolean
   allowHtmlThumb?: boolean
+  selectMode?: boolean
+  accountSelected?: boolean
+  missingUpstream?: boolean
   onSelect: (index: number) => void
   onOpen: (index: number) => void
 }) {
@@ -2617,22 +2970,40 @@ function PreviewThumbCard({
         'relative isolate z-0 aspect-[16/10] h-full w-full min-w-0 overflow-hidden rounded-xl border bg-background p-0 text-left transition-colors',
         active
           ? 'border-primary after:pointer-events-none after:absolute after:inset-0 after:z-[2] after:rounded-[11px] after:ring-2 after:ring-inset after:ring-primary'
-          : 'hover:border-primary/30'
+          : accountSelected
+            ? 'border-primary/70 bg-primary/5'
+            : 'hover:border-primary/30'
       )}
       onClick={() => onSelect(index)}
       onDoubleClick={() => onOpen(index)}
     >
       <div className='absolute inset-0 overflow-hidden bg-muted/20'>
+        {selectMode ? (
+          <PreviewSelectMark
+            active={accountSelected}
+            className='absolute top-2 left-2 z-[1]'
+          />
+        ) : null}
         {statusChip ? (
-          <span className='absolute top-2 left-2 z-[1] rounded-md bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm'>
+          <span
+            className={cn(
+              'absolute top-2 z-[1] rounded-md bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm',
+              selectMode ? 'left-9' : 'left-2'
+            )}
+          >
             {statusChip}
           </span>
         ) : null}
-        {(item.completedSteps || 0) > 1 && !item.sample && !item.sampleId ? (
-          <span className='absolute top-2 right-2 z-[1] rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium shadow-sm'>
-            {item.completedSteps} 轮
-          </span>
-        ) : null}
+        <div className='absolute top-2 right-2 z-[1] flex items-center gap-1'>
+          {(item.completedSteps || 0) > 1 && !item.sample && !item.sampleId ? (
+            <span className='rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium shadow-sm'>
+              {item.completedSteps} 轮
+            </span>
+          ) : null}
+          {missingUpstream ? (
+            <MissingUpstreamIndicator compact interactive={false} />
+          ) : null}
+        </div>
         {loading ? (
           <div className='flex h-full w-full items-center justify-center text-muted-foreground'>
             <Loader2 className='size-4 animate-spin' />

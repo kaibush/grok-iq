@@ -22,6 +22,17 @@ from app.web.schemas import (
 )
 
 
+def overlay_run_missing_upstream(
+    runs: list[dict[str, Any]],
+    assessments: dict[int, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    for run in runs:
+        account_id = int(run.get("account_id") or 0)
+        assessment = assessments.get(account_id) or {}
+        run["missingUpstream"] = bool(assessment.get("upstream_deleted_at"))
+    return runs
+
+
 class ProbesRouter:
     def __init__(
         self,
@@ -317,7 +328,7 @@ class ProbesRouter:
             created_from=normalized_from,
             created_to=normalized_to,
         )
-        payload["items"] = await self._with_account_created_at(payload.get("items", []))
+        payload["items"] = await self._with_account_overlay(payload.get("items", []))
         return payload
 
     def probe_worker_status(self) -> dict[str, Any]:
@@ -371,7 +382,7 @@ class ProbesRouter:
         value = self.repository.run_detail(run_id)
         if value is None:
             raise HTTPException(status_code=404, detail="探针任务不存在")
-        runs = await self._with_account_created_at([value["run"]])
+        runs = await self._with_account_overlay([value["run"]])
         value["run"] = runs[0]
         return value
 
@@ -422,31 +433,43 @@ class ProbesRouter:
     def delete_scheduler_executions(self, payload: BulkIdsInput) -> dict[str, Any]:
         return self.repository.delete_schedule_executions(payload.ids)
 
-    async def _with_account_created_at(
+    async def _with_account_overlay(
         self, runs: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        account_ids = {
+            int(run.get("account_id") or 0)
+            for run in runs
+            if int(run.get("account_id") or 0) > 0
+        }
         missing_ids = {
             int(run.get("account_id") or 0)
             for run in runs
             if not run.get("account_created_at") and int(run.get("account_id") or 0) > 0
         }
-        if not missing_ids:
-            return runs
-        try:
-            accounts = await self.client.get_accounts_by_ids(missing_ids)
-        except Exception:
-            return runs
-        created_at_by_id = {
-            int(account.get("id") or 0): account_created_at(account)
-            for account in accounts
-        }
-        self.repository.persist_account_created_at(created_at_by_id)
-        for run in runs:
-            account_id = int(run.get("account_id") or 0)
-            created_at = created_at_by_id.get(account_id)
-            if created_at is not None and not run.get("account_created_at"):
-                run["account_created_at"] = app_isoformat(created_at)
-        return runs
+        if missing_ids:
+            try:
+                accounts = await self.client.get_accounts_by_ids(missing_ids)
+            except Exception:
+                accounts = []
+            created_at_by_id = {
+                int(account.get("id") or 0): account_created_at(account)
+                for account in accounts
+            }
+            live_ids = [
+                account_id for account_id in created_at_by_id if account_id > 0
+            ]
+            if live_ids:
+                self.accounts.clear_upstream_deleted(live_ids)
+            self.repository.persist_account_created_at(created_at_by_id)
+            for run in runs:
+                account_id = int(run.get("account_id") or 0)
+                created_at = created_at_by_id.get(account_id)
+                if created_at is not None and not run.get("account_created_at"):
+                    run["account_created_at"] = app_isoformat(created_at)
+        assessments = (
+            self.accounts.get_assessments(sorted(account_ids)) if account_ids else {}
+        )
+        return overlay_run_missing_upstream(runs, assessments)
 
 
 def build_probes_router(

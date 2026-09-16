@@ -8,6 +8,8 @@ import {
   previewItemsFromRuns,
   previewThumbColumns,
   previewThumbWindow,
+  togglePreviewAccountId,
+  uniquePreviewAccountIds,
 } from './result-preview-gallery'
 
 const run = (overrides: Partial<ProbeRun> = {}): ProbeRun =>
@@ -38,6 +40,15 @@ describe('previewItemsFromRuns', () => {
     ])
     expect(items.map((item) => item.runId)).toEqual(['running', 'done'])
     expect(items[0]?.status).toBe('running')
+  })
+
+  it('copies missingUpstream from probe runs', () => {
+    const items = previewItemsFromRuns([
+      run({ id: 'gone', missingUpstream: true }),
+      run({ id: 'live' }),
+    ])
+    expect(items[0]?.missingUpstream).toBe(true)
+    expect(items[1]?.missingUpstream).toBeUndefined()
   })
 })
 
@@ -77,6 +88,42 @@ describe('previewItemsFromAccountPreview', () => {
     expect(items).toHaveLength(1)
     expect(items[0]?.status).toBe('running')
     expect(items[0]?.profileName).toBe('鹈鹕骑自行车')
+    expect(items[0]?.missingUpstream).toBeUndefined()
+  })
+
+  it('copies missingUpstream from the account payload', () => {
+    const payload = {
+      accountId: 9003,
+      account: {
+        id: '9003',
+        name: 'missing-upstream',
+        email: 'missing@example.com',
+        provider: 'grok',
+        enabled: false,
+        ssoAvailable: false,
+        missingUpstream: true,
+        assessment: { sample_count: 0 },
+      } as UpstreamAccount,
+      samples: [],
+      runs: [
+        {
+          id: 'run-missing',
+          account_id: 9003,
+          account_name: 'missing-upstream',
+          account_email: 'missing@example.com',
+          profile_id: 'pelican',
+          rounds: 1,
+          completed_steps: 1,
+          total_steps: 1,
+          status: 'completed',
+          error: '',
+          created_at: '2026-09-01T12:00:00Z',
+        },
+      ],
+    } as AccountPreviewPayload
+    const items = previewItemsFromAccountPreview(payload)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.missingUpstream).toBe(true)
   })
 })
 
@@ -165,6 +212,28 @@ describe('isPreviewableAccountIsolated', () => {
     expect(isPreviewableAccountIsolated({ id: 3, quarantined: true })).toBe(
       true
     )
+  })
+})
+
+describe('uniquePreviewAccountIds', () => {
+  it('keeps first-seen account ids and skips invalid values', () => {
+    expect(
+      uniquePreviewAccountIds([
+        { accountId: 7 },
+        { accountId: 7 },
+        { accountId: 11 },
+        { accountId: 0 },
+        { accountId: -3 },
+      ])
+    ).toEqual([7, 11])
+  })
+})
+
+describe('togglePreviewAccountId', () => {
+  it('adds and removes a valid account id', () => {
+    expect(togglePreviewAccountId([], 9)).toEqual([9])
+    expect(togglePreviewAccountId([9, 12], 9)).toEqual([12])
+    expect(togglePreviewAccountId([9], 0)).toEqual([9])
   })
 })
 
