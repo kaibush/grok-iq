@@ -12,6 +12,7 @@ import {
   Eye,
   Filter,
   Gauge,
+  Images,
   KeyRound,
   ListChecks,
   Loader2,
@@ -72,6 +73,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -108,6 +110,11 @@ import {
 import { DualTpsValue } from '@/features/monitor/components/tps-display'
 import { FilterChip } from '@/features/monitor/components/filter-chip'
 import { ProbeDialog } from '@/features/monitor/components/probe-dialog'
+import {
+  previewItemFromAccount,
+  previewItemsFromAccounts,
+  ResultPreviewGallery,
+} from '@/features/monitor/components/result-preview-gallery'
 
 type AccountBatchAction = 'enable' | 'disable'
 type RecoveryGuardFilter = 'all' | 'true' | 'false'
@@ -212,6 +219,12 @@ export function AccountsPage() {
   const [ssoConfirmOpen, setSsoConfirmOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
+  const [resultPreview, setResultPreview] = useState<{
+    page: number
+    index: number
+    land?: 'start' | 'end'
+    accountId?: number
+  } | null>(null)
   const accountsActive = matchWorkspaceTabId(pathname) === 'accounts'
   const [accountsArmed, setAccountsArmed] = useState(accountsActive)
   if (!accountsActive && accountsArmed) {
@@ -223,6 +236,7 @@ export function AccountsPage() {
     setIsolateConfirmOpen(false)
     setSsoConfirmOpen(false)
     setBatchAction(null)
+    setResultPreview(null)
   } else if (accountsActive && !accountsArmed) {
     setAccountsArmed(true)
   }
@@ -346,6 +360,112 @@ export function AccountsPage() {
     setDetailId(id)
     setDetailOpen(true)
   }, [])
+  const previewPage = resultPreview?.page ?? tableQuery.page
+  const previewAccountsQuery = useQuery({
+    queryKey: [
+      'accounts',
+      'preview',
+      previewPage,
+      tableQuery.pageSize,
+      tableQuery.search,
+      tableQuery.status,
+      tableQuery.upstreamStatus,
+      tableQuery.recoveryGuarded,
+      tableQuery.ssoRisk,
+      tableQuery.egressNodeId,
+    ],
+    queryFn: ({ signal }) =>
+      api.accounts(
+        {
+          page: previewPage,
+          pageSize: tableQuery.pageSize,
+          search: tableQuery.search,
+          monitorStatus: tableQuery.status === 'all' ? '' : tableQuery.status,
+          status:
+            tableQuery.upstreamStatus === 'all'
+              ? ''
+              : tableQuery.upstreamStatus,
+          recoveryGuarded:
+            tableQuery.recoveryGuarded === 'all'
+              ? ''
+              : tableQuery.recoveryGuarded,
+          ssoRisk: tableQuery.ssoRisk === 'all' ? '' : tableQuery.ssoRisk,
+          egressNodeId:
+            tableQuery.egressNodeId === 'all' ? '' : tableQuery.egressNodeId,
+        },
+        signal
+      ),
+    enabled: resultPreview != null && resultPreview.accountId == null,
+    placeholderData: (previous) => previous,
+  })
+  const previewSource =
+    resultPreview && resultPreview.page === tableQuery.page && query.data
+      ? query.data
+      : previewAccountsQuery.data?.page === previewPage
+        ? previewAccountsQuery.data
+        : undefined
+  const scopedAccountId = resultPreview?.accountId
+  const previewItems = useMemo(() => {
+    const items = previewItemsFromAccounts(previewSource?.items ?? [])
+    if (scopedAccountId == null) return items
+    const matched = items.filter((item) => item.accountId === scopedAccountId)
+    if (matched.length) return matched
+    const account = (previewSource?.items ?? []).find(
+      (item) => Number(item.id) === scopedAccountId
+    )
+    return account ? [previewItemFromAccount(account)] : []
+  }, [previewSource?.items, scopedAccountId])
+  const previewTotal =
+    scopedAccountId != null
+      ? previewItems.length
+      : (previewSource?.total ?? query.data?.total ?? 0)
+  const previewPageCount =
+    scopedAccountId != null
+      ? 1
+      : Math.max(1, Math.ceil(previewTotal / Math.max(tableQuery.pageSize, 1)))
+  const previewPageLoading =
+    resultPreview != null &&
+    scopedAccountId == null &&
+    previewSource?.page !== resultPreview.page &&
+    previewAccountsQuery.isFetching
+  if (
+    resultPreview?.land &&
+    previewItems.length > 0 &&
+    previewSource?.page === resultPreview.page
+  ) {
+    const nextIndex = resultPreview.land === 'end' ? previewItems.length - 1 : 0
+    setResultPreview((current) => {
+      if (!current?.land || current.page !== resultPreview.page) return current
+      return { ...current, index: nextIndex, land: undefined }
+    })
+  }
+  const openAccountPreview = useCallback(
+    (accountId?: number, required = false) => {
+      const items = previewItemsFromAccounts(accounts)
+      if (!items.length && !(query.data?.total ?? 0)) {
+        toast.error('当前筛选没有可预览的账号')
+        return
+      }
+      const matchedIndex =
+        accountId == null
+          ? 0
+          : items.findIndex((item) => item.accountId === accountId)
+      if (accountId != null && matchedIndex < 0 && required) {
+        setResultPreview({
+          page,
+          index: 0,
+          accountId,
+        })
+        return
+      }
+      setResultPreview({
+        page,
+        index: required ? 0 : Math.max(0, matchedIndex),
+        accountId: required ? accountId : undefined,
+      })
+    },
+    [accounts, page, query.data?.total]
+  )
 
   const selectionMutation = useMutation({
     mutationFn: () =>
@@ -818,6 +938,25 @@ export function AccountsPage() {
         toolbar={
           <div className='space-y-2' aria-busy={showTableLoading}>
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+              <Tabs
+                value={resultPreview ? 'preview' : 'list'}
+                className='shrink-0 gap-0'
+                onValueChange={(value) => {
+                  if (value === 'list') {
+                    setResultPreview(null)
+                    return
+                  }
+                  openAccountPreview(detailId ?? undefined)
+                }}
+              >
+                <TabsList className='h-8'>
+                  <TabsTrigger value='list'>列表</TabsTrigger>
+                  <TabsTrigger value='preview'>
+                    <Images className='size-3.5' />
+                    预览
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
               <div className='relative min-w-0 flex-1'>
                 <Search className='absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground' />
                 <Input
@@ -938,6 +1077,9 @@ export function AccountsPage() {
                   onToggleCurrentPage={toggleCurrentPageSelection}
                   onToggleAccount={toggleAccountSelection}
                   onDetail={openAccountDetail}
+                  onPreview={(account) =>
+                    openAccountPreview(Number(account.id), true)
+                  }
                 />
                 {showTableLoading && (
                   <ServerTableLoadingOverlay
@@ -1261,6 +1403,40 @@ export function AccountsPage() {
         disabled={selected.length === 0}
         handleConfirm={() => isolateBatchMutation.mutate(selected)}
       />
+      <ResultPreviewGallery
+        open={resultPreview != null}
+        onOpenChange={(open) => {
+          if (!open) setResultPreview(null)
+        }}
+        items={previewItems}
+        index={resultPreview?.index ?? 0}
+        onIndexChange={(index) =>
+          setResultPreview((current) =>
+            current ? { ...current, index } : current
+          )
+        }
+        page={scopedAccountId != null ? 1 : (resultPreview?.page ?? page)}
+        pageCount={previewPageCount}
+        total={previewTotal}
+        pageLoading={previewPageLoading}
+        onPageChange={
+          scopedAccountId == null
+            ? (nextPage, land) =>
+                setResultPreview((current) =>
+                  current
+                    ? {
+                        ...current,
+                        page: nextPage,
+                        land,
+                        index: 0,
+                        accountId: undefined,
+                      }
+                    : current
+                )
+            : undefined
+        }
+        perspective='account'
+      />
       <AccountProbeDetailDialog
         accountId={detailId}
         open={detailOpen}
@@ -1279,6 +1455,7 @@ type AccountsTableProps = {
   onToggleCurrentPage: (checked: boolean) => void
   onToggleAccount: (id: number, enabled: boolean, checked: boolean) => void
   onDetail: (id: number) => void
+  onPreview: (account: UpstreamAccount) => void
 }
 
 const AccountsTable = memo(function AccountsTable({
@@ -1289,6 +1466,7 @@ const AccountsTable = memo(function AccountsTable({
   onToggleCurrentPage,
   onToggleAccount,
   onDetail,
+  onPreview,
 }: AccountsTableProps) {
   const selectedIdSet = useMemo(() => new Set(selected), [selected])
   return (
@@ -1328,6 +1506,7 @@ const AccountsTable = memo(function AccountsTable({
                 onToggleAccount(id, account.enabled, checked)
               }
               onDetail={() => onDetail(id)}
+              onPreview={() => onPreview(account)}
             />
           )
         })}
@@ -1342,6 +1521,7 @@ type AccountRowProps = {
   selected: boolean
   onSelectedChange: (checked: boolean) => void
   onDetail: () => void
+  onPreview: () => void
 }
 
 function IconStat({
@@ -1444,6 +1624,7 @@ const AccountRow = memo(function AccountRow({
   selected,
   onSelectedChange,
   onDetail,
+  onPreview,
 }: AccountRowProps) {
   const id = Number(account.id)
   const assessment = account.assessment
@@ -1555,20 +1736,36 @@ const AccountRow = memo(function AccountRow({
         />
       </TableCell>
       <TableCell className='text-right'>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size='icon'
-              variant='ghost'
-              className='size-7'
-              onClick={onDetail}
-              aria-label={`查看 ${accountLabel} 详情`}
-            >
-              <Eye />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>查看详情</TooltipContent>
-        </Tooltip>
+        <div className='inline-flex items-center justify-end'>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size='icon'
+                variant='ghost'
+                className='size-7'
+                onClick={onPreview}
+                aria-label={`预览 ${accountLabel} 的结果`}
+              >
+                <Images />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>预览结果</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size='icon'
+                variant='ghost'
+                className='size-7'
+                onClick={onDetail}
+                aria-label={`查看 ${accountLabel} 详情`}
+              >
+                <Eye />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>查看详情</TooltipContent>
+          </Tooltip>
+        </div>
       </TableCell>
     </TableRow>
   )
