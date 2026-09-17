@@ -14,6 +14,7 @@ from app.integrations.wechat.client import WeChatTestAccountClient
 from app.persistence.account_repository import AccountRepository
 from app.persistence.auth_repository import AuthRepository
 from app.persistence.chat_provider_repository import ChatProviderRepository
+from app.persistence.client_key_repository import ClientKeyRepository
 from app.persistence.database import Database
 from app.persistence.linuxdo_user_repository import LinuxDoUserRepository
 from app.persistence.page_visit_repository import PageVisitRepository
@@ -27,6 +28,7 @@ from app.persistence.wechat_alert_repository import WeChatAlertRepository
 from app.services.account_service import AccountService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
+from app.services.client_key_service import ClientKeyService
 from app.services.egress_service import EgressService
 from app.services.linuxdo_oauth_service import LinuxDoOAuthService
 from app.services.page_visit_service import PageVisitService
@@ -59,6 +61,7 @@ wechat_alert_repository = WeChatAlertRepository(database)
 page_visit_repository = PageVisitRepository(database)
 linuxdo_user_repository = LinuxDoUserRepository(database)
 status_account_repository = StatusAccountRepository(database)
+client_key_repository = ClientKeyRepository(database)
 settings_repository = SettingsRepository(database, settings)
 register_event_repository = RegisterEventRepository(database)
 sso_report_repository = SsoReportRepository(database)
@@ -132,6 +135,11 @@ status_account_service = StatusAccountService(
     settings,
     status_account_repository,
     auth_service.secret,
+)
+client_key_service = ClientKeyService(
+    settings,
+    grok_client,
+    client_key_repository,
 )
 page_visit_service = PageVisitService(
     page_visit_repository,
@@ -235,6 +243,7 @@ app.include_router(
         page_visits=page_visit_service,
         linuxdo_oauth=linuxdo_oauth_service,
         status_accounts=status_account_service,
+        client_keys=client_key_service,
         scheduler=scheduler_service,
         runtime_settings_service=runtime_settings_service,
         tps_fuse_sync=tps_fuse_sync,

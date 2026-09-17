@@ -1074,6 +1074,27 @@ class Grok2APIClient:
         query = {"page": 1, "pageSize": 20} | params
         return await self.admin_request("GET", "/api/admin/v1/client-keys", params=query)
 
+    async def list_all_client_keys(self, **params: Any) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        page = 1
+        query = dict(params)
+        page_size = max(1, min(int(query.pop("pageSize", 200) or 200), 2000))
+        query.pop("page", None)
+        while True:
+            payload = await self.list_client_keys(**query, page=page, pageSize=page_size)
+            if not isinstance(payload, dict):
+                break
+            batch = [
+                item for item in payload.get("items", []) if isinstance(item, dict)
+            ]
+            items.extend(batch)
+            total = int(payload.get("total") or 0)
+            size = int(payload.get("pageSize") or page_size)
+            if not batch or size <= 0 or page * size >= total:
+                break
+            page += 1
+        return items
+
     async def get_client_key_secret(self, key_id: str) -> str:
         payload = await self.admin_request("GET", f"/api/admin/v1/client-keys/{key_id}/secret")
         secret = str(payload.get("secret") or "")

@@ -42,6 +42,9 @@ EXPECTED_ROUTES = {
     ("GET", "/api/status-accounts"),
     ("PATCH", "/api/status-accounts/{account_id}"),
     ("DELETE", "/api/status-accounts/{account_id}"),
+    ("GET", "/api/client-keys"),
+    ("POST", "/api/client-keys/sync"),
+    ("PATCH", "/api/client-keys/{key_id}"),
     ("GET", "/api/system/version"),
     ("POST", "/api/system/update/check"),
     ("GET", "/api/dashboard"),
@@ -199,6 +202,7 @@ def build_test_router():
         page_visits=MagicMock(),
         linuxdo_oauth=MagicMock(),
         status_accounts=MagicMock(),
+        client_keys=MagicMock(),
     )
 
 

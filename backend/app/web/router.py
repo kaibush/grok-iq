@@ -9,6 +9,7 @@ from app.persistence.probe_repository import ProbeRepository
 from app.services.account_service import AccountService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
+from app.services.client_key_service import ClientKeyService
 from app.services.egress_service import EgressService
 from app.services.export_service import ExportService
 from app.services.linuxdo_oauth_service import LinuxDoOAuthService
@@ -28,6 +29,7 @@ from .auth import build_admin_auth_dependency
 from .routes.accounts import build_accounts_router
 from .routes.auth import build_auth_router
 from .routes.chat import build_chat_router
+from .routes.client_keys import build_client_keys_router
 from .routes.egress import build_egress_router
 from .routes.exports import build_exports_router
 from .routes.health import build_health_router
@@ -68,6 +70,7 @@ def build_router(
     tps_fuse_sync: TpsFuseSyncService | None = None,
     linuxdo_oauth: LinuxDoOAuthService | None = None,
     status_accounts: StatusAccountService | None = None,
+    client_keys: ClientKeyService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     require_admin = build_admin_auth_dependency(auth_service)
@@ -141,6 +144,8 @@ def build_router(
         protected.include_router(build_linuxdo_users_router(linuxdo_oauth))
     if status_accounts is not None:
         protected.include_router(build_status_accounts_router(status_accounts))
+    if client_keys is not None:
+        protected.include_router(build_client_keys_router(client_keys))
     protected.include_router(build_sso_reports_router(sso_reports))
     protected.include_router(build_register_events_router(register_integration))
     protected.include_router(build_system_router(updates))

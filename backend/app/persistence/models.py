@@ -797,6 +797,59 @@ class PageVisit(Base):
     )
 
 
+class ClientKeyRecord(Base):
+    """Local overlay for grok2api Client Keys.
+
+    Snapshot fields stay in sync with grok2api. Paid-user marks, card type,
+    and accumulated recharge are owned by GrokIQ and survive upstream edits.
+    """
+
+    __tablename__ = "client_key_records"
+    __table_args__ = (
+        CheckConstraint(
+            "plan_type IN ('none', 'day', 'week', 'month')",
+            name="ck_client_key_records_plan_type",
+        ),
+        Index("ix_client_key_records_paid", "paid"),
+        Index("ix_client_key_records_plan_type", "plan_type"),
+        Index("ix_client_key_records_prefix", "prefix"),
+        Index("ix_client_key_records_upstream_missing", "upstream_missing"),
+        Index("ix_client_key_records_enabled", "enabled"),
+        Index("ix_client_key_records_name", "name"),
+    )
+
+    key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), default="", nullable=False)
+    scheme: Mapped[str] = mapped_column(String(16), default="sk", nullable=False)
+    prefix: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    rpm_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_concurrent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    billing_limit_usd_ticks: Mapped[int] = mapped_column(
+        BigInteger, default=0, nullable=False
+    )
+    billed_usage_usd_ticks: Mapped[int] = mapped_column(
+        BigInteger, default=0, nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    upstream_created_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    last_synced_at: Mapped[datetime | None] = mapped_column(AppDateTime())
+    upstream_missing: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    paid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    plan_type: Mapped[str] = mapped_column(String(16), default="none", nullable=False)
+    recharge_cents: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    note: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        AppDateTime(), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
 class StatusInviteCode(Base):
     """Invite codes that gate local /status account registration."""
 

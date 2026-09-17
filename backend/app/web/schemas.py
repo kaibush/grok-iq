@@ -71,6 +71,19 @@ class LinuxDoUserUpdateInput(BaseModel):
     enabled: bool | None = None
 
 
+class ClientKeyUpdateInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    paid: bool | None = None
+    plan_type: Literal["none", "day", "week", "month"] | None = Field(
+        default=None, alias="planType"
+    )
+    recharge_yuan: float | int | str | None = Field(
+        default=None, alias="rechargeYuan"
+    )
+    note: str | None = Field(default=None, max_length=500)
+
+
 class ChatProviderCreateInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

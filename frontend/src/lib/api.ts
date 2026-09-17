@@ -369,6 +369,65 @@ export type LinuxDoUserLedger = {
   pageSize: number
 }
 
+export type ClientKeyPlanType = 'none' | 'day' | 'week' | 'month'
+
+export type ManagedClientKey = {
+  id: string
+  name: string
+  scheme: 'sk' | 'g2a' | string
+  prefix: string
+  maskedKey: string
+  enabled: boolean
+  expired: boolean
+  expiresAt: string | null
+  rpmLimit: number
+  maxConcurrent: number
+  unlimited: boolean
+  billingLimitUsd: number
+  billedUsageUsd: number
+  remainingUsd: number
+  lastUsedAt: string | null
+  upstreamCreatedAt: string | null
+  lastSyncedAt: string | null
+  upstreamMissing: boolean
+  paid: boolean
+  planType: ClientKeyPlanType
+  rechargeYuan: number
+  note: string
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type ManagedClientKeySummary = {
+  total: number
+  paid: number
+  unpaid: number
+  day: number
+  week: number
+  month: number
+  missing: number
+  rechargeYuan: number
+  lastSyncedAt: string | null
+}
+
+export type ManagedClientKeyLedger = {
+  items: ManagedClientKey[]
+  total: number
+  page: number
+  pageSize: number
+  summary: ManagedClientKeySummary
+}
+
+export type ClientKeySyncResult = {
+  fetched: number
+  created: number
+  updated: number
+  missing: number
+  skippedProbeKeys: number
+  skippedSystemKeys: number
+  syncedAt: string | null
+}
+
 export type PublicVisitIpStat = {
   ip: string
   label: string
@@ -3679,6 +3738,41 @@ export const api = {
         page_size: params?.pageSize,
       })}`
     ),
+  clientKeys: (params?: {
+    q?: string
+    paid?: string
+    planType?: string
+    enabled?: string
+    upstream?: string
+    page?: number
+    pageSize?: number
+  }) =>
+    request<ManagedClientKeyLedger>(
+      `/client-keys${query({
+        q: params?.q,
+        paid: params?.paid,
+        planType: params?.planType,
+        enabled: params?.enabled,
+        upstream: params?.upstream,
+        page: params?.page,
+        pageSize: params?.pageSize,
+      })}`
+    ),
+  syncClientKeys: () =>
+    request<ClientKeySyncResult>('/client-keys/sync', { method: 'POST' }),
+  updateClientKey: (
+    id: string,
+    body: {
+      paid?: boolean
+      planType?: ClientKeyPlanType
+      rechargeYuan?: number | string
+      note?: string
+    }
+  ) =>
+    request<ManagedClientKey>(`/client-keys/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   statusInviteCodes: (params?: {
     q?: string
     page?: number

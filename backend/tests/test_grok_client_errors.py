@@ -184,3 +184,27 @@ async def test_create_probe_route_binds_account_ids_by_default():
     body = captured["json"]
     assert isinstance(body, dict)
     assert body["accountIds"] == ["4725"]
+
+
+@pytest.mark.asyncio
+async def test_list_all_client_keys_paginates_until_total() -> None:
+    client = Grok2APIClient(Settings())
+    pages: list[int] = []
+
+    async def list_client_keys(**params: object) -> dict[str, object]:
+        page = int(params.get("page") or 1)
+        page_size = int(params.get("pageSize") or 20)
+        pages.append(page)
+        items = [{"id": str(index)} for index in range(1, 6)]
+        start = (page - 1) * page_size
+        return {
+            "items": items[start : start + page_size],
+            "total": 5,
+            "pageSize": page_size,
+        }
+
+    client.list_client_keys = list_client_keys  # type: ignore[method-assign]
+    items = await client.list_all_client_keys(pageSize=2)
+    assert [item["id"] for item in items] == ["1", "2", "3", "4", "5"]
+    assert pages == [1, 2, 3]
+
