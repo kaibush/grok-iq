@@ -4260,11 +4260,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
   runs: (
-    params: Record<string, string | number | undefined> = {},
+    params: Record<string, string | number | boolean | undefined> = {},
     signal?: AbortSignal
   ) => request<Page<ProbeRun>>(`/probe-runs${query(params)}`, { signal }),
-  runSelection: (params: Record<string, string | number | undefined> = {}) =>
-    request<RunSelection>(`/probe-runs/selection${query(params)}`),
+  runSelection: (
+    params: Record<string, string | number | boolean | undefined> = {}
+  ) => request<RunSelection>(`/probe-runs/selection${query(params)}`),
   probeWorkers: () => request<ProbeWorkersResponse>('/probe-workers'),
   probeWorkerLogs: (limit = 300) =>
     request<ProbeWorkerLogsResponse>(

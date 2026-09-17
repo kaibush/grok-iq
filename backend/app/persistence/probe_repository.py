@@ -1408,6 +1408,7 @@ class ProbeRepository:
         plan_id: str | None = None,
         created_from: Any = None,
         created_to: Any = None,
+        has_anomalies: bool = False,
     ) -> dict[str, Any]:
         return self._run_reader.select_run_ids(
             status=status,
@@ -1416,6 +1417,7 @@ class ProbeRepository:
             plan_id=plan_id,
             created_from=created_from,
             created_to=created_to,
+            has_anomalies=has_anomalies,
         )
 
     def list_runs(
@@ -1429,6 +1431,7 @@ class ProbeRepository:
         plan_id: str | None = None,
         created_from: Any = None,
         created_to: Any = None,
+        has_anomalies: bool = False,
     ) -> dict[str, Any]:
         return self._run_reader.list_runs(
             page=page,
@@ -1439,6 +1442,7 @@ class ProbeRepository:
             plan_id=plan_id,
             created_from=created_from,
             created_to=created_to,
+            has_anomalies=has_anomalies,
         )
 
     def latest_runs_by_account_ids(

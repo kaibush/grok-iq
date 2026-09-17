@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import Integer, case, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.clock import to_app_timezone, utc_now
@@ -54,6 +54,7 @@ class ProbeRunReader:
         plan_id: str | None = None,
         created_from: Any = None,
         created_to: Any = None,
+        has_anomalies: bool = False,
     ) -> dict[str, Any]:
         filters = self._run_list_filters(
             status=status,
@@ -62,6 +63,7 @@ class ProbeRunReader:
             plan_id=plan_id,
             created_from=created_from,
             created_to=created_to,
+            has_anomalies=has_anomalies,
         )
         with self.database.session() as session:
             values = session.execute(
@@ -115,6 +117,7 @@ class ProbeRunReader:
         plan_id: str | None = None,
         created_from: Any = None,
         created_to: Any = None,
+        has_anomalies: bool = False,
     ) -> dict[str, Any]:
         filters = self._run_list_filters(
             status=status,
@@ -123,6 +126,7 @@ class ProbeRunReader:
             plan_id=plan_id,
             created_from=created_from,
             created_to=created_to,
+            has_anomalies=has_anomalies,
         )
         with self.database.session() as session:
             total, active_count = session.execute(
@@ -458,6 +462,7 @@ class ProbeRunReader:
         plan_id: str | None,
         created_from: Any,
         created_to: Any,
+        has_anomalies: bool = False,
     ) -> list[Any]:
         filters: list[Any] = []
         if status:
@@ -479,6 +484,17 @@ class ProbeRunReader:
             filters.append(ProbeRun.created_at >= created_from)
         if created_to is not None:
             filters.append(ProbeRun.created_at <= created_to)
+        if has_anomalies:
+            filters.append(
+                cast(
+                    func.coalesce(
+                        func.json_extract(ProbeRun.summary, "$.anomaly_count"),
+                        0,
+                    ),
+                    Integer,
+                )
+                > 0
+            )
         return filters
 
     def _blocked_account_ids(

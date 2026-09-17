@@ -757,6 +757,34 @@ def test_runs_can_be_filtered_by_indexed_creation_range(repository: ProbeReposit
     assert [item["id"] for item in selection["items"]] == [recent_run_id]
 
 
+def test_runs_can_be_filtered_by_anomaly_count(repository: ProbeRepository):
+    none_id = create_run(repository, account_id=321)
+    zero_id = create_run(repository, account_id=322)
+    flagged_id = create_run(repository, account_id=323)
+    with repository.database.transaction() as session:
+        session.get(ProbeRun, zero_id).summary = {  # type: ignore[union-attr]
+            "anomaly_count": 0,
+            "sample_count": 3,
+        }
+        session.get(ProbeRun, flagged_id).summary = {  # type: ignore[union-attr]
+            "anomaly_count": 2,
+            "sample_count": 4,
+            "classifications": {"elevated": 2},
+        }
+
+    result = repository.list_runs(page=1, page_size=20, has_anomalies=True)
+    selection = repository.select_run_ids(has_anomalies=True)
+
+    assert {run["id"] for run in result["items"]} == {flagged_id}
+    assert result["total"] == 1
+    assert [item["id"] for item in selection["items"]] == [flagged_id]
+    assert {run["id"] for run in repository.list_runs(page=1, page_size=20)["items"]} == {
+        none_id,
+        zero_id,
+        flagged_id,
+    }
+
+
 def test_runs_store_and_backfill_account_created_at(repository: ProbeRepository):
     created_at = utc_now().replace(microsecond=0)
     expected = to_app_timezone(created_at)

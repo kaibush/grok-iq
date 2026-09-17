@@ -309,6 +309,7 @@ class ProbesRouter:
         plan_id: str | None = Query(default=None, alias="planId"),
         created_from: Annotated[datetime | None, Query(alias="createdFrom")] = None,
         created_to: Annotated[datetime | None, Query(alias="createdTo")] = None,
+        has_anomalies: bool = Query(default=False, alias="hasAnomalies"),
     ) -> dict[str, Any]:
         normalized_from = ensure_utc(created_from)
         normalized_to = ensure_utc(created_to)
@@ -327,6 +328,7 @@ class ProbesRouter:
             plan_id=plan_id,
             created_from=normalized_from,
             created_to=normalized_to,
+            has_anomalies=has_anomalies,
         )
         payload["items"] = await self._with_account_overlay(payload.get("items", []))
         return payload
@@ -357,6 +359,7 @@ class ProbesRouter:
         plan_id: str | None = Query(default=None, alias="planId"),
         created_from: Annotated[datetime | None, Query(alias="createdFrom")] = None,
         created_to: Annotated[datetime | None, Query(alias="createdTo")] = None,
+        has_anomalies: bool = Query(default=False, alias="hasAnomalies"),
     ) -> dict[str, Any]:
         normalized_from = ensure_utc(created_from)
         normalized_to = ensure_utc(created_to)
@@ -373,6 +376,7 @@ class ProbesRouter:
             plan_id=plan_id,
             created_from=normalized_from,
             created_to=normalized_to,
+            has_anomalies=has_anomalies,
         )
 
     def preview_probe_samples(self, payload: BulkIdsInput) -> dict[str, Any]:

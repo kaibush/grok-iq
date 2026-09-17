@@ -228,6 +228,7 @@ const defaultRunsView = {
   search: '',
   createdFrom: '',
   createdTo: '',
+  hasAnomalies: false,
   page: 1,
   pageSize: 50,
 }
@@ -295,8 +296,15 @@ export function RunsPage() {
   const runsSearch = parsedSearch ?? cachedSearch
   const pinnedAccountId = pinnedAccountIdFromRunsSearch(runsSearch)
   const runsView = usePersistedViewState(RUNS_VIEW_STORAGE_KEY, defaultRunsView)
-  const { status, search, createdFrom, createdTo, page, pageSize } =
-    runsView.value
+  const {
+    status,
+    search,
+    createdFrom,
+    createdTo,
+    hasAnomalies,
+    page,
+    pageSize,
+  } = runsView.value
   const setRunsViewValue = runsView.setValue
   const updateRunsView = (patch: Partial<typeof defaultRunsView>) =>
     setRunsViewValue((current) => ({ ...current, ...patch }))
@@ -309,10 +317,19 @@ export function RunsPage() {
       search: deferredSearch,
       createdFrom: createdFromIso,
       createdTo: createdToIso,
+      hasAnomalies,
       page,
       pageSize,
     }),
-    [createdFromIso, createdToIso, deferredSearch, page, pageSize, status]
+    [
+      createdFromIso,
+      createdToIso,
+      deferredSearch,
+      hasAnomalies,
+      page,
+      pageSize,
+      status,
+    ]
   )
   // Apply filter/page query after the overlay and select close have painted.
   const tableQuery = usePaintDeferredValue(committedQuery)
@@ -374,6 +391,7 @@ export function RunsPage() {
     tableQuery.search !== committedQuery.search ||
     tableQuery.createdFrom !== committedQuery.createdFrom ||
     tableQuery.createdTo !== committedQuery.createdTo ||
+    tableQuery.hasAnomalies !== committedQuery.hasAnomalies ||
     tableQuery.page !== committedQuery.page ||
     tableQuery.pageSize !== committedQuery.pageSize
   const query = useQuery({
@@ -383,6 +401,7 @@ export function RunsPage() {
       tableQuery.search,
       tableQuery.createdFrom,
       tableQuery.createdTo,
+      tableQuery.hasAnomalies,
       tableQuery.page,
       tableQuery.pageSize,
       pinnedAccountId,
@@ -397,6 +416,7 @@ export function RunsPage() {
           accountId: pinnedAccountId ?? undefined,
           createdFrom: tableQuery.createdFrom,
           createdTo: tableQuery.createdTo,
+          hasAnomalies: tableQuery.hasAnomalies || undefined,
         },
         signal
       ),
@@ -454,6 +474,7 @@ export function RunsPage() {
     tableQuery.search,
     tableQuery.createdFrom,
     tableQuery.createdTo,
+    tableQuery.hasAnomalies ? 'anomalies' : '',
     pinnedAccountId ?? '',
   ].join('|')
   const appliedFilterKeyRef = useRef(tableFilterKey)
@@ -489,6 +510,7 @@ export function RunsPage() {
       tableQuery.search,
       tableQuery.createdFrom,
       tableQuery.createdTo,
+      tableQuery.hasAnomalies,
       previewPage,
       tableQuery.pageSize,
       pinnedAccountId,
@@ -503,6 +525,7 @@ export function RunsPage() {
           accountId: pinnedAccountId ?? undefined,
           createdFrom: tableQuery.createdFrom,
           createdTo: tableQuery.createdTo,
+          hasAnomalies: tableQuery.hasAnomalies || undefined,
         },
         signal
       ),
@@ -799,6 +822,7 @@ export function RunsPage() {
         accountId: pinnedAccountId ?? undefined,
         createdFrom: tableQuery.createdFrom,
         createdTo: tableQuery.createdTo,
+        hasAnomalies: tableQuery.hasAnomalies || undefined,
       }),
     onSuccess: (result) => {
       setSelection(new Map(result.items.map((item) => [item.id, item])))
@@ -936,9 +960,11 @@ export function RunsPage() {
   const todayActive =
     createdFrom === todayRange.from && createdTo === todayRange.to
   const timeFilterActive = Boolean(createdFrom || createdTo)
-  const activeFilterCount = [status !== 'all', timeFilterActive].filter(
-    Boolean
-  ).length
+  const activeFilterCount = [
+    status !== 'all',
+    hasAnomalies,
+    timeFilterActive,
+  ].filter(Boolean).length
   const timeFilterLabel = todayActive
     ? '今天'
     : createdFrom || createdTo
@@ -953,6 +979,7 @@ export function RunsPage() {
     status !== 'all'
       ? (runStatusMeta[status]?.label ?? `状态 ${status}`)
       : '全部状态',
+    hasAnomalies ? '降智信号 > 0' : '',
     createdFrom || createdTo
       ? `${createdFrom ? formatDateTimeInput(createdFrom) : '不限'} 至 ${createdTo ? formatDateTimeInput(createdTo) : '不限'}`
       : '',
@@ -1244,7 +1271,7 @@ export function RunsPage() {
                       <div>
                         <div className='text-sm font-semibold'>任务筛选</div>
                         <div className='mt-0.5 text-xs text-muted-foreground'>
-                          按状态和创建时间缩小任务范围
+                          按状态、降智信号和创建时间缩小任务范围
                         </div>
                       </div>
                       {activeFilterCount > 0 && (
@@ -1256,6 +1283,7 @@ export function RunsPage() {
                             beginTableInteraction()
                             updateRunsView({
                               status: 'all',
+                              hasAnomalies: false,
                               createdFrom: '',
                               createdTo: '',
                               page: 1,
@@ -1292,6 +1320,30 @@ export function RunsPage() {
                               </SelectItem>
                             )
                           )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className='space-y-2'>
+                      <div className='text-[11px] font-semibold tracking-wide text-muted-foreground uppercase'>
+                        降智信号
+                      </div>
+                      <Select
+                        value={hasAnomalies ? 'gt0' : 'all'}
+                        onValueChange={(value) => {
+                          beginTableInteraction()
+                          updateRunsView({
+                            hasAnomalies: value === 'gt0',
+                            page: 1,
+                          })
+                        }}
+                      >
+                        <SelectTrigger>
+                          <TriangleAlert className='size-4 text-muted-foreground' />
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value='all'>全部任务</SelectItem>
+                          <SelectItem value='gt0'>大于 0</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1401,6 +1453,15 @@ export function RunsPage() {
                     }}
                   />
                 )}
+                {hasAnomalies && (
+                  <FilterChip
+                    label='降智信号 > 0'
+                    onClear={() => {
+                      beginTableInteraction()
+                      updateRunsView({ hasAnomalies: false, page: 1 })
+                    }}
+                  />
+                )}
                 {timeFilterActive && (
                   <FilterChip
                     label={`时间：${timeFilterLabel}`}
@@ -1469,6 +1530,7 @@ export function RunsPage() {
                   title={
                     deferredSearch ||
                     status !== 'all' ||
+                    hasAnomalies ||
                     createdFrom ||
                     createdTo
                       ? '未找到匹配任务'
@@ -1477,9 +1539,10 @@ export function RunsPage() {
                   description={
                     deferredSearch ||
                     status !== 'all' ||
+                    hasAnomalies ||
                     createdFrom ||
                     createdTo
-                      ? '请调整账号搜索词、任务状态或时间范围。'
+                      ? '请调整账号搜索词、任务状态、降智信号或时间范围。'
                       : '从账号页面手动选择账号，或配置一个 Cron 计划。'
                   }
                 />
