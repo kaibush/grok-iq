@@ -116,6 +116,10 @@ export type SettingsForm = {
   autoIsolationMinStatus: AutoIsolationMinStatus
   qualityRetryIsolationEnabled: boolean
   qualityRetryIsolationIntervalSeconds: number
+  paidKeyAutoTopupEnabled: boolean
+  paidKeyAutoTopupThresholdPercent: number
+  paidKeyAutoTopupAmountUsd: number
+  paidKeyAutoTopupIntervalSeconds: number
   quarantineMinutes: number
 }
 
@@ -538,6 +542,12 @@ export function toSettingsForm(
       settings.qualityRetryIsolationEnabled ?? false,
     qualityRetryIsolationIntervalSeconds:
       settings.qualityRetryIsolationIntervalSeconds ?? 60,
+    paidKeyAutoTopupEnabled: settings.paidKeyAutoTopupEnabled ?? true,
+    paidKeyAutoTopupThresholdPercent:
+      settings.paidKeyAutoTopupThresholdPercent ?? 30,
+    paidKeyAutoTopupAmountUsd: settings.paidKeyAutoTopupAmountUsd ?? 100,
+    paidKeyAutoTopupIntervalSeconds:
+      settings.paidKeyAutoTopupIntervalSeconds ?? 60,
     quarantineMinutes: settings.quarantineMinutes,
   }
 }
@@ -657,6 +667,10 @@ export function buildSettingsPayload(
     qualityRetryIsolationEnabled: form.qualityRetryIsolationEnabled,
     qualityRetryIsolationIntervalSeconds:
       form.qualityRetryIsolationIntervalSeconds,
+    paidKeyAutoTopupEnabled: form.paidKeyAutoTopupEnabled,
+    paidKeyAutoTopupThresholdPercent: form.paidKeyAutoTopupThresholdPercent,
+    paidKeyAutoTopupAmountUsd: form.paidKeyAutoTopupAmountUsd,
+    paidKeyAutoTopupIntervalSeconds: form.paidKeyAutoTopupIntervalSeconds,
     quarantineMinutes: form.quarantineMinutes,
     clearSecrets,
   }
@@ -840,6 +854,27 @@ export function validateSettings(form: SettingsForm) {
     !form.wechatUpstreamHealthTemplateId.trim()
   ) {
     throw new Error('开启上游成功率通知前请填写对应模板 ID')
+  }
+  if (
+    !Number.isFinite(form.paidKeyAutoTopupThresholdPercent) ||
+    form.paidKeyAutoTopupThresholdPercent < 1 ||
+    form.paidKeyAutoTopupThresholdPercent > 100
+  ) {
+    throw new Error('付费密钥自动加额阈值需在 1–100% 之间')
+  }
+  if (
+    !Number.isFinite(form.paidKeyAutoTopupAmountUsd) ||
+    form.paidKeyAutoTopupAmountUsd <= 0 ||
+    form.paidKeyAutoTopupAmountUsd > 100000
+  ) {
+    throw new Error('付费密钥每次增加额度需在 0.01–100000 美元之间')
+  }
+  if (
+    !Number.isFinite(form.paidKeyAutoTopupIntervalSeconds) ||
+    form.paidKeyAutoTopupIntervalSeconds < 15 ||
+    form.paidKeyAutoTopupIntervalSeconds > 3600
+  ) {
+    throw new Error('付费密钥自动加额检查间隔需在 15–3600 秒之间')
   }
   if (form.initialProbeOnRegister && !form.registerProbeProfileIds.length) {
     throw new Error('注册后探针至少选择一个探针方案')

@@ -246,6 +246,142 @@ class ClientKeyRepository:
             session.flush()
             return model_dict(record)
 
+    def apply_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        key_id = _key_id(snapshot.get("key_id"))
+        if not key_id:
+            return None
+        stamp = now or utc_now()
+        with self.database.transaction() as session:
+            record = session.get(ClientKeyRecord, key_id)
+            if record is None:
+                record = ClientKeyRecord(
+                    key_id=key_id,
+                    created_at=stamp,
+                    paid=False,
+                    plan_type="none",
+                    recharge_cents=0,
+                    note="",
+                )
+                session.add(record)
+            _apply_snapshot_fields(record, snapshot, stamp=stamp)
+            session.flush()
+            return model_dict(record)
+
+    def list_ids(
+        self,
+        *,
+        query: str = "",
+        paid: str = "",
+        plan_type: str = "",
+        enabled: str = "",
+        upstream: str = "",
+        limit: int = 500,
+    ) -> tuple[list[str], int]:
+        filters = _list_filters(
+            query=query,
+            paid=paid,
+            plan_type=plan_type,
+            enabled=enabled,
+            upstream=upstream,
+        )
+        capped = max(1, min(int(limit or 500), 500))
+        with self.database.session() as session:
+            total = session.scalar(
+                select(func.count()).select_from(ClientKeyRecord).where(*filters)
+            )
+            values = session.scalars(
+                select(ClientKeyRecord.key_id)
+                .where(*filters)
+                .order_by(
+                    ClientKeyRecord.paid.desc(),
+                    case((ClientKeyRecord.plan_type == "none", 1), else_=0),
+                    ClientKeyRecord.plan_type.asc(),
+                    ClientKeyRecord.recharge_cents.desc(),
+                    ClientKeyRecord.updated_at.desc(),
+                    ClientKeyRecord.key_id.asc(),
+                )
+                .limit(capped)
+            ).all()
+            return [str(value) for value in values], int(total or 0)
+
+    def list_paid_present(self, *, limit: int = 10_000) -> list[dict[str, Any]]:
+        rows, _total = self.list_keys(
+            paid="paid",
+            upstream="present",
+            offset=0,
+            limit=max(1, min(int(limit or 10_000), 10_000)),
+        )
+        return rows
+
+    def set_enabled_many(self, key_ids: list[str], enabled: bool) -> int:
+        ids = [_key_id(value) for value in key_ids]
+        ids = [value for value in ids if value]
+        if not ids:
+            return 0
+        stamp = utc_now()
+        with self.database.transaction() as session:
+            result = session.execute(
+                update(ClientKeyRecord)
+                .where(ClientKeyRecord.key_id.in_(ids))
+                .values(enabled=bool(enabled), updated_at=stamp)
+            )
+            return int(result.rowcount or 0)
+
+    def delete(self, key_id: str) -> bool:
+        normalized = _key_id(key_id)
+        if not normalized:
+            return False
+        with self.database.transaction() as session:
+            record = session.get(ClientKeyRecord, normalized)
+            if record is None:
+                return False
+            session.delete(record)
+            return True
+
+    def delete_many(self, key_ids: list[str]) -> int:
+        ids = [_key_id(value) for value in key_ids]
+        ids = [value for value in ids if value]
+        if not ids:
+            return 0
+        deleted = 0
+        with self.database.transaction() as session:
+            records = session.scalars(
+                select(ClientKeyRecord).where(ClientKeyRecord.key_id.in_(ids))
+            ).all()
+            for record in records:
+                session.delete(record)
+                deleted += 1
+        return deleted
+
+
+def _apply_snapshot_fields(
+    record: ClientKeyRecord, snapshot: dict[str, Any], *, stamp: datetime
+) -> None:
+    record.name = str(snapshot.get("name") or "")[:160]
+    record.scheme = str(snapshot.get("scheme") or "sk")[:16]
+    record.prefix = str(snapshot.get("prefix") or "")[:64]
+    record.enabled = bool(snapshot.get("enabled", True))
+    record.expires_at = snapshot.get("expires_at")
+    record.rpm_limit = int(snapshot.get("rpm_limit") or 0)
+    record.max_concurrent = int(snapshot.get("max_concurrent") or 0)
+    record.billing_limit_usd_ticks = int(
+        snapshot.get("billing_limit_usd_ticks") or 0
+    )
+    record.billed_usage_usd_ticks = int(
+        snapshot.get("billed_usage_usd_ticks") or 0
+    )
+    record.last_used_at = snapshot.get("last_used_at")
+    if snapshot.get("upstream_created_at") is not None:
+        record.upstream_created_at = snapshot.get("upstream_created_at")
+    record.last_synced_at = stamp
+    record.upstream_missing = False
+    record.updated_at = stamp
+
 
 def _list_filters(
     *,

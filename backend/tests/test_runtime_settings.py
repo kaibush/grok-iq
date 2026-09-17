@@ -312,6 +312,44 @@ def test_quality_retry_isolation_setting_is_persisted_and_exposed(tmp_path: Path
     assert reloaded_settings.quality_retry_isolation_interval_seconds == 45
 
 
+def test_paid_key_auto_topup_setting_is_persisted_and_exposed(tmp_path: Path):
+    database, settings, service = build_service(tmp_path)
+
+    changed = service.update({
+        "paid_key_auto_topup_enabled": False,
+        "paid_key_auto_topup_threshold_percent": 25,
+        "paid_key_auto_topup_amount_usd": 80,
+        "paid_key_auto_topup_interval_seconds": 120,
+    })
+
+    assert changed == [
+        "paid_key_auto_topup_amount_usd",
+        "paid_key_auto_topup_enabled",
+        "paid_key_auto_topup_interval_seconds",
+        "paid_key_auto_topup_threshold_percent",
+    ]
+    assert settings.paid_key_auto_topup_enabled is False
+    assert settings.paid_key_auto_topup_threshold_percent == 25
+    assert settings.paid_key_auto_topup_amount_usd == 80
+    assert settings.paid_key_auto_topup_interval_seconds == 120
+    public = service.public_view()
+    assert public["paidKeyAutoTopupEnabled"] is False
+    assert public["paidKeyAutoTopupThresholdPercent"] == 25
+    assert public["paidKeyAutoTopupAmountUsd"] == 80
+    assert public["paidKeyAutoTopupIntervalSeconds"] == 120
+
+    reloaded_settings = Settings(database_path=tmp_path / "grokiq.db")
+    reloaded = RuntimeSettingsService(
+        reloaded_settings,
+        SettingsRepository(database, reloaded_settings),
+    )
+    reloaded.load()
+    assert reloaded_settings.paid_key_auto_topup_enabled is False
+    assert reloaded_settings.paid_key_auto_topup_threshold_percent == 25
+    assert reloaded_settings.paid_key_auto_topup_amount_usd == 80
+    assert reloaded_settings.paid_key_auto_topup_interval_seconds == 120
+
+
 def test_should_auto_isolate_matches_min_status_and_more_severe():
     assert should_auto_isolate("high_risk", enabled=False, min_status="watch") is False
     assert should_auto_isolate("watch", enabled=True, min_status="high_risk") is False

@@ -29,6 +29,7 @@ from app.services.account_service import AccountService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.client_key_service import ClientKeyService
+from app.services.client_key_topup_service import ClientKeyTopupService
 from app.services.egress_service import EgressService
 from app.services.linuxdo_oauth_service import LinuxDoOAuthService
 from app.services.page_visit_service import PageVisitService
@@ -141,6 +142,10 @@ client_key_service = ClientKeyService(
     grok_client,
     client_key_repository,
 )
+client_key_topup_service = ClientKeyTopupService(
+    settings=settings,
+    client_keys=client_key_service,
+)
 page_visit_service = PageVisitService(
     page_visit_repository,
     auth_service=auth_service,
@@ -159,6 +164,7 @@ scheduler_service = SchedulerService(
     recovery_callback=account_service.recover_due_quarantines,
     request_audit_callback=request_audit_service.scan_scheduled,
     quality_retry_callback=quality_retry_isolation_service.scan,
+    paid_key_topup_callback=client_key_topup_service.run,
 )
 register_integration_service = RegisterIntegrationService(
     settings=settings,

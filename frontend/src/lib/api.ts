@@ -386,6 +386,7 @@ export type ManagedClientKey = {
   billingLimitUsd: number
   billedUsageUsd: number
   remainingUsd: number
+  remainingPercent: number
   lastUsedAt: string | null
   upstreamCreatedAt: string | null
   lastSyncedAt: string | null
@@ -426,6 +427,108 @@ export type ClientKeySyncResult = {
   skippedProbeKeys: number
   skippedSystemKeys: number
   syncedAt: string | null
+}
+
+export type ManagedClientKeyUsagePeriod =
+  | '1h'
+  | '6h'
+  | '24h'
+  | '7d'
+  | '30d'
+  | '90d'
+  | 'custom'
+
+export type ManagedClientKeyUsageMetrics = {
+  requests: number
+  successfulRequests: number
+  failedRequests: number
+  streamingRequests: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  totalTokens: number
+  durationMs: number
+  billedCostUsdTicks: number
+  estimatedCostUsdTicks: number
+  pricedRequests: number
+  unpricedRequests: number
+  firstTokenSamples: number
+  averageFirstTokenMs: number
+  averageDurationMs: number
+  successRate: number
+  cacheHitRate: number
+}
+
+export type ManagedClientKeyUsageRow = ManagedClientKeyUsageMetrics & {
+  id: string
+  name: string
+  scheme: string
+  prefix: string
+  enabled: boolean
+  expiresAt?: string
+  rpmLimit: number
+  maxConcurrent: number
+  billingLimitUsdTicks: number
+  billedUsageUsdTicks: number
+  quotaRemainingUsdTicks: number
+  lastUsedAt?: string
+  peakRpm: number
+  lastRequestAt?: string
+}
+
+export type ManagedClientKeyUsageBreakdown = {
+  name: string
+  requests: number
+  successfulRequests: number
+  tokens: number
+  billedCostUsdTicks: number
+}
+
+export type ManagedClientKeyUsageError = {
+  code: string
+  requests: number
+}
+
+export type ManagedClientKeyUsageSummary = {
+  period: ManagedClientKeyUsagePeriod
+  start: string
+  end: string
+  selected: number
+  missing: number
+  total: ManagedClientKeyUsageMetrics
+  keys: ManagedClientKeyUsageRow[]
+  models: ManagedClientKeyUsageBreakdown[]
+  providers: ManagedClientKeyUsageBreakdown[]
+  errors: ManagedClientKeyUsageError[]
+}
+
+export type ClientKeyIdsResult = {
+  ids: string[]
+  total: number
+  truncated: boolean
+}
+
+export type ClientKeyAutoTopupItem = {
+  id: string
+  name: string
+  remainingPercent: number
+  addedUsd: number
+  error?: string
+}
+
+export type ClientKeyAutoTopupResult = {
+  ok?: boolean
+  scanned: number
+  eligible: number
+  toppedUp: number
+  skipped: number | boolean
+  failed: number
+  thresholdPercent: number
+  amountUsd: number
+  items: ClientKeyAutoTopupItem[]
+  error?: string
+  syncError?: string
 }
 
 export type PublicVisitIpStat = {
@@ -2214,6 +2317,10 @@ export type RuntimeSettings = {
   autoIsolationMinStatus: AutoIsolationMinStatus
   qualityRetryIsolationEnabled: boolean
   qualityRetryIsolationIntervalSeconds: number
+  paidKeyAutoTopupEnabled: boolean
+  paidKeyAutoTopupThresholdPercent: number
+  paidKeyAutoTopupAmountUsd: number
+  paidKeyAutoTopupIntervalSeconds: number
   quarantineMinutes: number
   bootstrap: {
     host: string
@@ -2348,6 +2455,10 @@ export type RuntimeSettingsUpdate = Partial<
     | 'autoIsolationMinStatus'
     | 'qualityRetryIsolationEnabled'
     | 'qualityRetryIsolationIntervalSeconds'
+    | 'paidKeyAutoTopupEnabled'
+    | 'paidKeyAutoTopupThresholdPercent'
+    | 'paidKeyAutoTopupAmountUsd'
+    | 'paidKeyAutoTopupIntervalSeconds'
     | 'quarantineMinutes'
   >
 > & {
@@ -2403,6 +2514,10 @@ type RuntimeSettingsWire = Omit<
   | 'autoIsolationMinStatus'
   | 'qualityRetryIsolationEnabled'
   | 'qualityRetryIsolationIntervalSeconds'
+  | 'paidKeyAutoTopupEnabled'
+  | 'paidKeyAutoTopupThresholdPercent'
+  | 'paidKeyAutoTopupAmountUsd'
+  | 'paidKeyAutoTopupIntervalSeconds'
   | 'requestAuditEnabled'
   | 'requestAuditAutoScanEnabled'
   | 'requestAuditAdaptiveScanEnabled'
@@ -2470,6 +2585,10 @@ type RuntimeSettingsWire = Omit<
   autoIsolationMinStatus?: AutoIsolationMinStatus
   qualityRetryIsolationEnabled?: boolean
   qualityRetryIsolationIntervalSeconds?: number
+  paidKeyAutoTopupEnabled?: boolean
+  paidKeyAutoTopupThresholdPercent?: number
+  paidKeyAutoTopupAmountUsd?: number
+  paidKeyAutoTopupIntervalSeconds?: number
   requestAuditEnabled?: boolean
   requestAuditAutoScanEnabled?: boolean
   requestAuditAdaptiveScanEnabled?: boolean
@@ -2631,6 +2750,12 @@ function normalizeRuntimeSettings(value: RuntimeSettingsWire): RuntimeSettings {
     qualityRetryIsolationEnabled: value.qualityRetryIsolationEnabled ?? false,
     qualityRetryIsolationIntervalSeconds:
       value.qualityRetryIsolationIntervalSeconds ?? 60,
+    paidKeyAutoTopupEnabled: value.paidKeyAutoTopupEnabled ?? true,
+    paidKeyAutoTopupThresholdPercent:
+      value.paidKeyAutoTopupThresholdPercent ?? 30,
+    paidKeyAutoTopupAmountUsd: value.paidKeyAutoTopupAmountUsd ?? 100,
+    paidKeyAutoTopupIntervalSeconds:
+      value.paidKeyAutoTopupIntervalSeconds ?? 60,
     scheduledProbeRegisterCooldownMinutes:
       value.scheduledProbeRegisterCooldownMinutes ?? 360,
     requestAuditEnabled: value.requestAuditEnabled ?? true,
@@ -2979,6 +3104,7 @@ export type SchedulerResponse = {
   enabled: boolean
   plansEnabled?: boolean
   systemRecoveryEnabled?: boolean
+  paidKeyAutoTopupEnabled?: boolean
   running: boolean
   plans: ProbePlan[]
   systemJobs: SchedulerJob[]
@@ -3773,12 +3899,67 @@ export const api = {
       planType?: ClientKeyPlanType
       rechargeYuan?: number | string
       note?: string
+      name?: string
+      enabled?: boolean
+      expiresAt?: string | null
+      rpmLimit?: number
+      maxConcurrent?: number
+      billingLimitUsd?: number
     }
   ) =>
     request<ManagedClientKey>(`/client-keys/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  batchUpdateClientKeysEnabled: (ids: string[], enabled: boolean) =>
+    request<{ updated: number }>('/client-keys/batch', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids, enabled }),
+    }),
+  deleteClientKey: (id: string) =>
+    request<{ deleted: true }>(`/client-keys/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  deleteClientKeys: (ids: string[]) =>
+    request<{ deleted: number }>('/client-keys', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids }),
+    }),
+  getClientKeySecret: (id: string) =>
+    request<{ secret: string }>(
+      `/client-keys/${encodeURIComponent(id)}/secret`,
+      { cache: 'no-store' }
+    ),
+  clientKeyUsageSummary: (body: {
+    ids: string[]
+    period: ManagedClientKeyUsagePeriod
+    start?: string
+    end?: string
+  }) =>
+    request<ManagedClientKeyUsageSummary>('/client-keys/usage-summary', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  runClientKeyAutoTopup: () =>
+    request<ClientKeyAutoTopupResult>('/client-keys/auto-topup/run', {
+      method: 'POST',
+    }),
+  clientKeyIds: (params?: {
+    q?: string
+    paid?: string
+    planType?: string
+    enabled?: string
+    upstream?: string
+  }) =>
+    request<ClientKeyIdsResult>(
+      `/client-keys/ids${query({
+        q: params?.q,
+        paid: params?.paid,
+        planType: params?.planType,
+        enabled: params?.enabled,
+        upstream: params?.upstream,
+      })}`
+    ),
   statusInviteCodes: (params?: {
     q?: string
     page?: number

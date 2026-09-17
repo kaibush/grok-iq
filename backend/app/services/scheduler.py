@@ -18,6 +18,7 @@ from .probe_manager import ProbeManager
 
 RequestAuditCallback = Callable[[], Awaitable[dict[str, Any]]]
 QualityRetryCallback = Callable[[], Awaitable[dict[str, Any]]]
+PaidKeyTopupCallback = Callable[[], Awaitable[dict[str, Any]]]
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +32,7 @@ class SchedulerService:
         recovery_callback: Callable[[], Awaitable[dict[str, Any]]],
         request_audit_callback: RequestAuditCallback | None = None,
         quality_retry_callback: QualityRetryCallback | None = None,
+        paid_key_topup_callback: PaidKeyTopupCallback | None = None,
     ):
         self.settings = settings
         self.repository = repository
@@ -38,6 +40,7 @@ class SchedulerService:
         self.recovery_callback = recovery_callback
         self.request_audit_callback = request_audit_callback
         self.quality_retry_callback = quality_retry_callback
+        self.paid_key_topup_callback = paid_key_topup_callback
         self.scheduler = AsyncIOScheduler(timezone=settings.scheduler_timezone)
 
     async def start(self) -> None:
@@ -96,6 +99,8 @@ class SchedulerService:
             self._schedule_request_audit(5)
         if self._quality_retry_schedule_enabled():
             self._schedule_quality_retry(5)
+        if self._paid_key_topup_schedule_enabled():
+            self._schedule_paid_key_topup(5)
 
     def _request_audit_schedule_enabled(self) -> bool:
         return bool(
@@ -111,10 +116,22 @@ class SchedulerService:
             and self.quality_retry_callback is not None
         )
 
+    def _paid_key_topup_schedule_enabled(self) -> bool:
+        return bool(
+            self.settings.paid_key_auto_topup_enabled
+            and self.paid_key_topup_callback is not None
+        )
+
     def _quality_retry_delay(self) -> int:
         return max(
             15,
             min(int(self.settings.quality_retry_isolation_interval_seconds), 600),
+        )
+
+    def _paid_key_topup_delay(self) -> int:
+        return max(
+            15,
+            min(int(self.settings.paid_key_auto_topup_interval_seconds), 3600),
         )
 
     def _schedule_request_audit(self, delay_seconds: int) -> None:
@@ -147,6 +164,24 @@ class SchedulerService:
             ),
             id="system:quality-retry-isolation",
             name="grok2api 降智停用同步",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=self.settings.scheduler_misfire_grace_seconds,
+        )
+
+    def _schedule_paid_key_topup(self, delay_seconds: int) -> None:
+        if not self.scheduler.running or not self._paid_key_topup_schedule_enabled():
+            return
+        delay = max(5, min(int(delay_seconds), 24 * 60 * 60))
+        self.scheduler.add_job(
+            self._run_paid_key_topup,
+            DateTrigger(
+                run_date=utc_now() + timedelta(seconds=delay),
+                timezone=ZoneInfo(self.settings.scheduler_timezone),
+            ),
+            id="system:paid-key-auto-topup",
+            name="付费密钥自动加额",
             replace_existing=True,
             coalesce=True,
             max_instances=1,
@@ -366,6 +401,63 @@ class SchedulerService:
         finally:
             self._schedule_quality_retry(self._quality_retry_delay())
 
+    async def run_paid_key_topup_now(self) -> dict[str, Any]:
+        return await self._execute_paid_key_topup(reschedule=False)
+
+    async def _run_paid_key_topup(self) -> None:
+        await self._execute_paid_key_topup(reschedule=True)
+
+    async def _execute_paid_key_topup(self, *, reschedule: bool) -> dict[str, Any]:
+        if self.paid_key_topup_callback is None:
+            raise ValueError("付费密钥自动加额未配置")
+        execution_id = self.repository.start_schedule_execution(
+            "system:paid-key-auto-topup"
+        )
+        result: dict[str, Any] = {}
+        try:
+            result = await self.paid_key_topup_callback()
+            if result.get("skipped") is True:
+                status = "skipped"
+                message = str(result.get("error") or "付费密钥自动加额已跳过")
+            elif bool(result.get("ok", True)):
+                status = "succeeded"
+                topped = int(result.get("toppedUp") or 0)
+                scanned = int(result.get("scanned") or 0)
+                failed = int(result.get("failed") or 0)
+                message = f"加额 {topped} 个，扫描 {scanned}，失败 {failed}"
+            else:
+                status = "failed"
+                message = str(result.get("error") or "付费密钥自动加额失败")
+            self.repository.finish_schedule_execution(
+                execution_id,
+                status=status,
+                message=message,
+                detail=result,
+            )
+            return result
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "skipped": False,
+                "error": str(exc),
+                "scanned": 0,
+                "eligible": 0,
+                "toppedUp": 0,
+                "failed": 0,
+                "items": [],
+            }
+            self.repository.finish_schedule_execution(
+                execution_id,
+                status="failed",
+                message=str(exc),
+                detail=result,
+            )
+            logger.exception("paid key auto topup failed")
+            return result
+        finally:
+            if reschedule:
+                self._schedule_paid_key_topup(self._paid_key_topup_delay())
+
     def status(self) -> dict[str, Any]:
         jobs = {
             job.id: {
@@ -385,6 +477,7 @@ class SchedulerService:
             "qualityRetryIsolationEnabled": (
                 self.settings.quality_retry_isolation_enabled
             ),
+            "paidKeyAutoTopupEnabled": self.settings.paid_key_auto_topup_enabled,
             "running": self.scheduler.running,
             "plans": plans,
             "systemJobs": [value for key, value in jobs.items() if key.startswith("system:")],

@@ -1102,6 +1102,66 @@ class Grok2APIClient:
             raise IntegrationError("读取 Client Key secret 后响应缺少 secret")
         return secret
 
+    async def update_client_key(self, key_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not key_id:
+            raise IntegrationError("Client Key ID 无效")
+        result = await self.admin_request(
+            "PATCH",
+            f"/api/admin/v1/client-keys/{key_id}",
+            json=payload,
+        )
+        if not isinstance(result, dict):
+            raise IntegrationError("更新 Client Key 后响应无效")
+        return result
+
+    async def set_client_keys_enabled(
+        self, key_ids: list[str], enabled: bool
+    ) -> dict[str, Any]:
+        result = await self.admin_request(
+            "PATCH",
+            "/api/admin/v1/client-keys/batch",
+            json={"ids": [str(key_id) for key_id in key_ids if key_id], "enabled": bool(enabled)},
+        )
+        if not isinstance(result, dict):
+            return {"updated": 0}
+        return result
+
+    async def delete_client_key(self, key_id: str) -> None:
+        if key_id:
+            await self.admin_request("DELETE", f"/api/admin/v1/client-keys/{key_id}")
+
+    async def delete_client_keys(self, key_ids: list[str]) -> dict[str, Any]:
+        result = await self.admin_request(
+            "DELETE",
+            "/api/admin/v1/client-keys",
+            json={"ids": [str(key_id) for key_id in key_ids if key_id]},
+        )
+        if not isinstance(result, dict):
+            return {"deleted": 0}
+        return result
+
+    async def client_key_usage_summary(
+        self,
+        *,
+        ids: list[str],
+        period: str,
+        start: str = "",
+        end: str = "",
+    ) -> dict[str, Any]:
+        result = await self.admin_request(
+            "POST",
+            "/api/admin/v1/client-keys/usage-summary",
+            json={
+                "ids": [str(key_id) for key_id in ids if key_id],
+                "period": period,
+                "start": start,
+                "end": end,
+            },
+        )
+        if not isinstance(result, dict):
+            raise IntegrationError("读取 Client Key 用量后响应无效")
+        return result
+
     async def create_probe_client_key(self, route_id: str) -> tuple[str, str]:
         payload = await self.admin_request(
             "POST",

@@ -796,6 +796,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCooldownIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/client-keys/': {
+      id: '/_authenticated/client-keys/'
+      path: '/client-keys'
+      fullPath: '/client-keys/'
+      preLoaderRoute: typeof AuthenticatedClientKeysIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/accounts/': {
       id: '/_authenticated/accounts/'
       path: '/accounts'

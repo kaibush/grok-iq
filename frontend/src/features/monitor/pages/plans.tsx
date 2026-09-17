@@ -591,6 +591,11 @@ export function PlansPage() {
               settings.data?.quarantineRecoveryEnabled ??
               false
             }
+            paidKeyAutoTopupEnabled={
+              scheduler.data?.paidKeyAutoTopupEnabled ??
+              settings.data?.paidKeyAutoTopupEnabled ??
+              true
+            }
             jobs={systemJobs}
             disabled={saveSchedulerMutation.isPending}
             onChange={setSchedulerForm}
@@ -730,6 +735,7 @@ function SystemCronPanel({
   running,
   plansEnabled,
   systemRecoveryEnabled,
+  paidKeyAutoTopupEnabled,
   jobs,
   disabled,
   onChange,
@@ -740,6 +746,7 @@ function SystemCronPanel({
   running: boolean
   plansEnabled: boolean
   systemRecoveryEnabled: boolean
+  paidKeyAutoTopupEnabled: boolean
   jobs: SchedulerJob[]
   disabled: boolean
   onChange: (value: SchedulerSettingsForm) => void
@@ -777,7 +784,7 @@ function SystemCronPanel({
         }
         contentClassName='space-y-3'
       >
-        <div className='grid gap-2 sm:grid-cols-3'>
+        <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
           <Info
             label='周期计划'
             value={<EnabledBadge enabled={plansEnabled} />}
@@ -786,6 +793,10 @@ function SystemCronPanel({
           <Info
             label='隔离恢复'
             value={<EnabledBadge enabled={systemRecoveryEnabled} />}
+          />
+          <Info
+            label='自动加额'
+            value={<EnabledBadge enabled={paidKeyAutoTopupEnabled} />}
           />
         </div>
         <div className='overflow-hidden rounded-lg border'>
@@ -808,9 +819,7 @@ function SystemCronPanel({
             ))
           ) : (
             <div className='px-3 py-3 text-sm text-muted-foreground'>
-              {systemRecoveryEnabled
-                ? '隔离恢复检查尚未注册，请刷新状态或检查调度器运行情况。'
-                : '隔离恢复检查已暂停，当前没有系统 Cron Job。'}
+              当前没有已注册的系统任务。隔离恢复、降智停用同步或付费密钥自动加额关闭后不会出现在这里。
             </div>
           )}
         </div>
@@ -1732,6 +1741,7 @@ function scheduleName(scheduleKey: string) {
   if (scheduleKey === 'system:missing-thinking-cooldown')
     return 'grok2api 降智冷却同步'
   if (scheduleKey === 'system:request-audit-scan') return '请求审计风险扫描'
+  if (scheduleKey === 'system:paid-key-auto-topup') return '付费密钥自动加额'
   if (scheduleKey.startsWith('plan:')) return '已删除的计划'
   return scheduleKey
 }
@@ -1743,14 +1753,20 @@ function executionDetailSummary(detail: Record<string, unknown>) {
     resolvedAccountCount: '命中账号',
     restored: '恢复账号',
     guarded: '保护账号',
+    scanned: '扫描',
+    eligible: '符合条件',
+    toppedUp: '已加额',
   }
   const values = Object.entries(labels).flatMap(([key, label]) => {
     const value = detail[key]
     return typeof value === 'number' ? [`${label} ${value}`] : []
   })
   const failed = detail.failed
-  if (Array.isArray(failed) && failed.length)
+  if (Array.isArray(failed) && failed.length) {
     values.push(`失败 ${failed.length}`)
+  } else if (typeof failed === 'number') {
+    values.push(`失败 ${failed}`)
+  }
   return values.join(' · ') || '无附加明细'
 }
 

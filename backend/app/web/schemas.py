@@ -82,6 +82,30 @@ class ClientKeyUpdateInput(BaseModel):
         default=None, alias="rechargeYuan"
     )
     note: str | None = Field(default=None, max_length=500)
+    name: str | None = Field(default=None, max_length=160)
+    enabled: bool | None = None
+    expires_at: str | None = Field(default=None, alias="expiresAt")
+    rpm_limit: int | None = Field(
+        default=None, alias="rpmLimit", ge=0, le=100000
+    )
+    max_concurrent: int | None = Field(
+        default=None, alias="maxConcurrent", ge=0, le=1024
+    )
+    billing_limit_usd: float | None = Field(
+        default=None, alias="billingLimitUsd", ge=0, le=900_000
+    )
+
+
+class ClientKeyBatchEnabledInput(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    enabled: bool
+
+
+class ClientKeyUsageSummaryInput(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    period: Literal["1h", "6h", "24h", "7d", "30d", "90d", "custom"] = "24h"
+    start: str = ""
+    end: str = ""
 
 
 class ChatProviderCreateInput(BaseModel):
@@ -732,6 +756,27 @@ class RuntimeSettingsInput(BaseModel):
         alias="qualityRetryIsolationIntervalSeconds",
         ge=15,
         le=600,
+    )
+    paid_key_auto_topup_enabled: bool | None = Field(
+        default=None, alias="paidKeyAutoTopupEnabled"
+    )
+    paid_key_auto_topup_threshold_percent: float | None = Field(
+        default=None,
+        alias="paidKeyAutoTopupThresholdPercent",
+        ge=1,
+        le=100,
+    )
+    paid_key_auto_topup_amount_usd: float | None = Field(
+        default=None,
+        alias="paidKeyAutoTopupAmountUsd",
+        gt=0,
+        le=100000,
+    )
+    paid_key_auto_topup_interval_seconds: int | None = Field(
+        default=None,
+        alias="paidKeyAutoTopupIntervalSeconds",
+        ge=15,
+        le=3600,
     )
     quarantine_minutes: int | None = Field(default=None, alias="quarantineMinutes", ge=1, le=7 * 24 * 60)
     clear_secrets: list[SecretSettingName] = Field(default_factory=list, alias="clearSecrets")

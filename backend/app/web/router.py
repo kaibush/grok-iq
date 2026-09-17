@@ -145,7 +145,9 @@ def build_router(
     if status_accounts is not None:
         protected.include_router(build_status_accounts_router(status_accounts))
     if client_keys is not None:
-        protected.include_router(build_client_keys_router(client_keys))
+        protected.include_router(
+            build_client_keys_router(client_keys, scheduler=scheduler)
+        )
     protected.include_router(build_sso_reports_router(sso_reports))
     protected.include_router(build_register_events_router(register_integration))
     protected.include_router(build_system_router(updates))

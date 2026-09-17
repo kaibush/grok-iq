@@ -363,6 +363,14 @@ class RuntimeSettingsService:
             "qualityRetryIsolationIntervalSeconds": (
                 s.quality_retry_isolation_interval_seconds
             ),
+            "paidKeyAutoTopupEnabled": s.paid_key_auto_topup_enabled,
+            "paidKeyAutoTopupThresholdPercent": (
+                s.paid_key_auto_topup_threshold_percent
+            ),
+            "paidKeyAutoTopupAmountUsd": s.paid_key_auto_topup_amount_usd,
+            "paidKeyAutoTopupIntervalSeconds": (
+                s.paid_key_auto_topup_interval_seconds
+            ),
             "quarantineMinutes": s.quarantine_minutes,
             "bootstrap": {
                 "host": s.host,
