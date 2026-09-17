@@ -858,7 +858,7 @@ def test_wechat_metric_alert_settings_require_templates_and_reject_unlabeled_key
     tmp_path: Path,
 ):
     _, _, service = build_service(tmp_path)
-    with pytest.raises(ValueError, match="密钥正常率模板"):
+    with pytest.raises(ValueError, match="密钥正常率通知"):
         service.update(
             {
                 "wechat_notification_enabled": True,
@@ -870,7 +870,7 @@ def test_wechat_metric_alert_settings_require_templates_and_reject_unlabeled_key
             }
         )
 
-    with pytest.raises(ValueError, match="上游成功率模板"):
+    with pytest.raises(ValueError, match="上游成功率通知"):
         service.update(
             {
                 "wechat_notification_enabled": True,

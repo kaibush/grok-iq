@@ -429,7 +429,11 @@ def build_missing_thinking_cooldown_item(
         account_id=account_id,
         status=normalized_status,
         verification=verification,
-        cooldown_count=int(cooldown_count) if cooldown_count is not None else max(degrade_hits, failure_count, 1),
+        cooldown_count=(
+            int(cooldown_count)
+            if cooldown_count is not None
+            else max(degrade_hits, failure_count, 1)
+        ),
         upstream=account,
         missing_upstream=False,
         quarantined=quarantined,

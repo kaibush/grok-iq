@@ -113,7 +113,9 @@ class PageVisitService:
                 "linuxdo_user_id": None if linuxdo_user is None else int(linuxdo_user["id"]),
                 "linuxdo_username": "" if linuxdo_user is None else str(linuxdo_user.get("username") or ""),
                 "linuxdo_name": "" if linuxdo_user is None else str(linuxdo_user.get("name") or ""),
-                "linuxdo_avatar_url": "" if linuxdo_user is None else str(linuxdo_user.get("avatar_url") or ""),
+                "linuxdo_avatar_url": (
+                    "" if linuxdo_user is None else str(linuxdo_user.get("avatar_url") or "")
+                ),
                 "linuxdo_trust_level": None if linuxdo_user is None else linuxdo_user.get("trust_level"),
                 "status_account_id": None if status_account is None else int(status_account["id"]),
                 "status_account_username": ""

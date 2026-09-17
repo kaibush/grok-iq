@@ -25,8 +25,8 @@ from app.analyzer import (
 )
 from app.core.clock import APP_TIMEZONE, app_now, ensure_utc, to_app_timezone, utc_now
 from app.core.config import Settings
-from app.core.probe_resources import is_probe_resource
 from app.core.disposition import public_disposition
+from app.core.probe_resources import is_probe_resource
 from app.integrations.grok2api.client import Grok2APIClient
 from app.persistence.account_repository import AccountRepository
 from app.persistence.probe_repository import ProbeRepository

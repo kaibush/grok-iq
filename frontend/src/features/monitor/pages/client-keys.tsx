@@ -158,16 +158,19 @@ export function ClientKeysPage() {
   const [deleting, setDeleting] = useState<ManagedClientKey | null>(null)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
 
-  const listParams = {
-    q: appliedQuery,
-    paid: paid === 'all' ? '' : paid,
-    planType: planType === 'all' ? '' : planType,
-    enabled: enabled === 'all' ? '' : enabled,
-    upstream: upstream === 'all' ? '' : upstream,
-  }
+  const listParams = useMemo(
+    () => ({
+      q: appliedQuery,
+      paid: paid === 'all' ? '' : paid,
+      planType: planType === 'all' ? '' : planType,
+      enabled: enabled === 'all' ? '' : enabled,
+      upstream: upstream === 'all' ? '' : upstream,
+    }),
+    [appliedQuery, enabled, paid, planType, upstream]
+  )
 
   const keysQuery = useQuery({
-    queryKey: ['client-keys', appliedQuery, paid, planType, enabled, upstream, page, pageSize],
+    queryKey: ['client-keys', listParams, page, pageSize],
     queryFn: () =>
       api.clientKeys({
         ...listParams,

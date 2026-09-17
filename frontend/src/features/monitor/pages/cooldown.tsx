@@ -431,7 +431,9 @@ export function CooldownPage() {
   const [isolateIds, setIsolateIds] = useState<number[]>([])
   const [unstageOpen, setUnstageOpen] = useState(false)
   const [unstageIds, setUnstageIds] = useState<number[]>([])
-  const selectedAccountsRef = useRef(new Map<number, CooldownAccount>())
+  const [selectedAccounts, setSelectedAccounts] = useState(
+    () => new Map<number, CooldownAccount>()
+  )
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [upstreamAccount, setUpstreamAccount] =
     useState<CooldownAccount | null>(null)
@@ -562,7 +564,7 @@ export function CooldownPage() {
     }
     if (appliedFilterKeyRef.current === tableFilterKey) return
     appliedFilterKeyRef.current = tableFilterKey
-    selectedAccountsRef.current.clear()
+    setSelectedAccounts((current) => (current.size === 0 ? current : new Map()))
     setSelected((current) => (current.length === 0 ? current : []))
     setSelectedDisabled((current) => (current.length === 0 ? current : []))
     setSelectedReleasable((current) => (current.length === 0 ? current : []))
@@ -781,7 +783,7 @@ export function CooldownPage() {
   const stageableSelected = grokSource
     ? selected.filter((id) => {
         const account =
-          selectedAccountsRef.current.get(id) ??
+          selectedAccounts.get(id) ??
           accounts.find((item) => item.id === id)
         return account ? canStageCooldownAccount(account) : false
       })
@@ -815,15 +817,18 @@ export function CooldownPage() {
     .join(' · ')
 
   const rememberSelectedAccounts = (items: CooldownAccount[], checked: boolean) => {
-    const next = selectedAccountsRef.current
-    for (const item of items) {
-      if (checked) next.set(item.id, item)
-      else next.delete(item.id)
-    }
+    setSelectedAccounts((current) => {
+      const next = new Map(current)
+      for (const item of items) {
+        if (checked) next.set(item.id, item)
+        else next.delete(item.id)
+      }
+      return next
+    })
   }
 
   const clearSelection = () => {
-    selectedAccountsRef.current.clear()
+    setSelectedAccounts(new Map())
     setSelected([])
     setSelectedDisabled([])
     setSelectedReleasable([])
@@ -1052,7 +1057,7 @@ export function CooldownPage() {
     const payloads = uniqueIds(selected)
       .map(
         (id) =>
-          selectedAccountsRef.current.get(id) ??
+          selectedAccounts.get(id) ??
           accounts.find((item) => item.id === id)
       )
       .filter((item): item is CooldownAccount => Boolean(item))
