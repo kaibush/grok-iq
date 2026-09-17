@@ -115,7 +115,7 @@ class AccountService:
             ]
             start = (page - 1) * page_size
             return {
-                "items": values[start : start + page_size],
+                "items": self._with_featured_probe_runs(values[start : start + page_size]),
                 "total": len(values),
                 "page": page,
                 "pageSize": page_size,
@@ -137,28 +137,31 @@ class AccountService:
         verifications = self._latest_verifications(account_ids)
         return {
             **payload,
-            "items": [
-                self._overlay(
-                    item,
-                    assessments.get(int(item.get("id") or 0)),
-                    sso_available=int(item.get("id") or 0) in sso_account_ids,
-                    verification=verifications.get(int(item.get("id") or 0)),
-                )
-                for item in items
-            ],
+            "items": self._with_featured_probe_runs(
+                [
+                    self._overlay(
+                        item,
+                        assessments.get(int(item.get("id") or 0)),
+                        sso_available=int(item.get("id") or 0) in sso_account_ids,
+                        verification=verifications.get(int(item.get("id") or 0)),
+                    )
+                    for item in items
+                ]
+            ),
         }
 
     async def detail(self, account_id: int, limit: int = 200) -> dict[str, Any]:
         account = await self.client.get_account(account_id)
         self.accounts.clear_upstream_deleted([account_id])
         verification = self._latest_verifications([account_id]).get(account_id)
+        overlaid = self._overlay(
+            account,
+            self.accounts.get_assessment(account_id),
+            sso_available=account_id in self._account_ids_with_sso([account_id]),
+            verification=verification,
+        )
         return {
-            "account": self._overlay(
-                account,
-                self.accounts.get_assessment(account_id),
-                sso_available=account_id in self._account_ids_with_sso([account_id]),
-                verification=verification,
-            ),
+            "account": self._with_featured_probe_runs([overlaid])[0],
             "history": self.probes.account_history(account_id, limit),
         }
 
@@ -2078,6 +2081,42 @@ class AccountService:
             current = str(disposition.get("source") or "")
         return matches_disposition_source(current, source)
 
+    def _with_featured_probe_runs(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        account_ids = [int(item.get("id") or 0) for item in items]
+        if not account_ids:
+            return items
+        runs = self.probes.featured_runs_by_account_ids(account_ids)
+        active_ids = self.probes.active_account_ids(account_ids)
+        return [
+            {
+                **item,
+                "hasActiveProbeRun": int(item.get("id") or 0) in active_ids,
+                "latestProbeRun": self._compact_account_probe_run(
+                    runs.get(int(item.get("id") or 0))
+                ),
+            }
+            for item in items
+        ]
+
+    @staticmethod
+    def _compact_account_probe_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(run, dict) or not str(run.get("id") or "").strip():
+            return None
+        summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+        sample_count = _count(summary.get("sample_count"))
+        if sample_count <= 0:
+            sample_count = _count(run.get("completed_steps"))
+        return {
+            "id": str(run.get("id") or ""),
+            "status": str(run.get("status") or ""),
+            "sampleCount": sample_count,
+            "anomalyCount": _count(summary.get("anomaly_count")),
+            "createdAt": _probe_run_iso(run.get("created_at") or run.get("createdAt")),
+            "completedAt": _probe_run_iso(run.get("completed_at") or run.get("completedAt")),
+            "profileId": str(run.get("profile_id") or run.get("profileId") or ""),
+            "error": str(run.get("error") or ""),
+        }
+
     @staticmethod
     def _overlay(
         item: dict[str, Any],
@@ -2121,6 +2160,15 @@ def _count(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _probe_run_iso(value: Any) -> str | None:
+    parsed = parse_optional_datetime(value)
+    if parsed is not None:
+        return app_isoformat(parsed)
+    if value is None or value == "":
+        return None
+    return str(value)
 
 
 def _provider_counts(value: Any) -> dict[str, int]:

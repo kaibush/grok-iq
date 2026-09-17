@@ -432,6 +432,7 @@ class ProbeRunExecutor:
                 current_node_id=state.original_node_id,
             ),
         )
+        self._refresh_account_assessment(account_id)
         self.logger.warning(
             "step failed worker=%s run=%s account=%s round=%s target=%s "
             "status=%s code=%s error=%s",
@@ -527,6 +528,7 @@ class ProbeRunExecutor:
                 "created_at": utc_now(),
             },
         )
+        self._refresh_account_assessment(account_id)
         self.logger.info(
             "step completed worker=%s run=%s account=%s round=%s target=%s "
             "http=%s output_tokens=%s tps=%.2f duration_ms=%s classification=%s",
@@ -541,6 +543,20 @@ class ProbeRunExecutor:
             result.duration_ms,
             classified.name,
         )
+
+    def _refresh_account_assessment(self, account_id: int) -> None:
+        manager = self.manager
+        try:
+            manager.accounts.recalculate(
+                account_id,
+                manager.thresholds,
+                manager.settings.analysis_window_hours,
+            )
+        except Exception:
+            self.logger.exception(
+                "account assessment refresh failed account=%s",
+                account_id,
+            )
 
     async def _post_process(
         self,

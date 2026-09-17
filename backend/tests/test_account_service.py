@@ -637,6 +637,28 @@ def _isolation_service(
     return database, accounts, probe_repo, isolation_client, service
 
 
+def _add_failed_probe_run(
+    probes: ProbeRepository,
+    account_id: int,
+    *,
+    profile_id: str = "html-preview",
+) -> str:
+    probes.seed_defaults()
+    run_id = probes.create_run(
+        account_id=account_id,
+        account_name="Alpha",
+        account_email="alpha@example.test",
+        profile_id=profile_id,
+        rounds=1,
+        proxy_targets=[{"kind": "current", "id": None}],
+        trigger="manual",
+        priority=100,
+        queue_limit=20,
+    )
+    probes.finish_run(run_id, status="failed", error="account disabled")
+    return run_id
+
+
 def _add_probe_sample(probes: ProbeRepository, account_id: int) -> str:
     probes.seed_defaults()
     run_id = probes.create_run(
@@ -1534,3 +1556,116 @@ def test_isolation_stats_uses_register_events_and_current_zone(tmp_path: Path):
     assert stats["registered"]["failed"] == 1
     assert stats["registered"]["isolated"] == 2
     assert stats["registered"]["isolatedInRange"] == 1
+
+
+@pytest.mark.asyncio
+async def test_account_list_prefers_featured_probe_run_with_samples(tmp_path: Path):
+    database = Database(tmp_path / "grokiq.db")
+    database.initialize()
+    probes = ProbeRepository(database)
+    completed_id = _add_probe_sample(probes, 1)
+    failed_id = _add_failed_probe_run(probes, 1)
+    service = AccountService(
+        settings=Settings(database_path=tmp_path / "grokiq.db"),
+        client=AccountListClient(),  # type: ignore[arg-type]
+        accounts=AccountRepository(database),
+        probes=probes,
+    )
+
+    result = await service.list_accounts(page=1, page_size=50)
+    featured = result["items"][0]["latestProbeRun"]
+
+    assert failed_id != completed_id
+    assert featured["id"] == completed_id
+    assert featured["sampleCount"] == 1
+    assert featured["anomalyCount"] == 0
+    assert featured["status"] == "completed"
+    assert result["items"][0]["hasActiveProbeRun"] is False
+    assert result["items"][1]["latestProbeRun"] is None
+    database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_account_list_prefers_active_probe_run_with_samples(tmp_path: Path):
+    database = Database(tmp_path / "grokiq.db")
+    database.initialize()
+    probes = ProbeRepository(database)
+    completed_id = _add_probe_sample(probes, 1)
+    active_id = probes.create_run(
+        account_id=1,
+        account_name="Alpha",
+        account_email="alpha@example.test",
+        profile_id="quality-marker",
+        rounds=1,
+        proxy_targets=[{"kind": "current", "id": None}],
+        trigger="manual",
+        priority=100,
+        queue_limit=20,
+    )
+    probes.add_sample(
+        active_id,
+        {
+            "round_number": 1,
+            "target_key": "current",
+            "target_kind": "current",
+            "egress_node_id": None,
+            "egress_name": "",
+            "status": "done",
+            "status_code": 200,
+            "output_tokens": 10,
+            "reasoning_tokens": 0,
+            "visible_tokens": 10,
+            "chunk_count": 1,
+            "first_token_ms": 100,
+            "duration_ms": 200,
+            "generation_ms": 100,
+            "first_token_share": 0.5,
+            "tps": 50,
+            "expected_matched": True,
+            "classification": "elevated",
+            "severity": 1,
+            "error": "",
+        },
+    )
+    service = AccountService(
+        settings=Settings(database_path=tmp_path / "grokiq.db"),
+        client=AccountListClient(),  # type: ignore[arg-type]
+        accounts=AccountRepository(database),
+        probes=probes,
+    )
+
+    result = await service.list_accounts(page=1, page_size=50)
+    featured = result["items"][0]["latestProbeRun"]
+
+    assert featured["id"] == active_id
+    assert featured["id"] != completed_id
+    assert featured["status"] == "queued"
+    assert featured["sampleCount"] == 1
+    assert featured["anomalyCount"] == 1
+    assert result["items"][0]["hasActiveProbeRun"] is True
+    database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_account_list_keeps_sampled_run_when_empty_probe_is_queued(tmp_path: Path):
+    database = Database(tmp_path / "grokiq.db")
+    database.initialize()
+    probes = ProbeRepository(database)
+    completed_id = _add_probe_sample(probes, 1)
+    queued_id = _add_queued_probe_run(probes, 1)
+    service = AccountService(
+        settings=Settings(database_path=tmp_path / "grokiq.db"),
+        client=AccountListClient(),  # type: ignore[arg-type]
+        accounts=AccountRepository(database),
+        probes=probes,
+    )
+
+    result = await service.list_accounts(page=1, page_size=50)
+    featured = result["items"][0]["latestProbeRun"]
+
+    assert queued_id != completed_id
+    assert featured["id"] == completed_id
+    assert featured["sampleCount"] == 1
+    assert featured["status"] == "completed"
+    assert result["items"][0]["hasActiveProbeRun"] is True
+    database.dispose()

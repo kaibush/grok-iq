@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
+import { accountProbePeriodStats } from '@/lib/account-probe-stats'
 import {
   api,
   type AccountActionName,
@@ -331,6 +332,7 @@ function AccountProbeDetail({
 }) {
   const account = data.account
   const assessment = account.assessment
+  const periodStats = accountProbePeriodStats(account)
   const history = data.history
   const reasons: string[] = assessment.risk_reasons ?? []
   const byTarget = history.byTarget ?? []
@@ -378,7 +380,7 @@ function AccountProbeDetail({
         <Metric label='风险分' value={formatNumber(assessment.risk_score)} />
         <Metric
           label='周期样本 / 信号'
-          value={`${assessment.sample_count ?? 0} / ${assessment.anomaly_count ?? 0}`}
+          value={`${periodStats.sampleCount} / ${periodStats.anomalyCount}`}
         />
         <Metric
           label='最后样本'

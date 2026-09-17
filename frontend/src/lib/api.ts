@@ -823,6 +823,11 @@ export type CooldownProbeRunSummary = {
   profileId?: string
 }
 
+export type AccountProbeRunSummary = CooldownProbeRunSummary & {
+  sampleCount?: number
+  anomalyCount?: number
+}
+
 export type CooldownProbeStagingAccount = CooldownAccount & {
   stagedAt?: string | null
   updatedAt?: string | null
@@ -964,6 +969,8 @@ export type UpstreamAccount = {
   egressRecommendation?: EgressRecommendation | null
   quota?: UpstreamQuota
   assessment: Assessment
+  latestProbeRun?: AccountProbeRunSummary | null
+  hasActiveProbeRun?: boolean
 }
 
 export type EgressRecommendation = {

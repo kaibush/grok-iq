@@ -33,6 +33,10 @@ import {
 import { toast } from 'sonner'
 import { formatAccountSecondaryLabel } from '@/lib/account-label'
 import {
+  accountHasActiveProbeRun,
+  accountProbePeriodStats,
+} from '@/lib/account-probe-stats'
+import {
   api,
   type UpstreamAccount,
   type UpstreamQuota,
@@ -289,6 +293,10 @@ export function AccountsPage() {
         signal
       ),
     placeholderData: (previous) => previous,
+    refetchInterval: (current) => {
+      const items = current.state.data?.items ?? []
+      return items.some((item) => accountHasActiveProbeRun(item)) ? 4_000 : false
+    },
   })
   const profiles = useQuery({
     queryKey: ['profiles'],
@@ -1133,6 +1141,7 @@ export function AccountsPage() {
           setSelectedDisabled([])
           setAllFilteredSelected(false)
           void client.invalidateQueries({ queryKey: ['runs'] })
+          void client.invalidateQueries({ queryKey: ['accounts'] })
         }}
       />
       <Dialog
@@ -1566,12 +1575,13 @@ function IconStat({
 }
 
 function AccountPeriodStats({
-  assessment,
+  account,
 }: {
-  assessment: UpstreamAccount['assessment']
+  account: UpstreamAccount
 }) {
-  const samples = assessment.sample_count ?? 0
-  const anomalies = assessment.anomaly_count ?? 0
+  const assessment = account.assessment
+  const { sampleCount: samples, anomalyCount: anomalies } =
+    accountProbePeriodStats(account)
   const latestTps = assessment.latest_tps ?? 0
   const latestUpstream = assessment.latest_upstream_tps
   const overridden = tpsOverridden(latestTps, latestUpstream)
@@ -1723,7 +1733,7 @@ const AccountRow = memo(function AccountRow({
         />
       </TableCell>
       <TableCell>
-        <AccountPeriodStats assessment={assessment} />
+        <AccountPeriodStats account={account} />
       </TableCell>
       <TableCell>
         <QuotaRemainingIndicator quota={account.quota} />

@@ -195,6 +195,89 @@ class ProbeRunReader:
             ).all()
             return {int(value.account_id): model_dict(value) for value in values}
 
+    def featured_runs_by_account_ids(
+        self,
+        account_ids: Iterable[int],
+    ) -> dict[int, dict[str, Any]]:
+        """Pick the most informative probe run for account-list overlays.
+
+        Recency alone is not enough: register flows often create a completed
+        quality probe and a failed follow-up in the same second. Prefer runs
+        that already have samples, then in-progress work, then recency.
+        """
+
+        unique_ids = sorted(
+            {
+                int(account_id)
+                for account_id in account_ids
+                if int(account_id or 0) > 0
+            }
+        )
+        if not unique_ids:
+            return {}
+        sample_count = cast(
+            func.coalesce(
+                func.json_extract(ProbeRun.summary, "$.sample_count"),
+                ProbeRun.completed_steps,
+                0,
+            ),
+            Integer,
+        )
+        has_samples = case((sample_count > 0, 0), else_=1)
+        active_rank = case(
+            (ProbeRun.status.in_(tuple(self.active_statuses)), 0),
+            else_=1,
+        )
+        ranked = (
+            select(
+                ProbeRun.id,
+                func.row_number()
+                .over(
+                    partition_by=ProbeRun.account_id,
+                    order_by=(
+                        has_samples.asc(),
+                        active_rank.asc(),
+                        sample_count.desc(),
+                        ProbeRun.created_at.desc(),
+                        ProbeRun.id.desc(),
+                    ),
+                )
+                .label("rn"),
+            )
+            .where(ProbeRun.account_id.in_(unique_ids))
+            .subquery()
+        )
+        with self.database.session() as session:
+            values = session.scalars(
+                select(ProbeRun)
+                .join(ranked, ProbeRun.id == ranked.c.id)
+                .where(ranked.c.rn == 1)
+            ).all()
+            return {int(value.account_id): model_dict(value) for value in values}
+
+    def active_account_ids(self, account_ids: Iterable[int]) -> set[int]:
+        unique_ids = sorted(
+            {
+                int(account_id)
+                for account_id in account_ids
+                if int(account_id or 0) > 0
+            }
+        )
+        if not unique_ids:
+            return set()
+        with self.database.session() as session:
+            return set(
+                int(account_id)
+                for account_id in session.scalars(
+                    select(ProbeRun.account_id)
+                    .where(
+                        ProbeRun.account_id.in_(unique_ids),
+                        ProbeRun.status.in_(tuple(self.active_statuses)),
+                    )
+                    .distinct()
+                ).all()
+            )
+
     def run_detail(self, run_id: str) -> dict[str, Any] | None:
         with self.database.session() as session:
             run = session.get(ProbeRun, run_id)
