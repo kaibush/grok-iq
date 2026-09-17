@@ -679,6 +679,21 @@ def _add_probe_sample(probes: ProbeRepository, account_id: int) -> str:
     return run_id
 
 
+def _add_queued_probe_run(probes: ProbeRepository, account_id: int) -> str:
+    probes.seed_defaults()
+    return probes.create_run(
+        account_id=account_id,
+        account_name="Alpha",
+        account_email="alpha@example.test",
+        profile_id="quality-marker",
+        rounds=1,
+        proxy_targets=[{"kind": "current", "id": None}],
+        trigger="manual",
+        priority=100,
+        queue_limit=20,
+    )
+
+
 @pytest.mark.asyncio
 async def test_isolate_disables_upstream_and_enters_permanent_zone(tmp_path: Path):
     _database, accounts, _probes, client, service = _isolation_service(tmp_path)
@@ -1198,7 +1213,30 @@ async def test_local_purge_deletes_assessment_samples_alerts_not_upstream(tmp_pa
     assert accounts.get_assessment(1) is None
     assert accounts.list_alerts() == []
     assert probes.account_samples(1, page=1, page_size=25)["total"] == 0
+    assert probes.get_run(run_id) is None
+    assert client.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_local_purge_keeps_queued_task_center_runs(tmp_path: Path):
+    _database, accounts, probes, client, service = _isolation_service(tmp_path)
+    assert isinstance(probes, ProbeRepository)
+    await service.action(
+        account_id=1,
+        action="isolate",
+        note="manual isolate",
+        propagate=True,
+        quarantine_minutes=None,
+    )
+    run_id = _add_queued_probe_run(probes, 1)
+
+    result = await service.delete_local_quarantine_records(account_ids=[1])
+
+    assert result["deleted"] == 1
+    assert result["skippedAccountIds"] == []
+    assert accounts.get_assessment(1) is None
     assert probes.get_run(run_id) is not None
+    assert probes.get_run(run_id)["status"] == "queued"
     assert client.delete_calls == []
 
 

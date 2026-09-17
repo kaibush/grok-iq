@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -1207,13 +1207,37 @@ class ProbeRepository:
             return account_id
 
     def delete_samples_for_account(self, account_id: int) -> int:
-        """Delete probe samples for one account while keeping probe runs."""
+        """Delete leftover probe samples whose run no longer exists."""
 
         with self.database.transaction() as session:
             result = session.execute(
-                delete(ProbeSample).where(ProbeSample.account_id == account_id)
+                delete(ProbeSample).where(
+                    ProbeSample.account_id == account_id,
+                    ~exists().where(ProbeRun.id == ProbeSample.run_id),
+                )
             )
             return int(result.rowcount or 0)
+
+    def delete_runs_for_account(self, account_id: int) -> int:
+        """Delete terminal probe runs for one account.
+
+        Active, queued, and restore-pending runs are skipped so a local
+        quarantine purge never interrupts work still holding account settings.
+        """
+
+        deleted = 0
+        with self.database.transaction() as session:
+            values = session.scalars(
+                select(ProbeRun).where(ProbeRun.account_id == account_id)
+            ).all()
+            for value in values:
+                if value.status not in TERMINAL_RUN_STATUSES or self._restore_pending(
+                    value
+                ):
+                    continue
+                session.delete(value)
+                deleted += 1
+        return deleted
 
     def delete_runs(self, run_ids: list[str]) -> tuple[int, set[int], list[str]]:
         """Delete every deletable run, skipping the ones still holding state.

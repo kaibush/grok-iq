@@ -1656,6 +1656,7 @@ class AccountService:
             try:
                 self.accounts.delete_assessment(account_id)
                 self.accounts.delete_alerts_for_account(account_id)
+                self.probes.delete_runs_for_account(account_id)
                 self.probes.delete_samples_for_account(account_id)
             except Exception as exc:
                 failures.append({"id": account_id, "error": str(exc)})

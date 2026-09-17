@@ -1071,6 +1071,7 @@ export function QuarantinePage() {
     onSettled: () => {
       void client.invalidateQueries({ queryKey: ['accounts'] })
       void client.invalidateQueries({ queryKey: ['dashboard'] })
+      void client.invalidateQueries({ queryKey: ['runs'] })
     },
   })
 
@@ -1199,6 +1200,7 @@ export function QuarantinePage() {
         queryKey: ['accounts', 'quarantine-stats'],
       })
       void client.invalidateQueries({ queryKey: ['dashboard'] })
+      void client.invalidateQueries({ queryKey: ['runs'] })
     },
   })
 
@@ -1818,11 +1820,14 @@ export function QuarantinePage() {
         desc={
           <div className='space-y-2'>
             <p>
-              只删除 GrokIQ 本地评估/样本/告警，不会删除 grok2api
-              账号；上游若仍停用会保持停用。
+              只删除 GrokIQ 本地评估、样本、告警，以及任务中心里已结束的探针任务，不会删除
+              grok2api 账号；上游若仍停用会保持停用。
             </p>
             <p className='font-medium text-foreground'>
               删除后这些账号会离开隔离区列表，本地证据不可恢复。
+            </p>
+            <p className='text-muted-foreground'>
+              正在执行探针或等待账号设置恢复的账号会被跳过并保留选择。
             </p>
           </div>
         }
@@ -1862,8 +1867,8 @@ export function QuarantinePage() {
             </p>
             <p className='font-medium text-foreground'>
               {deleteUpstreamAlsoLocal
-                ? '勾选后，上游删除成功的账号会继续删除 GrokIQ 本地评估、样本和隔离记录，并离开隔离区列表。'
-                : '默认不会删除 GrokIQ 本地评估、样本和隔离记录；那些会保留，直到使用「删除本系统记录」。'}
+                ? '勾选后，上游删除成功的账号会继续删除 GrokIQ 本地评估、样本、隔离记录和任务中心探针任务，并离开隔离区列表。'
+                : '默认不会删除 GrokIQ 本地评估、样本、隔离记录和任务中心探针任务；那些会保留，直到使用「删除本系统记录」。'}
             </p>
             <p className='text-muted-foreground'>
               正在执行探针或等待账号设置恢复的账号会被跳过并保留选择。
