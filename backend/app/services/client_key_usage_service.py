@@ -6,8 +6,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.core.clock import APP_TIMEZONE_NAME, utc_now
+from app.core.clock import APP_TIMEZONE_NAME, ensure_utc, utc_now
+from app.core.config import Settings
+from app.core.probe_resources import is_probe_resource
 from app.integrations.grok2api.client import Grok2APIClient
+from app.persistence.request_audit_repository import RequestAuditRepository
 from app.services.client_key_quota_service import ClientKeyQuotaService
 
 MAX_AUDIT_KEYS = 50
@@ -30,9 +33,13 @@ class ClientKeyUsageService:
         self,
         client: Grok2APIClient,
         quota_service: ClientKeyQuotaService | None = None,
+        settings: Settings | None = None,
+        request_audits: RequestAuditRepository | None = None,
     ) -> None:
         self.client = client
         self.quota_service = quota_service or ClientKeyQuotaService(client)
+        self.settings = settings
+        self.request_audits = request_audits
         self._public_usage_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._public_usage_lock = asyncio.Lock()
 
@@ -94,8 +101,68 @@ class ClientKeyUsageService:
                 payload = _public_dashboard(raw, reachable=True, period=resolved_period)
             except Exception:
                 payload = _empty_public_dashboard(period=resolved_period, reachable=False)
+            payload = self._exclude_probe_usage(payload, timezone=resolved_timezone)
             self._public_usage_cache[cache_key] = (time.monotonic(), payload)
             return payload
+
+    def _probe_prefix(self) -> str:
+        if self.settings is None:
+            return "grokiq-probe"
+        return str(self.settings.probe_route_prefix or "").strip()
+
+    def _exclude_probe_usage(
+        self,
+        payload: dict[str, Any],
+        *,
+        timezone: str,
+    ) -> dict[str, Any]:
+        prefix = self._probe_prefix()
+        payload["topModels"] = [
+            item
+            for item in payload.get("topModels") or []
+            if not is_probe_resource(str(item.get("model") or ""), prefix)
+        ]
+        if self.request_audits is None or not prefix or not payload.get("reachable"):
+            return payload
+        range_raw = payload.get("range") if isinstance(payload.get("range"), dict) else {}
+        range_start = _parse_audit_time(str(range_raw.get("start") or ""))
+        range_end = _parse_audit_time(str(range_raw.get("end") or ""))
+        activity = payload.get("activity") if isinstance(payload.get("activity"), list) else []
+        query_start = range_start
+        query_end = range_end
+        if activity:
+            first = _parse_audit_time(str((activity[0] or {}).get("start") or ""))
+            last = _parse_audit_time(str((activity[-1] or {}).get("start") or ""))
+            if first is not None and (query_start is None or first < query_start):
+                query_start = first
+            if last is not None:
+                last_end = last + timedelta(days=1)
+                if query_end is None or last_end > query_end:
+                    query_end = last_end
+        if query_start is None or query_end is None or query_end <= query_start:
+            return payload
+        rows = self.request_audits.probe_usage_rows(
+            query_start, query_end, prefix=prefix
+        )
+        if not isinstance(rows, list) or not rows:
+            return payload
+        range_rows = rows
+        if range_start is not None and range_end is not None:
+            range_rows = [
+                row
+                for row in rows
+                if (created := ensure_utc(row.get("created_at"))) is not None
+                and range_start <= created < range_end
+            ]
+        payload["usage"] = _subtract_usage_totals(payload.get("usage") or {}, range_rows)
+        payload["series"] = _subtract_usage_series(payload.get("series") or [], range_rows)
+        payload["activity"] = _subtract_usage_activity(
+            payload.get("activity") or [], rows, timezone
+        )
+        payload["providers"] = _subtract_usage_providers(
+            payload.get("providers") or [], range_rows
+        )
+        return payload
 
     def _fresh_public_usage(self, cache_key: tuple[str, str]) -> dict[str, Any] | None:
         cached = self._public_usage_cache.get(cache_key)
@@ -486,6 +553,201 @@ def _public_dashboard_provider_list(raw: Any) -> list[dict[str, Any]]:
             }
         )
     return items
+
+
+
+
+def _probe_row_success(row: dict[str, Any]) -> bool:
+    status = int(row.get("status_code") or 0)
+    error = str(row.get("error_code") or "").strip()
+    return 200 <= status < 300 and not error
+
+
+def _accumulate_probe_usage(rows: list[dict[str, Any]]) -> dict[str, int]:
+    requests = 0
+    successful = 0
+    input_tokens = 0
+    output_tokens = 0
+    reasoning_tokens = 0
+    tokens = 0
+    for row in rows:
+        requests += 1
+        if _probe_row_success(row):
+            successful += 1
+        input_tokens += max(0, int(row.get("input_tokens") or 0))
+        output_tokens += max(0, int(row.get("output_tokens") or 0))
+        reasoning_tokens += max(0, int(row.get("reasoning_tokens") or 0))
+        tokens += max(0, int(row.get("total_tokens") or 0))
+    return {
+        "requests": requests,
+        "successful": successful,
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "reasoningTokens": reasoning_tokens,
+        "tokens": tokens,
+    }
+
+
+def _scale_cost(
+    original_cost: int,
+    original_tokens: int,
+    remaining_tokens: int,
+    original_requests: int,
+    remaining_requests: int,
+) -> int:
+    cost = max(0, int(original_cost or 0))
+    if original_tokens > 0:
+        return max(0, round(cost * remaining_tokens / original_tokens))
+    if original_requests > 0:
+        return max(0, round(cost * remaining_requests / original_requests))
+    return 0
+
+
+def _subtract_usage_totals(
+    usage: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    probe = _accumulate_probe_usage(rows)
+    original_requests = _as_int(usage.get("requests"))
+    original_tokens = _as_int(usage.get("tokens"))
+    requests = max(0, original_requests - probe["requests"])
+    successful = max(0, _as_int(usage.get("successfulRequests")) - probe["successful"])
+    if successful > requests:
+        successful = requests
+    input_tokens = max(0, _as_int(usage.get("inputTokens")) - probe["inputTokens"])
+    output_tokens = max(0, _as_int(usage.get("outputTokens")) - probe["outputTokens"])
+    reasoning_tokens = max(
+        0, _as_int(usage.get("reasoningTokens")) - probe["reasoningTokens"]
+    )
+    tokens = max(0, original_tokens - probe["tokens"])
+    cached = min(_as_int(usage.get("cachedInputTokens")), input_tokens)
+    billed = _scale_cost(
+        _as_int(usage.get("billedCostUsdTicks")),
+        original_tokens,
+        tokens,
+        original_requests,
+        requests,
+    )
+    return {
+        **usage,
+        "requests": requests,
+        "successfulRequests": successful,
+        "failedRequests": max(0, requests - successful),
+        "inputTokens": input_tokens,
+        "cachedInputTokens": cached,
+        "outputTokens": output_tokens,
+        "reasoningTokens": reasoning_tokens,
+        "tokens": tokens,
+        "billedCostUsdTicks": billed,
+        "successRate": successful / requests * 100 if requests else 0.0,
+        "cacheHitRate": cached / input_tokens * 100 if input_tokens else 0.0,
+    }
+
+
+def _subtract_usage_series(
+    series: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in series:
+        start = _parse_audit_time(str(item.get("start") or ""))
+        end = _parse_audit_time(str(item.get("end") or ""))
+        bucket_rows: list[dict[str, Any]] = []
+        if start is not None and end is not None:
+            for row in rows:
+                created = ensure_utc(row.get("created_at"))
+                if created is not None and start <= created < end:
+                    bucket_rows.append(row)
+        probe = _accumulate_probe_usage(bucket_rows)
+        original_requests = _as_int(item.get("requests"))
+        original_tokens = _as_int(item.get("tokens"))
+        requests = max(0, original_requests - probe["requests"])
+        input_tokens = max(0, _as_int(item.get("inputTokens")) - probe["inputTokens"])
+        output_tokens = max(0, _as_int(item.get("outputTokens")) - probe["outputTokens"])
+        reasoning_tokens = max(
+            0, _as_int(item.get("reasoningTokens")) - probe["reasoningTokens"]
+        )
+        tokens = max(0, original_tokens - probe["tokens"])
+        cached = min(_as_int(item.get("cachedInputTokens")), input_tokens)
+        billed = _scale_cost(
+            _as_int(item.get("billedCostUsdTicks")),
+            original_tokens,
+            tokens,
+            original_requests,
+            requests,
+        )
+        result.append(
+            {
+                **item,
+                "requests": requests,
+                "inputTokens": input_tokens,
+                "cachedInputTokens": cached,
+                "outputTokens": output_tokens,
+                "reasoningTokens": reasoning_tokens,
+                "tokens": tokens,
+                "billedCostUsdTicks": billed,
+            }
+        )
+    return result
+
+
+def _subtract_usage_activity(
+    activity: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    timezone: str,
+) -> list[dict[str, Any]]:
+    try:
+        tz = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo(APP_TIMEZONE_NAME)
+    counts: dict[Any, int] = {}
+    for row in rows:
+        created = ensure_utc(row.get("created_at"))
+        if created is None:
+            continue
+        day = created.astimezone(tz).date()
+        counts[day] = counts.get(day, 0) + 1
+    result: list[dict[str, Any]] = []
+    for item in activity:
+        start = _parse_audit_time(str(item.get("start") or ""))
+        if start is None:
+            result.append(item)
+            continue
+        day = start.astimezone(tz).date()
+        result.append(
+            {
+                **item,
+                "requests": max(0, _as_int(item.get("requests")) - counts.get(day, 0)),
+            }
+        )
+    return result
+
+
+def _subtract_usage_providers(
+    providers: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    probe = _accumulate_probe_usage(rows)
+    result: list[dict[str, Any]] = []
+    for item in providers:
+        if str(item.get("provider") or "") != "grok_build":
+            result.append(item)
+            continue
+        requests = max(0, _as_int(item.get("requests")) - probe["requests"])
+        successful = max(
+            0, _as_int(item.get("successfulRequests")) - probe["successful"]
+        )
+        if successful > requests:
+            successful = requests
+        result.append(
+            {
+                **item,
+                "requests": requests,
+                "successfulRequests": successful,
+                "tokens": max(0, _as_int(item.get("tokens")) - probe["tokens"]),
+            }
+        )
+    return result
 
 
 def _resolve_dashboard_period(value: str) -> str:

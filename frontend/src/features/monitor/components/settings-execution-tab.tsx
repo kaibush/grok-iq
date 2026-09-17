@@ -1,6 +1,5 @@
 import { Workflow } from 'lucide-react'
-import { Input } from '@/components/ui/input'
-import { Field, NumberField, SettingsCard } from './settings-components'
+import { NumberField, SettingsCard } from './settings-components'
 import type { SettingsForm, SettingsSetter } from './settings-model'
 
 export function SettingsExecutionTab({
@@ -75,12 +74,6 @@ export function SettingsExecutionTab({
           step={0.1}
           onChange={(value) => set('probeTransientRetryMaxSeconds', value)}
         />
-        <Field label='临时资源前缀' hint='2-48 位字母、数字、下划线或连字符'>
-          <Input
-            value={form.probeRoutePrefix}
-            onChange={(event) => set('probeRoutePrefix', event.target.value)}
-          />
-        </Field>
         <NumberField
           label='诊断优先级'
           hint='停用账号短时激活时使用；保持低于普通账号'

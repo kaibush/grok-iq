@@ -61,7 +61,6 @@ export type SettingsForm = {
   probeTransientRetryAttempts: number
   probeTransientRetryBaseSeconds: number
   probeTransientRetryMaxSeconds: number
-  probeRoutePrefix: string
   probeDiagnosticPriority: number
   requestAuditEnabled: boolean
   requestAuditAutoScanEnabled: boolean
@@ -451,7 +450,6 @@ export function toSettingsForm(
     probeTransientRetryBaseSeconds:
       settings.probeTransientRetryBaseSeconds ?? 5,
     probeTransientRetryMaxSeconds: settings.probeTransientRetryMaxSeconds ?? 30,
-    probeRoutePrefix: settings.probeRoutePrefix,
     probeDiagnosticPriority: settings.probeDiagnosticPriority,
     requestAuditEnabled: settings.requestAuditEnabled ?? true,
     requestAuditAutoScanEnabled: settings.requestAuditAutoScanEnabled ?? true,
@@ -600,7 +598,6 @@ export function buildSettingsPayload(
     probeTransientRetryAttempts: form.probeTransientRetryAttempts,
     probeTransientRetryBaseSeconds: form.probeTransientRetryBaseSeconds,
     probeTransientRetryMaxSeconds: form.probeTransientRetryMaxSeconds,
-    probeRoutePrefix: form.probeRoutePrefix.trim(),
     probeDiagnosticPriority: form.probeDiagnosticPriority,
     requestAuditEnabled: form.requestAuditEnabled,
     requestAuditAutoScanEnabled: form.requestAuditAutoScanEnabled,

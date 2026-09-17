@@ -248,3 +248,48 @@ def test_recent_request_health_omits_internal_quality_intercepts(tmp_path: Path)
     assert payload["models"][0]["mainError"]["errorCode"] == (
         "upstream_server_error_unavailable"
     )
+
+
+def test_recent_request_health_omits_probe_resources(tmp_path: Path):
+    repository, service = _build(tmp_path)
+    now = utc_now()
+    repository.upsert_records(
+        [
+            _record(now - timedelta(minutes=2), upstream_id="1", status_code=200),
+            _record(
+                now - timedelta(minutes=3),
+                upstream_id="2",
+                status_code=503,
+                error_code="upstream_server_error_unavailable",
+                client_key_name="grokiq-probe-abc123",
+            ),
+            _record(
+                now - timedelta(minutes=4),
+                upstream_id="3",
+                status_code=200,
+                model_public_id="grokiq-probe-7-deadbeef",
+                model_upstream_model="Build/grok-4.6",
+            ),
+        ]
+    )
+
+    payload = service.recent_request_health()
+
+    assert payload["windows"]["15m"] == {
+        "requests": 1,
+        "successfulRequests": 1,
+        "failedRequests": 0,
+        "successRate": 100.0,
+    }
+    assert payload["models"] == [
+        {
+            "model": "grok-4.6",
+            "requests": 1,
+            "successfulRequests": 1,
+            "failedRequests": 0,
+            "successRate": 100.0,
+            "mainError": None,
+        }
+    ]
+    assert payload["errors"] == []
+

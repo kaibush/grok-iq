@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from app.core.config import Settings
 from app.services.client_key_quota_service import USD_TICKS
 from app.services.client_key_usage_service import (
     MAX_AUDIT_KEYS,
@@ -409,6 +410,195 @@ async def test_public_usage_overview_hides_upstream_errors() -> None:
     assert result["series"] == []
     assert result["topModels"] == []
     assert "resources" not in result
+
+
+class FakeRequestAuditRepository:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+        self.calls: list[dict[str, Any]] = []
+
+    def probe_usage_rows(self, start: datetime, end: datetime, *, prefix: str = ""):
+        self.calls.append({"start": start, "end": end, "prefix": prefix})
+        return [
+            row
+            for row in self.rows
+            if start <= row["created_at"] < end
+        ]
+
+
+def _probe_row(
+    created: datetime,
+    *,
+    status_code: int = 200,
+    error_code: str = "",
+    input_tokens: int = 10,
+    output_tokens: int = 6,
+    reasoning_tokens: int = 2,
+    total_tokens: int = 16,
+    model_public_id: str = "grokiq-probe-7-deadbeef",
+    client_key_name: str = "grokiq-probe-abc123",
+) -> dict[str, Any]:
+    return {
+        "created_at": created,
+        "status_code": status_code,
+        "error_code": error_code,
+        "model_public_id": model_public_id,
+        "client_key_name": client_key_name,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+@pytest.mark.asyncio
+async def test_public_usage_overview_drops_probe_models_without_local_audits() -> None:
+    client = FakeGrok2APIClient(
+        dashboards={
+            ("7d", "UTC"): {
+                "period": "7d",
+                "range": {
+                    "start": "2026-08-24T12:00:00Z",
+                    "end": "2026-08-31T12:00:00Z",
+                },
+                "usage": {"requests": 12, "successfulRequests": 10, "tokens": 20},
+                "topModels": [
+                    {"model": "grok-4", "requests": 9, "tokens": 8},
+                    {"model": "grokiq-probe-7-deadbeef", "requests": 3, "tokens": 2},
+                ],
+            }
+        }
+    )
+    service = ClientKeyUsageService(client)  # type: ignore[arg-type]
+    result = await service.public_usage_overview(period="7d", timezone="UTC")
+    assert [item["model"] for item in result["topModels"]] == ["grok-4"]
+    assert result["usage"]["requests"] == 12
+
+
+@pytest.mark.asyncio
+async def test_public_usage_overview_subtracts_local_probe_rows() -> None:
+    created = datetime(2026, 8, 24, 16, 0, tzinfo=UTC)
+    audits = FakeRequestAuditRepository(
+        [
+            _probe_row(created),
+            _probe_row(created, status_code=503, error_code="upstream_server_error_unavailable"),
+            _probe_row(
+                datetime(2026, 8, 20, 8, 0, tzinfo=UTC),
+                total_tokens=40,
+                input_tokens=20,
+                output_tokens=18,
+                reasoning_tokens=2,
+            ),
+        ]
+    )
+    client = FakeGrok2APIClient(
+        dashboards={
+            ("7d", "UTC"): {
+                "period": "7d",
+                "generatedAt": "2026-08-31T12:00:00Z",
+                "range": {
+                    "start": "2026-08-24T12:00:00Z",
+                    "end": "2026-08-31T12:00:00Z",
+                },
+                "usage": {
+                    "requests": 100,
+                    "successfulRequests": 90,
+                    "failedRequests": 10,
+                    "inputTokens": 1000,
+                    "cachedInputTokens": 400,
+                    "outputTokens": 500,
+                    "reasoningTokens": 80,
+                    "tokens": 1580,
+                    "billedCostUsdTicks": 20_000_000_000,
+                    "successRate": 90.0,
+                    "averageFirstTokenMs": 420.5,
+                    "outputTokensPerSecond": 31.2,
+                    "firstTokenSamples": 10,
+                    "throughputSamples": 8,
+                },
+                "series": [
+                    {
+                        "start": "2026-08-24T00:00:00Z",
+                        "end": "2026-08-25T00:00:00Z",
+                        "requests": 40,
+                        "inputTokens": 80,
+                        "cachedInputTokens": 10,
+                        "outputTokens": 20,
+                        "reasoningTokens": 4,
+                        "tokens": 100,
+                        "billedCostUsdTicks": 1_000_000_000,
+                    }
+                ],
+                "activity": [
+                    {"start": "2026-08-20T00:00:00Z", "requests": 12},
+                    {"start": "2026-08-24T00:00:00Z", "requests": 40},
+                ],
+                "topModels": [
+                    {
+                        "model": "grok-4",
+                        "requests": 90,
+                        "tokens": 1500,
+                        "billedCostUsdTicks": 1,
+                    },
+                    {
+                        "model": "grokiq-probe-7-deadbeef",
+                        "requests": 10,
+                        "tokens": 80,
+                        "billedCostUsdTicks": 1,
+                    },
+                ],
+                "providers": [
+                    {
+                        "provider": "grok_build",
+                        "requests": 80,
+                        "successfulRequests": 70,
+                        "tokens": 1400,
+                    },
+                    {
+                        "provider": "grok_web",
+                        "requests": 20,
+                        "successfulRequests": 20,
+                        "tokens": 180,
+                    },
+                ],
+            }
+        }
+    )
+    service = ClientKeyUsageService(
+        client,  # type: ignore[arg-type]
+        settings=Settings(_env_file=None, probe_route_prefix="grokiq-probe"),
+        request_audits=audits,  # type: ignore[arg-type]
+    )
+
+    result = await service.public_usage_overview(period="7d", timezone="UTC")
+
+    assert result["usage"]["requests"] == 98
+    assert result["usage"]["successfulRequests"] == 89
+    assert result["usage"]["failedRequests"] == 9
+    assert result["usage"]["inputTokens"] == 980
+    assert result["usage"]["outputTokens"] == 488
+    assert result["usage"]["reasoningTokens"] == 76
+    assert result["usage"]["tokens"] == 1548
+    assert result["usage"]["cachedInputTokens"] == 400
+    assert result["usage"]["billedCostUsdTicks"] == round(
+        20_000_000_000 * 1548 / 1580
+    )
+    assert result["usage"]["averageFirstTokenMs"] == 420.5
+    assert result["usage"]["outputTokensPerSecond"] == 31.2
+    assert [item["model"] for item in result["topModels"]] == ["grok-4"]
+    assert result["series"][0]["requests"] == 38
+    assert result["series"][0]["tokens"] == 68
+    assert result["activity"][0]["requests"] == 11
+    assert result["activity"][1]["requests"] == 38
+    assert result["providers"][0] == {
+        "provider": "grok_build",
+        "requests": 78,
+        "successfulRequests": 69,
+        "tokens": 1368,
+    }
+    assert result["providers"][1]["provider"] == "grok_web"
+    assert result["providers"][1]["requests"] == 20
+    assert audits.calls[0]["prefix"] == "grokiq-probe"
 
 
 SK_PREFIX = "abcdefghijkl"

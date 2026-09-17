@@ -54,7 +54,12 @@ def build_public_router(
 ) -> APIRouter:
     router = APIRouter()
     quota_service = ClientKeyQuotaService(client)
-    usage_service = ClientKeyUsageService(client, quota_service=quota_service)
+    usage_service = ClientKeyUsageService(
+        client,
+        quota_service=quota_service,
+        settings=None if request_audits is None else request_audits.settings,
+        request_audits=None if request_audits is None else request_audits.repository,
+    )
 
     def require_status_access(request: Request) -> None:
         authorize_status_request(

@@ -6,13 +6,13 @@ from typing import Any
 
 from app.core.clock import app_isoformat, parse_optional_datetime, utc_now
 from app.core.config import Settings
+from app.core.probe_resources import is_probe_resource
 from app.integrations.grok2api.client import Grok2APIClient
 from app.persistence.client_key_repository import PLAN_TYPES, ClientKeyRepository
 
 USD_TICKS = 10_000_000_000
 YUAN_CENTS = Decimal("100")
 MAX_RECHARGE_YUAN = Decimal("100000000")
-PROBE_NAME_MARKER = "-"
 INTERNAL_KEY_NAME_PREFIX = "[system]"
 INTERNAL_KEY_PREFIXES = frozenset(
     {"quality-guard-internal", "thinking-standby-internal"}
@@ -200,10 +200,7 @@ class ClientKeyService:
         }
 
     def _is_probe_key(self, name: str) -> bool:
-        prefix = str(self.settings.probe_route_prefix or "").strip()
-        if not prefix:
-            return False
-        return name.startswith(f"{prefix}{PROBE_NAME_MARKER}")
+        return is_probe_resource(name, self.settings.probe_route_prefix)
 
     @staticmethod
     def _is_system_key(name: str, prefix: str = "") -> bool:

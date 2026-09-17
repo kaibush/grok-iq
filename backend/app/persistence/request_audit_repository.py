@@ -9,6 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import defer
 
 from app.core.clock import to_app_timezone, utc_now
+from app.core.probe_resources import probe_resource_marker
 
 from .database import Database
 from .models import (
@@ -829,24 +830,33 @@ class RequestAuditRepository:
             ).all()
             return [_audit_record_dict(value) for value in values]
 
-    def recent_health_rows(self, start: datetime) -> list[dict[str, Any]]:
+    def recent_health_rows(
+        self,
+        start: datetime,
+        *,
+        probe_prefix: str = "",
+    ) -> list[dict[str, Any]]:
         """Lightweight newest-request rows used by the public health board.
 
         The public status page only needs outcome fields, so this avoids
         materializing the heavier ledger rows (risk payloads and stream
-        samples) that the request-audit workspace reads.
+        samples) that the request-audit workspace reads. GrokIQ probe keys
+        and probe models are omitted so /status does not count diagnostics.
         """
 
+        stmt = select(
+            RequestAuditRecord.created_at,
+            RequestAuditRecord.status_code,
+            RequestAuditRecord.error_code,
+            RequestAuditRecord.model_public_id,
+            RequestAuditRecord.model_upstream_model,
+            RequestAuditRecord.client_key_name,
+        ).where(RequestAuditRecord.created_at >= start)
+        probe_clause = _probe_resource_clause(probe_prefix)
+        if probe_clause is not None:
+            stmt = stmt.where(~probe_clause)
         with self.database.session() as session:
-            rows = session.execute(
-                select(
-                    RequestAuditRecord.created_at,
-                    RequestAuditRecord.status_code,
-                    RequestAuditRecord.error_code,
-                    RequestAuditRecord.model_public_id,
-                    RequestAuditRecord.model_upstream_model,
-                ).where(RequestAuditRecord.created_at >= start)
-            ).all()
+            rows = session.execute(stmt).all()
         return [
             {
                 "created_at": row.created_at,
@@ -854,6 +864,51 @@ class RequestAuditRepository:
                 "error_code": str(row.error_code or "").strip(),
                 "model_public_id": str(row.model_public_id or "").strip(),
                 "model_upstream_model": str(row.model_upstream_model or "").strip(),
+                "client_key_name": str(row.client_key_name or "").strip(),
+            }
+            for row in rows
+        ]
+
+    def probe_usage_rows(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        prefix: str = "",
+    ) -> list[dict[str, Any]]:
+        """Compact GrokIQ probe rows used to subtract diagnostics from /status."""
+
+        probe_clause = _probe_resource_clause(prefix)
+        if probe_clause is None or end <= start:
+            return []
+        stmt = select(
+            RequestAuditRecord.created_at,
+            RequestAuditRecord.status_code,
+            RequestAuditRecord.error_code,
+            RequestAuditRecord.model_public_id,
+            RequestAuditRecord.client_key_name,
+            RequestAuditRecord.input_tokens,
+            RequestAuditRecord.output_tokens,
+            RequestAuditRecord.reasoning_tokens,
+            RequestAuditRecord.total_tokens,
+        ).where(
+            RequestAuditRecord.created_at >= start,
+            RequestAuditRecord.created_at < end,
+            probe_clause,
+        )
+        with self.database.session() as session:
+            rows = session.execute(stmt).all()
+        return [
+            {
+                "created_at": row.created_at,
+                "status_code": int(row.status_code or 0),
+                "error_code": str(row.error_code or "").strip(),
+                "model_public_id": str(row.model_public_id or "").strip(),
+                "client_key_name": str(row.client_key_name or "").strip(),
+                "input_tokens": int(row.input_tokens or 0),
+                "output_tokens": int(row.output_tokens or 0),
+                "reasoning_tokens": int(row.reasoning_tokens or 0),
+                "total_tokens": int(row.total_tokens or 0),
             }
             for row in rows
         ]
@@ -1075,6 +1130,22 @@ def _positive_account_ids(account_ids: Iterable[int] | None) -> list[int]:
 def _contains_pattern(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
+
+
+def _prefix_like_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{escaped}%"
+
+
+def _probe_resource_clause(prefix: str):
+    marker = probe_resource_marker(prefix)
+    if not marker:
+        return None
+    pattern = _prefix_like_pattern(marker)
+    return or_(
+        RequestAuditRecord.client_key_name.like(pattern, escape="\\"),
+        RequestAuditRecord.model_public_id.like(pattern, escape="\\"),
+    )
 
 
 def _ledger_filter_clauses(

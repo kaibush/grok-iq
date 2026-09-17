@@ -25,6 +25,7 @@ from app.analyzer import (
 )
 from app.core.clock import APP_TIMEZONE, app_now, ensure_utc, to_app_timezone, utc_now
 from app.core.config import Settings
+from app.core.probe_resources import is_probe_resource
 from app.core.disposition import public_disposition
 from app.integrations.grok2api.client import Grok2APIClient
 from app.persistence.account_repository import AccountRepository
@@ -421,11 +422,17 @@ def _is_internal_health_error(error_code: str) -> bool:
 
 def _health_rows(
     rows: list[dict[str, Any]],
+    *,
+    probe_prefix: str = "",
 ) -> list[tuple[datetime, bool, str, int, str]]:
     normalized: list[tuple[datetime, bool, str, int, str]] = []
     for row in rows:
         created = ensure_utc(row.get("created_at"))
         if created is None:
+            continue
+        if is_probe_resource(row.get("client_key_name"), probe_prefix) or is_probe_resource(
+            row.get("model_public_id"), probe_prefix
+        ):
             continue
         status_code = int(row.get("status_code") or 0)
         error_code = str(row.get("error_code") or "").strip()
@@ -3682,8 +3689,9 @@ class RequestAuditService:
 
         end = utc_now()
         start = end - timedelta(hours=1)
-        rows = self.repository.recent_health_rows(start)
-        normalized = _health_rows(rows)
+        probe_prefix = str(self.settings.probe_route_prefix or "").strip()
+        rows = self.repository.recent_health_rows(start, probe_prefix=probe_prefix)
+        normalized = _health_rows(rows, probe_prefix=probe_prefix)
         state = self.repository.ensure_state(REQUEST_AUDIT_SCOPE)
         last_success_at = ensure_utc(state.get("last_success_at"))
         last_scan_at = ensure_utc(state.get("last_scan_at"))

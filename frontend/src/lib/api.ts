@@ -2308,7 +2308,6 @@ export type RuntimeSettingsUpdate = Partial<
     | 'probeTransientRetryAttempts'
     | 'probeTransientRetryBaseSeconds'
     | 'probeTransientRetryMaxSeconds'
-    | 'probeRoutePrefix'
     | 'probeDiagnosticPriority'
     | 'analysisWindowHours'
     | 'degradationTps'
