@@ -329,6 +329,30 @@ but introduces breaking changes.
 - update sidebar logo and title
 - **ui**: remove unnecessary spacing
 - remove unused files
+## v0.7.3 (2026-09-17)
+
+Client keys can now be managed like grok2api, with paid overlays and automatic quota top-up.
+
+### Feat
+
+- edit, delete, enable, disable, inspect usage, and reveal grok2api client key secrets from GrokIQ
+- keep paid-user overlays, expiry, and created time on client keys
+- auto-top-up in-window paid keys when remaining quota falls below a configurable threshold
+- expose paid-key top-up threshold, amount, and interval in system settings
+- show the paid-key auto-top-up worker on the plans page
+- add account-probe result preview gallery and sample counts
+- add cooldown zone for grok2api missing-thinking and local TPS pauses, with probe staging
+- add Linux.do Connect and invite-code login for the public status page
+- add status visit analytics and admin user management
+- persist request-audit thinking, output, and grok2api extras
+
+### Fix
+
+- satisfy release lint for client-key query keys, cooldown selection, and ruff import order
+- align WeChat template validation tests with the live error copy
+- exclude probe stats from public /status
+- delete task-center runs together with local quarantine records
+
 ## v0.7.2 (2026-08-31)
 
 Please upgrade. Opening the workspace dock and switching pages could keep every visited page mounted, grow a single browser tab to about 2GB, and crash the console.
