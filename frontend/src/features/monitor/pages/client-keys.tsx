@@ -47,6 +47,11 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { ActionToolbar, ToolbarAction } from '@/components/action-toolbar'
 import { CopyableText } from '@/components/copy-button'
 import { NumericInput } from '@/components/numeric-input'
@@ -452,6 +457,8 @@ export function ClientKeysPage() {
                   <TableHead>累计充值</TableHead>
                   <TableHead>额度</TableHead>
                   <TableHead>状态</TableHead>
+                  <TableHead>截止日期</TableHead>
+                  <TableHead>创建时间</TableHead>
                   <TableHead>最近使用</TableHead>
                   <TableHead className='text-right'>操作</TableHead>
                 </TableRow>
@@ -502,21 +509,37 @@ export function ClientKeysPage() {
                         ) : null}
                       </div>
                     </TableCell>
+                    <TableCell
+                      className={
+                        row.expired
+                          ? 'whitespace-nowrap text-amber-600 dark:text-amber-400'
+                          : 'whitespace-nowrap text-muted-foreground'
+                      }
+                    >
+                      {formatDate(row.expiresAt)}
+                    </TableCell>
+                    <TableCell className='whitespace-nowrap text-muted-foreground'>
+                      {formatDate(row.upstreamCreatedAt ?? row.createdAt)}
+                    </TableCell>
                     <TableCell className='whitespace-nowrap text-muted-foreground'>
                       {formatDate(row.lastUsedAt)}
                     </TableCell>
-                    <TableCell>
-                      <div className='flex justify-end'>
-                        <Button
-                          type='button'
-                          size='sm'
-                          variant='ghost'
-                          onClick={() => setEditor(toEditor(row))}
-                        >
-                          <Pencil />
-                          标记
-                        </Button>
-                      </div>
+                    <TableCell className='text-right'>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type='button'
+                            size='icon'
+                            variant='ghost'
+                            className='size-7'
+                            onClick={() => setEditor(toEditor(row))}
+                            aria-label={`标记 ${row.name || row.maskedKey}`}
+                          >
+                            <Pencil />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>标记付费用户</TooltipContent>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
